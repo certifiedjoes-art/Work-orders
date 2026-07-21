@@ -1,82 +1,70 @@
 # Harder Contracting Work Order Board — Setup Guide
 
-You'll do two things: (1) connect a free real-time database so every phone
-stays in sync, and (2) put the files online so you have one link to share.
-Takes about 10 minutes total, no coding required.
+## Your live app
 
-## Part 1 — Connect Firebase (free, ~5 min)
+**https://certifiedjoes-art.github.io/Work-orders/**
 
-1. Go to **console.firebase.google.com** and sign in with any Google account.
-2. Click **Add project**. Name it anything (e.g. "harder-work-orders"). You
-   can skip Google Analytics.
-3. Once the project loads, in the left sidebar click **Build → Realtime Database**.
-4. Click **Create Database**. Pick any location. Start in **test mode**
-   (you can lock it down later — see the note at the bottom).
-5. Now click the gear icon (top left, next to "Project Overview") →
-   **Project settings**.
-6. Scroll to **Your apps** → click the **</> (Web)** icon to register a new
-   web app. Give it any nickname. You do NOT need Firebase Hosting.
-7. It'll show you a `firebaseConfig` object like this:
-   ```js
-   const firebaseConfig = {
-     apiKey: "AIzaSy...",
-     authDomain: "harder-work-orders.firebaseapp.com",
-     databaseURL: "https://harder-work-orders-default-rtdb.firebaseio.com",
-     projectId: "harder-work-orders",
-     storageBucket: "harder-work-orders.appspot.com",
-     messagingSenderId: "123456789",
-     appId: "1:123456789:web:abcdef"
-   };
-   ```
-8. Copy that whole block.
-9. Open **index.html** in any text editor (Notepad, TextEdit, VS Code —
-   anything). Find the `firebaseConfig` section near the top (search for
-   "YOUR_API_KEY") and replace the placeholder object with the one you copied.
-10. Save the file.
+This is the link to share with all your mechanics. It's fully set up —
+Firebase is connected, so everyone who opens this link sees the same
+shared board in real time.
 
-## Part 2 — Put it online (free, ~5 min)
+## Add it to your home screen (do this on each phone)
 
-You need somewhere to host these 5 files so they have one public link:
-`index.html`, `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`.
+**iPhone (Safari):**
+1. Open the link above in Safari
+2. Tap the **Share icon** (square with an arrow pointing up)
+3. Scroll down, tap **"Add to Home Screen"**
+4. Tap **Add**
 
-**Easiest option — Netlify Drop:**
-1. Go to **app.netlify.com/drop**
-2. Sign up free (or log in) if prompted.
-3. Drag the whole folder of 5 files onto the page.
-4. Netlify gives you a link instantly, like `https://random-name-123.netlify.app`
-5. That's your shareable link. Text or email it to your mechanics.
+**Android (Chrome):**
+1. Open the link in Chrome
+2. Tap the **⋮ menu** (top right)
+3. Tap **"Add to Home screen"** or **"Install app"**
 
-**Alternative — GitHub Pages**, if you already use GitHub:
-1. Create a new repository, upload the 5 files.
-2. Go to Settings → Pages → set source to your main branch.
-3. GitHub gives you a link like `https://yourname.github.io/reponame/`
+**Windows/Mac/Linux (Chrome or Edge):**
+1. Open the link
+2. Click the install icon in the address bar, or the **⋮** menu → **"Install"**
 
-## Part 3 — Add to home screen
+Once added, it opens full-screen with the orange "H" icon like a normal app.
 
-Once mechanics open your link:
+## Sharing with your employees
 
-- **iPhone (Safari):** tap the Share icon → "Add to Home Screen"
-- **Android (Chrome):** tap the ⋮ menu → "Add to Home screen" or "Install app"
-- **Windows/Mac/Linux (Chrome or Edge):** click the install icon (⊕ or
-  computer icon) in the address bar, or the ⋮ menu → "Install Work Orders"
+Just text, email, or AirDrop them this link:
+**https://certifiedjoes-art.github.io/Work-orders/**
 
-It'll show up with the orange "H" icon and open full-screen like a native app.
+They open it and do the same "Add to Home Screen" step above. Everyone
+sees the same board update live.
 
-## A note on security
+## Making changes to the app later
 
-Test mode leaves your database open to anyone with the link for 30 days,
-then it locks automatically. For an internal tool this is usually fine
-short-term, but if you want it locked down sooner: in Firebase, go to
-Realtime Database → Rules, and set:
-```json
-{
-  "rules": {
-    ".read": true,
-    ".write": true
-  }
-}
-```
-This keeps it open to anyone who has your app's link (no login needed,
-matching how the app works today) but stops search engines and randoms
-from finding it without the link. For anything more locked-down (e.g.
-requiring mechanics to log in), let me know and I can help set that up.
+You do **not** need to redo the Firebase setup again — that's done for
+good. Your data lives in Firebase, separate from the app files.
+
+When you want a change (new feature, different colors, new field, etc.):
+
+1. Ask me (Claude) to make the change
+2. I'll hand you an updated `index.html` file (and occasionally an updated
+   `manifest.json` or `sw.js`, if needed — I'll tell you which changed)
+3. Go to **github.com**, log in, open your **Work-orders** repository
+4. Tap **"Add file" → "Upload files"** (same as before)
+5. Select the new file(s) — GitHub will ask if you want to replace the
+   existing one, confirm yes
+6. Scroll down, tap **"Commit changes"**
+7. Wait about a minute — your link stays exactly the same, nothing to
+   re-share with your team
+
+## Your accounts
+
+- **GitHub repository:** certifiedjoes-art / Work-orders
+- **Firebase project:** harder-contracting (Realtime Database, free tier)
+
+You generally won't need to touch Firebase again unless you want to add
+things like a login/password step later — just ask if you ever want that.
+
+### A note on security
+
+Your database currently allows anyone with your app's link to read and
+write data (no login required) — this matches how the app works today,
+where mechanics just pick their name from a list. Fine for an internal
+tool, but be mindful about who you share the link with. If you ever want
+it locked down further, let me know and we can add that.
