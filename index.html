@@ -46,6 +46,13 @@
   html, body { background: #1B1E20; margin: 0; padding: 0; }
   #root { min-height: 100vh; }
   #config-warning { display: none; }
+  /* Keep content clear of the iPhone notch/status bar and the home indicator */
+  #root {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
 </style>
 </head>
 <body>
@@ -113,12 +120,16 @@
   }
 </script>
 
-<!-- Register service worker for offline support / installability -->
+<!-- Remove any previously-registered service worker and its caches so
+     phones always load the latest version instead of a stale cached copy -->
 <script>
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
-    });
+    navigator.serviceWorker.getRegistrations().then((regs) => {
+      regs.forEach((r) => r.unregister());
+    }).catch(() => {});
+  }
+  if (window.caches) {
+    caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
   }
 </script>
 
