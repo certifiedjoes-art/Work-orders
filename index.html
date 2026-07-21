@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<title>Harder Contracting — Work Order Board</title>
+
+<!-- PWA / Add to Home Screen -->
+<meta name="theme-color" content="#1B1E20" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Work Orders" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+<link rel="manifest" href="manifest.json" />
+
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+<!-- Load tracking: records which external libraries succeeded/failed -->
+<script>
+  window.__loadStatus = {};
+  function __track(name) {
+    return {
+      onload: function () { window.__loadStatus[name] = 'ok'; },
+      onerrorAttr: function () { window.__loadStatus[name] = 'FAILED'; }
+    };
+  }
+</script>
+
+<!-- Tailwind -->
+<script src="https://cdn.tailwindcss.com" onload="window.__loadStatus['tailwind']='ok'" onerror="window.__loadStatus['tailwind']='FAILED'"></script>
+
+<!-- React + Babel -->
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js" onload="window.__loadStatus['react']='ok'" onerror="window.__loadStatus['react']='FAILED'"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js" onload="window.__loadStatus['react-dom']='ok'" onerror="window.__loadStatus['react-dom']='FAILED'"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.25.6/babel.min.js" onload="window.__loadStatus['babel']='ok'" onerror="window.__loadStatus['babel']='FAILED'"></script>
+
+<!-- Firebase (Realtime Database) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" onload="window.__loadStatus['firebase-app']='ok'" onerror="window.__loadStatus['firebase-app']='FAILED'"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js" onload="window.__loadStatus['firebase-db']='ok'" onerror="window.__loadStatus['firebase-db']='FAILED'"></script>
+
+<style>
+  html, body { background: #1B1E20; margin: 0; padding: 0; }
+  #root { min-height: 100vh; }
+  #config-warning { display: none; }
+</style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<!-- On-screen error reporting: if anything fails, show it instead of a blank screen -->
+<script>
+  window.addEventListener('error', function (e) {
+    showFatalError((e.message || 'Script failed to load') + (e.filename ? '\n\nFile: ' + e.filename + (e.lineno ? ':' + e.lineno : '') : ''));
+  }, true); // capture:true so we also catch <script src> load failures, not just JS errors
+  window.addEventListener('unhandledrejection', function (e) {
+    showFatalError('Unhandled error: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
+  });
+  function showFatalError(msg) {
+    const root = document.getElementById('root');
+    if (root.dataset.errorShown) return;
+    root.dataset.errorShown = '1';
+    root.innerHTML =
+      '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem;font-family:sans-serif;color:#ECE8DF;background:#1B1E20;text-align:center;">' +
+      '<div style="max-width:520px;"><h1 style="color:#E8622C;font-size:1.4rem;">Something went wrong loading the app</h1>' +
+      '<p style="margin-top:1rem;">Please screenshot this and send it back:</p>' +
+      '<pre style="text-align:left;background:#242829;padding:1rem;border-radius:8px;overflow:auto;font-size:0.75rem;white-space:pre-wrap;">' +
+      String(msg).replace(/</g, '&lt;') + '</pre></div></div>';
+  }
+
+  // Fallback diagnostic: if nothing has rendered into #root after 6 seconds,
+  // report exactly which external libraries loaded and which didn't.
+  setTimeout(function () {
+    const root = document.getElementById('root');
+    if (root.dataset.errorShown) return;
+    if (root.children.length > 0) return; // app rendered fine
+    const status = window.__loadStatus || {};
+    const lines = ['tailwind', 'react', 'react-dom', 'babel', 'firebase-app', 'firebase-db'].map(function (k) {
+      return k + ': ' + (status[k] || 'never finished loading');
+    });
+    showFatalError('The app never finished starting up. Here is what loaded:\n\n' + lines.join('\n'));
+  }, 6000);
+</script>
+
+<!-- ====================================================================
+     FIREBASE SETUP — REPLACE THE VALUES BELOW WITH YOUR OWN PROJECT'S
+     CONFIG. See the setup instructions provided alongside this file.
+     ==================================================================== -->
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyAcKWZYgawRHLBIqbUWPPYHmP812_4gODI",
+    authDomain: "harder-contracting.firebaseapp.com",
+    databaseURL: "https://harder-contracting-default-rtdb.firebaseio.com",
+    projectId: "harder-contracting",
+    storageBucket: "harder-contracting.firebasestorage.app",
+    messagingSenderId: "337605513419",
+    appId: "1:337605513419:web:f599c3a5fa57f005ed4b4e"
+  };
+
+  if (firebaseConfig.apiKey === "YOUR_API_KEY") {
+    document.getElementById('root').innerHTML =
+      '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem;font-family:sans-serif;color:#ECE8DF;background:#1B1E20;text-align:center;">' +
+      '<div style="max-width:480px;"><h1 style="color:#E8622C;font-size:1.5rem;">Setup needed</h1>' +
+      '<p>This app needs a free Firebase project connected before it will work. ' +
+      'Open this file in a text editor, find the <code>firebaseConfig</code> section near the top, ' +
+      'and paste in your project\'s config values. See the setup guide for step-by-step instructions.</p></div></div>';
+  } else {
+    firebase.initializeApp(firebaseConfig);
+  }
+</script>
+
+<!-- Register service worker for offline support / installability -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+  }
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+
+const COLORS = {
+  bg: '#1B1E20',
+  surface: '#242829',
+  surfaceRaised: '#2C3133',
+  ink: '#ECE8DF',
+  inkDim: '#8F9793',
+  line: '#34393B',
+  accent: '#E8622C',
+  accentDim: '#B84A22',
+  open: '#7A8590',
+  progress: '#E3A23C',
+  done: '#5FA776',
+  manila: '#D9C7A0',
+  manilaDark: '#C7B486',
+  ink2: '#2B2620',
+};
+
+const STATUSES = ['Open', 'In Progress', 'Done'];
+
+function statusColor(s) {
+  if (s === 'Open') return COLORS.open;
+  if (s === 'In Progress') return COLORS.progress;
+  return COLORS.done;
+}
+
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+function fmtDate(d) {
+  if (!d) return '';
+  const dt = new Date(d + 'T00:00:00');
+  if (isNaN(dt)) return d;
+  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+async function saveMeta(meta) {
+  try { await firebase.database().ref('meta').set(meta); } catch (e) { console.error('save meta failed', e); }
+}
+async function saveOrders(orders) {
+  try { await firebase.database().ref('orders').set(orders); } catch (e) { console.error('save orders failed', e); }
+}
+async function saveTemplates(templates) {
+  try { await firebase.database().ref('templates').set(templates); } catch (e) { console.error('save templates failed', e); }
+}
+
+const DEFAULT_TEMPLATES = [
+  {
+    id: 'buncher-b4',
+    name: 'Buncher checklist B4',
+    items: [
+      'Change cab filter', 'Check coolant level', 'Check hydraulic level', 'Hydraulic tune up',
+      'Valve setting on engine', 'Check lights', 'Check/top up a/c', 'Clean the cab',
+      'Change hydraulic filters', 'Check/change air filters', 'Check all pins and bushings',
+      'Change swing gear oil', 'Check/change final drive oils', 'Check bottom rollers',
+      'Check undercarriage life', 'Check idlers', 'Check for leaks', 'Change worn hoses',
+      'Touch up paint', 'Check emergency escape hatch', 'Check for proper hose orientation',
+      'Check grease hoses', 'Check/change fuel filters', 'Check/change engine oil', 'Check for cracks',
+    ],
+  },
+  {
+    id: 'excavator-ex1',
+    name: 'Excavator checklist Ex1',
+    items: [
+      'Change engine oil', 'Change fuel filters', 'Change air filters', 'Change cab filters',
+      'Change hydraulic filters', 'Check/change final drive oil', 'Check/change pump drive oil',
+      'Check pins and bushings', 'Check for oil leaks', 'Change broken hoses', 'Check bottom rollers',
+      'Check idlers', 'Check top rollers', 'Check chain wear', 'Check for cracks', 'Clean cab',
+    ],
+  },
+  {
+    id: 'crawler',
+    name: 'Crawler checklist',
+    items: [
+      'Change engine oil', 'Check/change air filters', 'Check/change fuel filters', 'Change final drives',
+      'Check coolant level', 'Check hydraulic oil level', 'Change hydraulic filters', 'Check pins and bushings',
+      'Check cylinders for drift', 'Check for oil leaks', 'Check for any worn hoses', 'Check for cracks',
+      'Check lights', 'Check rails', 'Check idlers', 'Check bottom rollers', 'Check top rollers',
+    ],
+  },
+  {
+    id: 'processor',
+    name: 'Processor checklist',
+    items: [
+      'Check/change air filters', 'Check/change fuel filters', 'Change final drive oil', 'Change swing drive oil',
+      'Check coolant level', 'Check hydraulic oil level', 'Change hydraulic filters', 'Check pins and bushings',
+      'Check cylinders for drift', 'Check for oil leaks', 'Check for any worn hoses', 'Check for cracks',
+      'Check lights', 'Check escape hatch', 'Check rails', 'Check idlers', 'Check bottom rollers',
+      'Sharpen delimb knives', 'Valve lash set on engine', 'Hydraulic tune up on machine',
+      'Hydraulic tune up on head', 'Check/change engine oil',
+    ],
+  },
+  {
+    id: 'skidder',
+    name: 'Skidder checklist',
+    items: [
+      'Check/change engine oil and filter', 'Check/change air filters', 'Check/change fuel filters',
+      'Change hydraulic filter', 'Change differential filters', 'Change cab filters', 'Check coolant level',
+      'Check hydraulic level', 'Check differential levels', 'Check final drive levels',
+      'Change oil in park brake', 'Check pins and bushings', 'Check for oil leaks', 'Check hoses for bad wear',
+      'Check for cracks', 'Check differential bolts', 'Check driveline/grease driveline',
+      'Check grapple brakes', 'Check lights', 'Check and tighten chains', 'Check tire pressures',
+      'Clean the cab', 'Hydraulic check/tune up', 'Check cylinders for drooping', 'Touch up painting',
+    ],
+  },
+];
+
+const FONT_STYLE = (
+  <style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+    * { box-sizing: border-box; }
+    .font-display { font-family: 'Rajdhani', sans-serif; }
+    .font-body { font-family: 'Inter', sans-serif; }
+    .font-mono { font-family: 'IBM Plex Mono', monospace; }
+    input, textarea, select { font-family: 'Inter', sans-serif; }
+    ::placeholder { color: #7d8a86; }
+  `}</style>
+);
+
+function PunchHole({ bg }) {
+  return (
+    <span
+      style={{ background: bg || COLORS.bg, boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.7)' }}
+      className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full"
+    />
+  );
+}
+
+function StatusStamp({ status, small }) {
+  return (
+    <span
+      style={{
+        borderColor: statusColor(status),
+        color: statusColor(status),
+        transform: 'rotate(-3deg)',
+        fontSize: small ? '10px' : '11px',
+      }}
+      className="font-display border-2 rounded-sm px-2 py-0.5 font-bold uppercase tracking-wider whitespace-nowrap inline-block"
+    >
+      {status}
+    </span>
+  );
+}
+
+function Btn({ children, onClick, variant = 'primary', className = '', type = 'button', disabled }) {
+  const base = 'font-display font-semibold uppercase tracking-wide text-sm px-4 py-2 rounded-lg transition-all focus:outline-none focus:ring-2 cursor-pointer active:scale-95';
+  const styles = {
+    primary: { background: COLORS.accent, color: '#1B1E20', boxShadow: '0 2px 4px rgba(0,0,0,0.3)', border: 'none' },
+    ghost: { background: 'transparent', color: COLORS.ink, border: `2px solid ${COLORS.line}`, boxShadow: 'none' },
+    danger: { background: 'transparent', color: '#D6604A', border: '2px solid #D6604A', boxShadow: 'none' },
+  };
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      style={{ ...styles[variant], opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? 'none' : 'auto' }}
+      className={`${base} ${className} hover:scale-105`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TextField({ label, value, onChange, placeholder, type = 'text', mono, helper }) {
+  return (
+    <label className="block mb-4">
+      <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>{label}</span>
+      {helper && <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>{helper}</span>}
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={`w-full rounded-lg px-4 py-2.5 text-base focus:outline-none focus:ring-2 ${mono ? 'font-mono' : 'font-body'}`}
+        style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+      />
+    </label>
+  );
+}
+
+function App() {
+  const [loading, setLoading] = useState(true);
+  const [mechanics, setMechanics] = useState([]);
+  const [units, setUnits] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [currentMechanic, setCurrentMechanic] = useState(null);
+  const [screen, setScreen] = useState('login');
+  const [activeUnit, setActiveUnit] = useState(null);
+  const [activeOrderId, setActiveOrderId] = useState(null);
+  const [newMechanicName, setNewMechanicName] = useState('');
+  const [newUnitName, setNewUnitName] = useState('');
+  const [showAddUnit, setShowAddUnit] = useState(false);
+  const [showAddOrder, setShowAddOrder] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [showNewTemplate, setShowNewTemplate] = useState(false);
+  const [confirmDeleteTemplate, setConfirmDeleteTemplate] = useState(null);
+  const [attachTemplateId, setAttachTemplateId] = useState('');
+
+  useEffect(() => {
+    const db = firebase.database();
+    const metaRef = db.ref('meta');
+    const ordersRef = db.ref('orders');
+    const templatesRef = db.ref('templates');
+    const ready = { meta: false, orders: false, templates: false };
+    const checkReady = () => {
+      if (ready.meta && ready.orders && ready.templates) setLoading(false);
+    };
+
+    const onMeta = metaRef.on('value', (snap) => {
+      const meta = snap.val() || { mechanics: [], units: [] };
+      setMechanics(meta.mechanics || []);
+      setUnits(meta.units || []);
+      ready.meta = true;
+      checkReady();
+    });
+    const onOrders = ordersRef.on('value', (snap) => {
+      setOrders(snap.val() || []);
+      ready.orders = true;
+      checkReady();
+    });
+    const onTemplates = templatesRef.on('value', (snap) => {
+      const t = snap.val();
+      if (t) {
+        setTemplates(t);
+      } else {
+        templatesRef.set(DEFAULT_TEMPLATES);
+      }
+      ready.templates = true;
+      checkReady();
+    });
+
+    return () => {
+      metaRef.off('value', onMeta);
+      ordersRef.off('value', onOrders);
+      templatesRef.off('value', onTemplates);
+    };
+  }, []);
+
+  const persistMeta = async (nextMechanics, nextUnits) => {
+    setMechanics(nextMechanics);
+    setUnits(nextUnits);
+    await saveMeta({ mechanics: nextMechanics, units: nextUnits });
+  };
+  const persistOrders = async (next) => {
+    setOrders(next);
+    await saveOrders(next);
+  };
+  const persistTemplates = async (next) => {
+    setTemplates(next);
+    await saveTemplates(next);
+  };
+
+  const addTemplate = async (name, itemsText) => {
+    const trimmedName = name.trim();
+    const items = itemsText.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (!trimmedName || items.length === 0) return;
+    const t = { id: uid(), name: trimmedName, items };
+    await persistTemplates([...templates, t]);
+    setShowNewTemplate(false);
+  };
+
+  const deleteTemplate = async (id) => {
+    await persistTemplates(templates.filter((t) => t.id !== id));
+    setConfirmDeleteTemplate(null);
+  };
+
+  const attachChecklist = async (orderId, templateId) => {
+    const template = templates.find((t) => t.id === templateId);
+    if (!template) return;
+    const checklist = {
+      templateId: template.id,
+      templateName: template.name,
+      items: template.items.map((text) => ({ id: uid(), text, checked: false, checkedBy: null, checkedAt: null })),
+    };
+    await updateOrder(orderId, { checklist });
+    setAttachTemplateId('');
+  };
+
+  const detachChecklist = async (orderId) => {
+    await updateOrder(orderId, { checklist: null });
+  };
+
+  const toggleChecklistItem = async (orderId, itemId) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order || !order.checklist) return;
+    const items = order.checklist.items.map((it) => {
+      if (it.id !== itemId) return it;
+      const nowChecked = !it.checked;
+      return {
+        ...it,
+        checked: nowChecked,
+        checkedBy: nowChecked ? currentMechanic : null,
+        checkedAt: nowChecked ? new Date().toISOString() : null,
+      };
+    });
+    await updateOrder(orderId, { checklist: { ...order.checklist, items } });
+  };
+
+  const addMechanic = async () => {
+    const name = newMechanicName.trim();
+    if (!name || mechanics.includes(name)) return;
+    const next = [...mechanics, name];
+    await persistMeta(next, units);
+    setNewMechanicName('');
+    setCurrentMechanic(name);
+    setScreen('dashboard');
+  };
+
+  const addUnit = async () => {
+    const name = newUnitName.trim();
+    if (!name || units.includes(name)) return;
+    await persistMeta(mechanics, [...units, name]);
+    setNewUnitName('');
+    setShowAddUnit(false);
+  };
+
+  const createOrder = async (data) => {
+    const order = {
+      id: uid(),
+      unit: activeUnit,
+      description: data.description,
+      assignedMechanic: data.assignedMechanic,
+      hours: data.hours,
+      dueDate: data.dueDate,
+      dateCreated: new Date().toISOString().slice(0, 10),
+      status: 'Open',
+      notes: [],
+      createdBy: currentMechanic,
+    };
+    await persistOrders([order, ...orders]);
+    setShowAddOrder(false);
+  };
+
+  const updateOrder = async (id, patch) => {
+    const next = orders.map((o) => (o.id === id ? { ...o, ...patch } : o));
+    await persistOrders(next);
+  };
+
+  const addNote = async (id, text) => {
+    if (!text.trim()) return;
+    const note = { id: uid(), author: currentMechanic, text: text.trim(), ts: new Date().toISOString() };
+    const next = orders.map((o) => (o.id === id ? { ...o, notes: [...(o.notes || []), note] } : o));
+    await persistOrders(next);
+  };
+
+  const deleteOrder = async (id) => {
+    await persistOrders(orders.filter((o) => o.id !== id));
+    setScreen('unit');
+    setConfirmDelete(false);
+  };
+
+  if (loading) {
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="flex items-center justify-center font-display">
+        {FONT_STYLE}
+        <span className="text-sm uppercase tracking-widest" style={{ color: COLORS.inkDim }}>Loading board…</span>
+      </div>
+    );
+  }
+
+  // ---------- LOGIN ----------
+  if (screen === 'login' || !currentMechanic) {
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-6 flex flex-col items-center justify-center">
+        {FONT_STYLE}
+        <div className="max-w-md w-full">
+          <div className="text-center mb-10">
+            <p className="font-display text-sm uppercase tracking-[0.3em] mb-2" style={{ color: COLORS.accent }}>Harder Contracting</p>
+            <h1 className="font-display text-4xl font-bold mb-2">Work Order Board</h1>
+            <p className="text-base" style={{ color: COLORS.inkDim }}>Pick your name to get started</p>
+          </div>
+
+          {mechanics.length > 0 && (
+            <div className="mb-8">
+              <p className="font-display text-xs uppercase tracking-wider mb-3 block" style={{ color: COLORS.inkDim }}>Tap to sign in</p>
+              <div className="grid grid-cols-2 gap-3">
+                {mechanics.map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => { setCurrentMechanic(m); setScreen('dashboard'); }}
+                    className="rounded-lg px-4 py-5 font-medium text-center focus:outline-none focus:ring-2 transition-all hover:scale-105 active:scale-95"
+                    style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}`, color: COLORS.ink }}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+              <div className="h-px my-6" style={{ background: COLORS.line }} />
+            </div>
+          )}
+
+          <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>
+            <p className="font-display text-sm uppercase tracking-wide mb-3 block" style={{ color: COLORS.accent }}>First time here?</p>
+            <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>Enter your name to sign in:</p>
+            <div className="flex gap-2">
+              <input
+                value={newMechanicName}
+                onChange={(e) => setNewMechanicName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addMechanic()}
+                placeholder="Your name"
+                className="flex-1 rounded-lg px-4 py-2 text-base focus:outline-none focus:ring-2"
+                style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                autoFocus
+              />
+              <Btn onClick={addMechanic}>Sign in</Btn>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- DASHBOARD ----------
+  if (screen === 'dashboard') {
+    const counts = (unit) => {
+      const list = orders.filter((o) => o.unit === unit);
+      return {
+        Open: list.filter((o) => o.status === 'Open').length,
+        'In Progress': list.filter((o) => o.status === 'In Progress').length,
+        Done: list.filter((o) => o.status === 'Done').length,
+      };
+    };
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
+        {FONT_STYLE}
+        <div className="max-w-5xl mx-auto">
+          <div className="flex items-start justify-between mb-10">
+            <div>
+              <p className="font-display text-xs uppercase tracking-[0.3em] mb-2" style={{ color: COLORS.accent }}>Harder Contracting</p>
+              <h1 className="font-display text-3xl sm:text-4xl font-bold">Board</h1>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setScreen('checklists')}
+                className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
+                style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+              >
+                📋 Checklists
+              </button>
+              <button
+                onClick={() => { setCurrentMechanic(null); setScreen('login'); }}
+                className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
+                style={{ color: COLORS.inkDim, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+              >
+                👤 {currentMechanic}
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="font-display text-lg font-semibold uppercase tracking-wide">Your machines</h2>
+            <Btn variant="ghost" onClick={() => setShowAddUnit((s) => !s)}>+ Add machine</Btn>
+          </div>
+
+          {showAddUnit && (
+            <div className="flex gap-2 mb-5">
+              <input
+                value={newUnitName}
+                onChange={(e) => setNewUnitName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addUnit()}
+                placeholder="Unit number, e.g. UNIT-104"
+                className="flex-1 rounded-sm px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
+                style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+              />
+              <Btn onClick={addUnit}>Add</Btn>
+            </div>
+          )}
+
+          {units.length === 0 ? (
+            <div className="rounded-lg p-10 text-center" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
+              <p className="font-body text-base mb-4" style={{ color: COLORS.inkDim }}>No machines added yet</p>
+              <p className="font-body text-sm" style={{ color: COLORS.line }}>Tap "Add machine" above to get started</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              {units.map((u) => {
+                const c = counts(u);
+                const totalJobs = c.Open + c['In Progress'] + c.Done;
+                return (
+                  <button
+                    key={u}
+                    onClick={() => { setActiveUnit(u); setScreen('unit'); }}
+                    className="text-left rounded-lg p-5 focus:outline-none focus:ring-2 transition-all hover:scale-105 active:scale-95"
+                    style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}
+                  >
+                    <p className="font-mono text-xl font-semibold mb-4 truncate">{u}</p>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span style={{ color: COLORS.open }}>📋 Open</span>
+                        <span className="font-semibold" style={{ color: COLORS.open }}>{c.Open}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span style={{ color: COLORS.progress }}>🔧 In progress</span>
+                        <span className="font-semibold" style={{ color: COLORS.progress }}>{c['In Progress']}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span style={{ color: COLORS.done }}>✓ Done</span>
+                        <span className="font-semibold" style={{ color: COLORS.done }}>{c.Done}</span>
+                      </div>
+                    </div>
+                    {totalJobs > 0 && (
+                      <div className="mt-3 pt-3 border-t" style={{ borderColor: COLORS.line }}>
+                        <span className="text-xs font-display uppercase tracking-wide" style={{ color: COLORS.inkDim }}>
+                          {totalJobs} job{totalJobs !== 1 ? 's' : ''} total
+                        </span>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <p className="font-body text-xs mt-12 text-center" style={{ color: COLORS.line }}>All mechanics see the same board in real time</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- CHECKLIST TEMPLATES ----------
+  if (screen === 'checklists') {
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
+        {FONT_STYLE}
+        <div className="max-w-3xl mx-auto">
+          <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
+            ← Back to board
+          </button>
+          <div className="flex items-center justify-between mb-8">
+            <h1 className="font-display text-3xl font-bold">Checklists</h1>
+            <Btn onClick={() => setShowNewTemplate((s) => !s)}>+ New checklist</Btn>
+          </div>
+
+          {showNewTemplate && (
+            <NewTemplateForm onCancel={() => setShowNewTemplate(false)} onSubmit={addTemplate} />
+          )}
+
+          {templates.length === 0 ? (
+            <div className="rounded-lg p-10 text-center" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
+              <p className="text-base mb-2" style={{ color: COLORS.inkDim }}>No custom checklists yet</p>
+              <p className="text-sm" style={{ color: COLORS.line }}>Tap "+ New checklist" above, or use the built-in templates when creating a work order.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {templates.map((t) => {
+                const isDefault = ['buncher-b4', 'excavator-ex1', 'crawler', 'processor', 'skidder'].includes(t.id);
+                return (
+                  <div key={t.id} className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className="flex-1">
+                        <p className="font-display font-bold text-lg">{t.name}</p>
+                        <p className="text-sm" style={{ color: COLORS.line }}>{t.items.length} steps</p>
+                      </div>
+                      {!isDefault && (
+                        <button 
+                          onClick={() => setConfirmDeleteTemplate(confirmDeleteTemplate === t.id ? null : t.id)} 
+                          className="text-xs font-display uppercase tracking-wider hover:opacity-70"
+                          style={{ color: '#D6604A' }}
+                        >
+                          {confirmDeleteTemplate === t.id ? '✕ Close' : 'Delete'}
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>
+                      {t.items.slice(0, 3).join(' • ')}
+                      {t.items.length > 3 ? ' • …' : ''}
+                    </p>
+                    {confirmDeleteTemplate === t.id && !isDefault && (
+                      <div className="mt-3 pt-3 border-t" style={{ borderColor: COLORS.line }}>
+                        <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>Are you sure? You can't undo this.</p>
+                        <Btn variant="danger" onClick={() => deleteTemplate(t.id)}>Yes, delete this checklist</Btn>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- UNIT VIEW ----------
+  if (screen === 'unit') {
+    const unitOrders = orders.filter((o) => o.unit === activeUnit).sort((a, b) => (a.status === 'Done') - (b.status === 'Done'));
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
+        {FONT_STYLE}
+        <div className="max-w-3xl mx-auto">
+          <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
+            ← Back to board
+          </button>
+          <div className="flex items-center justify-between mb-8">
+            <h1 className="font-mono text-3xl font-bold">{activeUnit}</h1>
+            <Btn onClick={() => setShowAddOrder((s) => !s)}>+ New job</Btn>
+          </div>
+
+          {showAddOrder && (
+            <NewOrderForm
+              mechanics={mechanics}
+              onCancel={() => setShowAddOrder(false)}
+              onSubmit={createOrder}
+            />
+          )}
+
+          {unitOrders.length === 0 ? (
+            <div className="rounded-lg p-10 text-center mt-6" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
+              <p className="text-base mb-2" style={{ color: COLORS.inkDim }}>All caught up!</p>
+              <p className="text-sm" style={{ color: COLORS.line }}>No work orders yet. Tap "+ Work Order" to create one.</p>
+            </div>
+          ) : (
+            <div className="mt-6 space-y-3">
+              {unitOrders.map((o) => {
+                const isDone = o.status === 'Done';
+                return (
+                  <button
+                    key={o.id}
+                    onClick={() => { setActiveOrderId(o.id); setScreen('order'); setConfirmDelete(false); }}
+                    style={{ background: isDone ? COLORS.line : COLORS.manila, color: isDone ? COLORS.inkDim : COLORS.ink2 }}
+                    className="relative rounded-lg p-5 pl-8 text-left w-full focus:outline-none focus:ring-2 transition-all hover:scale-102 active:scale-98"
+                  >
+                    <PunchHole bg={isDone ? COLORS.line : COLORS.manila} />
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-body font-semibold text-base leading-snug mb-2">{o.description || '(no description)'}</p>
+                        <div className="flex flex-wrap items-center gap-4 font-mono text-xs" style={{ color: isDone ? COLORS.line : '#5B5342', opacity: isDone ? 0.6 : 1 }}>
+                          {o.assignedMechanic && <span>👤 {o.assignedMechanic}</span>}
+                          {o.hours && o.hours !== '' && <span>⏱️ {o.hours}h</span>}
+                          {o.dueDate && <span>📅 {fmtDate(o.dueDate)}</span>}
+                        </div>
+                        {o.checklist && (
+                          <div className="mt-2 text-xs font-semibold" style={{ color: isDone ? COLORS.line : COLORS.accent }}>
+                            ✓ {o.checklist.items.filter((i) => i.checked).length}/{o.checklist.items.length} checklist items done
+                          </div>
+                        )}
+                      </div>
+                      <StatusStamp status={o.status} small />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- ORDER DETAIL ----------
+  if (screen === 'order') {
+    const order = orders.find((o) => o.id === activeOrderId);
+    if (!order) {
+      setScreen('unit');
+      return null;
+    }
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
+        {FONT_STYLE}
+        <div className="max-w-2xl mx-auto">
+          <button onClick={() => setScreen('unit')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
+            ← Back to {activeUnit}
+          </button>
+
+          <div style={{ background: COLORS.manila, color: COLORS.ink2 }} className="relative rounded-lg p-7 pl-10 shadow-lg">
+            <PunchHole />
+            <div className="flex items-start justify-between mb-4 gap-3">
+              <p className="font-mono text-xs" style={{ color: '#5B5342' }}>
+                {activeUnit} · opened {fmtDate(order.dateCreated)} by {order.createdBy}
+              </p>
+              <StatusStamp status={order.status} />
+            </div>
+
+            <label className="block mb-4">
+              <span className="font-display text-xs uppercase tracking-wider block mb-1" style={{ color: '#6B6250' }}>Issue description</span>
+              <textarea
+                value={order.description}
+                onChange={(e) => updateOrder(order.id, { description: e.target.value })}
+                rows={3}
+                className="w-full rounded-sm px-3 py-2 text-sm font-body focus:outline-none focus:ring-2"
+                style={{ background: '#EFE3C4', color: COLORS.ink2, border: `1px solid ${COLORS.manilaDark}` }}
+              />
+            </label>
+
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <label className="block">
+                <span className="font-display text-xs uppercase tracking-wider block mb-1" style={{ color: '#6B6250' }}>Assigned mechanic</span>
+                <select
+                  value={order.assignedMechanic || ''}
+                  onChange={(e) => updateOrder(order.id, { assignedMechanic: e.target.value })}
+                  className="w-full rounded-sm px-3 py-2 text-sm font-body focus:outline-none focus:ring-2"
+                  style={{ background: '#EFE3C4', color: COLORS.ink2, border: `1px solid ${COLORS.manilaDark}` }}
+                >
+                  <option value="">Unassigned</option>
+                  {mechanics.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <span className="font-display text-xs uppercase tracking-wider block mb-1" style={{ color: '#6B6250' }}>Machine hours</span>
+                <input
+                  type="number"
+                  value={order.hours || ''}
+                  onChange={(e) => updateOrder(order.id, { hours: e.target.value })}
+                  className="w-full rounded-sm px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
+                  style={{ background: '#EFE3C4', color: COLORS.ink2, border: `1px solid ${COLORS.manilaDark}` }}
+                />
+              </label>
+            </div>
+
+            <label className="block mb-5">
+              <span className="font-display text-xs uppercase tracking-wider block mb-1" style={{ color: '#6B6250' }}>Due date</span>
+              <input
+                type="date"
+                value={order.dueDate || ''}
+                onChange={(e) => updateOrder(order.id, { dueDate: e.target.value })}
+                className="w-full sm:w-1/2 rounded-sm px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
+                style={{ background: '#EFE3C4', color: COLORS.ink2, border: `1px solid ${COLORS.manilaDark}` }}
+              />
+            </label>
+
+            <div className="mb-2">
+              <span className="font-display text-xs uppercase tracking-wider block mb-2" style={{ color: '#6B6250' }}>Status</span>
+              <div className="flex gap-2">
+                {STATUSES.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => updateOrder(order.id, { status: s })}
+                    className="font-display text-xs uppercase font-semibold tracking-wide px-3 py-1.5 rounded-sm focus:outline-none focus:ring-2"
+                    style={{
+                      border: `2px solid ${statusColor(s)}`,
+                      color: order.status === s ? COLORS.ink2 : statusColor(s),
+                      background: order.status === s ? statusColor(s) : 'transparent',
+                    }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-8">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-display text-lg font-bold">Checklist</h3>
+              {order.checklist && (
+                <button onClick={() => detachChecklist(order.id)} className="text-xs font-display uppercase tracking-wider text-red-400 hover:opacity-70 focus:outline-none" style={{ color: '#D6604A' }}>
+                  Remove
+                </button>
+              )}
+            </div>
+            {!order.checklist ? (
+              <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
+                {templates.length === 0 ? (
+                  <p className="text-sm" style={{ color: COLORS.inkDim }}>No checklists yet. Go to Checklists on the board to create one, or use the built-in templates.</p>
+                ) : (
+                  <div>
+                    <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>Pick a checklist to use for this job:</p>
+                    <div className="flex gap-2">
+                      <select
+                        value={attachTemplateId}
+                        onChange={(e) => setAttachTemplateId(e.target.value)}
+                        className="flex-1 rounded-lg px-4 py-2 text-base focus:outline-none focus:ring-2"
+                        style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                      >
+                        <option value="">Select a checklist…</option>
+                        {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                      <Btn disabled={!attachTemplateId} onClick={() => attachChecklist(order.id, attachTemplateId)}>Add</Btn>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+                <div className="flex items-center justify-between mb-4 pb-4" style={{ borderBottomColor: COLORS.line, borderBottomWidth: '1px' }}>
+                  <p className="font-display font-semibold" style={{ color: COLORS.accent }}>
+                    {order.checklist.templateName}
+                  </p>
+                  <span className="font-mono text-sm font-bold" style={{ color: COLORS.accent }}>
+                    {order.checklist.items.filter((i) => i.checked).length}/{order.checklist.items.length}
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {order.checklist.items.map((it) => (
+                    <label key={it.id} className="flex items-start gap-3 cursor-pointer group">
+                      <input
+                        type="checkbox"
+                        checked={it.checked}
+                        onChange={() => toggleChecklistItem(order.id, it.id)}
+                        className="mt-1 w-5 h-5 rounded focus:outline-none focus:ring-2 cursor-pointer"
+                        style={{ accentColor: COLORS.accent }}
+                      />
+                      <div className="flex-1">
+                        <span className="text-base" style={{ color: it.checked ? COLORS.line : COLORS.ink, textDecoration: it.checked ? 'line-through' : 'none' }}>
+                          {it.text}
+                        </span>
+                        {it.checked && it.checkedBy && (
+                          <span className="block font-mono text-xs mt-1" style={{ color: COLORS.line }}>
+                            ✓ {it.checkedBy} on {new Date(it.checkedAt).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-8">
+            <h3 className="font-display text-lg font-bold mb-4">Notes & Updates</h3>
+            <div className="space-y-3 mb-5">
+              {(order.notes || []).length === 0 && (
+                <p className="text-sm text-center py-4" style={{ color: COLORS.line }}>No notes yet. Add one to keep the team in the loop.</p>
+              )}
+              {(order.notes || []).slice().reverse().map((n) => (
+                <div key={n.id} className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-display font-semibold text-sm" style={{ color: COLORS.accent }}>💬 {n.author}</span>
+                    <span className="font-mono text-xs" style={{ color: COLORS.line }}>{new Date(n.ts).toLocaleString()}</span>
+                  </div>
+                  <p className="text-base">{n.text}</p>
+                </div>
+              ))}
+            </div>
+            <NoteForm onSubmit={(text) => addNote(order.id, text)} />
+          </div>
+
+          <div className="mt-8 flex justify-end">
+            {!confirmDelete ? (
+              <Btn variant="danger" onClick={() => setConfirmDelete(true)}>Delete work order</Btn>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-sm" style={{ color: COLORS.inkDim }}>Delete this work order for good?</span>
+                <Btn variant="danger" onClick={() => deleteOrder(order.id)}>Yes, delete</Btn>
+                <Btn variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Btn>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function NewTemplateForm({ onSubmit, onCancel }) {
+  const [name, setName] = useState('');
+  const [itemsText, setItemsText] = useState('');
+  return (
+    <div className="rounded-lg p-6 mb-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+      <h3 className="font-display text-lg font-bold mb-4">Create a new checklist</h3>
+      <TextField label="What's this checklist for?" value={name} onChange={setName} placeholder="e.g. Engine rebuild, Pre-shift inspection" helper="Give it a clear, descriptive name" />
+      <label className="block mb-4">
+        <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>Steps to complete</span>
+        <span className="text-xs block mb-2" style={{ color: COLORS.inkDim }}>Type one step per line. Example:</span>
+        <textarea
+          value={itemsText}
+          onChange={(e) => setItemsText(e.target.value)}
+          rows={10}
+          placeholder={'Change engine oil\nReplace air filter\nCheck coolant level\nInspect for leaks\nTest engine'}
+          className="w-full rounded-lg px-4 py-3 text-base font-body focus:outline-none focus:ring-2 resize-none"
+          style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+        />
+      </label>
+      <div className="flex gap-2">
+        <Btn onClick={() => name.trim() && itemsText.trim() && onSubmit(name, itemsText)}>Save checklist</Btn>
+        <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
+function NewOrderForm({ mechanics, onSubmit, onCancel }) {
+  const [description, setDescription] = useState('');
+  const [assignedMechanic, setAssignedMechanic] = useState('');
+  const [hours, setHours] = useState('');
+  const [dueDate, setDueDate] = useState('');
+
+  return (
+    <div className="rounded-lg p-6 mb-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+      <h3 className="font-display text-lg font-bold mb-4">Create a work order</h3>
+      <TextField label="What needs to be fixed?" value={description} onChange={setDescription} placeholder="e.g. Replace hydraulic pump, Fix leaking hose" helper="Be specific so the mechanic knows what to do" />
+      <div className="grid grid-cols-2 gap-4 mb-4">
+        <label className="block">
+          <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>Who's doing this?</span>
+          <select
+            value={assignedMechanic}
+            onChange={(e) => setAssignedMechanic(e.target.value)}
+            className="w-full rounded-lg px-4 py-2.5 text-base focus:outline-none focus:ring-2"
+            style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          >
+            <option value="">Leave unassigned</option>
+            {mechanics.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </label>
+        <TextField label="Machine hours" value={hours} onChange={setHours} placeholder="Current hour meter reading" type="number" mono />
+      </div>
+      <TextField label="When do you need it done?" value={dueDate} onChange={setDueDate} type="date" mono />
+      <div className="flex gap-2 mt-6">
+        <Btn onClick={() => description.trim() && onSubmit({ description, assignedMechanic, hours, dueDate })}>Create job</Btn>
+        <Btn variant="ghost" onClick={onCancel}>Nevermind</Btn>
+      </div>
+    </div>
+  );
+}
+
+function NoteForm({ onSubmit }) {
+  const [text, setText] = useState('');
+  return (
+    <div className="flex gap-2">
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="What's the status? Any issues? Tips for next shift?"
+        rows={2}
+        className="flex-1 rounded-lg px-4 py-3 text-base focus:outline-none focus:ring-2 resize-none"
+        style={{ background: COLORS.surface, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+      />
+      <Btn onClick={() => { onSubmit(text); setText(''); }} disabled={!text.trim()}>Post</Btn>
+    </div>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+
+</body>
+</html>
