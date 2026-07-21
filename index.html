@@ -178,6 +178,108 @@ function OfflineBanner({ isOnline }) {
   );
 }
 
+function PinModalOverlay({ pinModal, pinInput, setPinInput, pinError, onSubmit, onCancel, onForgot }) {
+  if (!pinModal) return null;
+  const isVerify = pinModal.mode === 'verify';
+  const isConfirm = pinModal.mode === 'setup' && pinModal.stage === 'confirm';
+  const title = isVerify
+    ? `Enter PIN`
+    : isConfirm
+      ? 'Confirm your PIN'
+      : 'Create a 4-digit PIN';
+
+  const handleDigit = (d) => {
+    if (pinInput.length >= 4) return;
+    setPinInput(pinInput + d);
+  };
+  const handleBackspace = () => setPinInput(pinInput.slice(0, -1));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.75)' }}>
+      <div className="w-full max-w-xs rounded-2xl p-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+        <p className="font-display text-lg font-bold text-center mb-1">{title}</p>
+        <p className="text-sm text-center mb-5" style={{ color: COLORS.inkDim }}>{pinModal.mechanic}</p>
+
+        <div className="flex justify-center gap-3 mb-5">
+          {[0, 1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="w-4 h-4 rounded-full"
+              style={{
+                background: i < pinInput.length ? COLORS.accent : 'transparent',
+                border: `2px solid ${i < pinInput.length ? COLORS.accent : COLORS.line}`,
+              }}
+            />
+          ))}
+        </div>
+
+        {pinError && (
+          <p className="text-sm text-center mb-4 font-semibold" style={{ color: '#E07A5F' }}>{pinError}</p>
+        )}
+
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
+            <button
+              key={d}
+              onClick={() => handleDigit(d)}
+              className="font-display text-2xl font-bold rounded-xl py-4 transition-all active:scale-95"
+              style={{ background: COLORS.surfaceRaised, color: COLORS.ink }}
+            >
+              {d}
+            </button>
+          ))}
+          <button
+            onClick={onCancel}
+            className="font-display text-xs uppercase font-bold rounded-xl py-4 transition-all active:scale-95"
+            style={{ background: 'transparent', color: COLORS.inkDim }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => handleDigit('0')}
+            className="font-display text-2xl font-bold rounded-xl py-4 transition-all active:scale-95"
+            style={{ background: COLORS.surfaceRaised, color: COLORS.ink }}
+          >
+            0
+          </button>
+          <button
+            onClick={handleBackspace}
+            className="font-display text-lg font-bold rounded-xl py-4 transition-all active:scale-95"
+            style={{ background: 'transparent', color: COLORS.inkDim }}
+          >
+            ⌫
+          </button>
+        </div>
+
+        {isVerify && (
+          <button onClick={onForgot} className="block w-full text-center text-sm underline" style={{ color: COLORS.inkDim }}>
+            Forgot PIN? Reset it
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BiometricOfferOverlay({ mechanic, onEnable, onSkip }) {
+  if (!mechanic) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.75)' }}>
+      <div className="w-full max-w-xs rounded-2xl p-6 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+        <p className="text-4xl mb-3">🔓</p>
+        <p className="font-display text-lg font-bold mb-2">Use Face ID or Touch ID?</p>
+        <p className="text-sm mb-5" style={{ color: COLORS.inkDim }}>
+          Skip typing your PIN next time on this phone. You can turn this off anytime from the board.
+        </p>
+        <div className="flex flex-col gap-2">
+          <Btn onClick={onEnable}>Yes, use it on this phone</Btn>
+          <Btn variant="ghost" onClick={onSkip}>Not now</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function statusColor(s) {
   if (s === 'Open') return COLORS.open;
   if (s === 'In Progress') return COLORS.progress;
@@ -233,6 +335,74 @@ async function saveOrders(orders) {
 }
 async function saveTemplates(templates) {
   try { await firebase.database().ref('templates').set(templates); } catch (e) { console.error('save templates failed', e); }
+}
+
+async function savePins(pins) {
+  try { await firebase.database().ref('pins').set(pins); } catch (e) { console.error('save pins failed', e); }
+}
+
+// One-way hash so raw PINs are never stored or sent anywhere in plain text.
+async function sha256Hex(text) {
+  const enc = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function webauthnKey(name) {
+  return 'webauthn_cred_' + name;
+}
+
+async function webauthnAvailable() {
+  return !!(
+    window.PublicKeyCredential &&
+    window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable &&
+    (await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable())
+  );
+}
+
+// Registers Face ID / Touch ID (or Windows Hello, etc.) as a shortcut on THIS device only.
+// The credential never leaves the device — it's just a local unlock, not shared identity proof.
+async function registerBiometric(name) {
+  const challenge = crypto.getRandomValues(new Uint8Array(32));
+  const cred = await navigator.credentials.create({
+    publicKey: {
+      challenge,
+      rp: { name: 'Harder Contracting Work Orders' },
+      user: {
+        id: new TextEncoder().encode(name),
+        name,
+        displayName: name,
+      },
+      pubKeyCredParams: [
+        { type: 'public-key', alg: -7 },
+        { type: 'public-key', alg: -257 },
+      ],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
+      timeout: 60000,
+    },
+  });
+  const credIdB64 = btoa(String.fromCharCode(...new Uint8Array(cred.rawId)));
+  localStorage.setItem(webauthnKey(name), credIdB64);
+}
+
+async function verifyBiometric(name) {
+  const credIdB64 = localStorage.getItem(webauthnKey(name));
+  if (!credIdB64) return false;
+  try {
+    const credId = Uint8Array.from(atob(credIdB64), (c) => c.charCodeAt(0));
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    await navigator.credentials.get({
+      publicKey: {
+        challenge,
+        allowCredentials: [{ id: credId, type: 'public-key' }],
+        userVerification: 'required',
+        timeout: 60000,
+      },
+    });
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 const DEFAULT_TEMPLATES = [
@@ -389,6 +559,12 @@ function App() {
   const [confirmDeleteTemplate, setConfirmDeleteTemplate] = useState(null);
   const [attachTemplateId, setAttachTemplateId] = useState('');
   const [isOnline, setIsOnline] = useState(true);
+  const [pins, setPins] = useState({});
+  const [pinModal, setPinModal] = useState(null); // { mode: 'verify'|'setup', mechanic, stage, firstEntry }
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [offerBiometric, setOfferBiometric] = useState(null);
+  const [bioMsg, setBioMsg] = useState('');
 
   useEffect(() => {
     const connectedRef = firebase.database().ref('.info/connected');
@@ -397,6 +573,21 @@ function App() {
     });
     return () => connectedRef.off('value', onConnected);
   }, []);
+
+  useEffect(() => {
+    const pinsRef = firebase.database().ref('pins');
+    const onPins = pinsRef.on('value', (snap) => {
+      setPins(snap.val() || {});
+    });
+    return () => pinsRef.off('value', onPins);
+  }, []);
+
+  useEffect(() => {
+    if (pinModal && pinInput.length === 4) {
+      submitPin();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinInput]);
 
   useEffect(() => {
     const db = firebase.database();
@@ -452,6 +643,122 @@ function App() {
     await saveTemplates(next);
   };
 
+  const persistPins = async (next) => {
+    setPins(next);
+    await savePins(next);
+  };
+
+  const handleMechanicTap = async (name) => {
+    setPinError('');
+    const hasCred = !!localStorage.getItem('webauthn_cred_' + name);
+    if (hasCred) {
+      const ok = await verifyBiometric(name);
+      if (ok) {
+        setCurrentMechanic(name);
+        setScreen('dashboard');
+        return;
+      }
+      // if biometric fails or is cancelled, fall through to PIN entry
+    }
+    setPinInput('');
+    if (pins[name]) {
+      setPinModal({ mode: 'verify', mechanic: name });
+    } else {
+      setPinModal({ mode: 'setup', mechanic: name, stage: 'first', firstEntry: '' });
+    }
+  };
+
+  const submitPin = async () => {
+    if (!pinModal || pinInput.length !== 4) return;
+    if (pinModal.mode === 'verify') {
+      const hash = await sha256Hex(pinInput);
+      if (hash === pins[pinModal.mechanic]) {
+        const mechanic = pinModal.mechanic;
+        setPinModal(null);
+        setPinInput('');
+        setPinError('');
+        setCurrentMechanic(mechanic);
+        setScreen('dashboard');
+        maybeOfferBiometric(mechanic);
+      } else {
+        setPinError('Wrong PIN — try again');
+        setPinInput('');
+      }
+    } else if (pinModal.mode === 'setup') {
+      if (pinModal.stage === 'first') {
+        setPinModal({ ...pinModal, stage: 'confirm', firstEntry: pinInput });
+        setPinInput('');
+      } else {
+        if (pinInput === pinModal.firstEntry) {
+          const hash = await sha256Hex(pinInput);
+          const nextPins = { ...pins, [pinModal.mechanic]: hash };
+          await persistPins(nextPins);
+          const mechanic = pinModal.mechanic;
+          const isNewMechanic = !mechanics.includes(mechanic);
+          setPinModal(null);
+          setPinInput('');
+          setPinError('');
+          if (isNewMechanic) {
+            await persistMeta([...mechanics, mechanic], units);
+          }
+          setCurrentMechanic(mechanic);
+          setScreen('dashboard');
+          maybeOfferBiometric(mechanic);
+        } else {
+          setPinError("Those didn't match — start over");
+          setPinModal({ ...pinModal, stage: 'first', firstEntry: '' });
+          setPinInput('');
+        }
+      }
+    }
+  };
+
+  const cancelPinModal = () => {
+    setPinModal(null);
+    setPinInput('');
+    setPinError('');
+  };
+
+  const forgotPin = async () => {
+    if (!pinModal) return;
+    const name = pinModal.mechanic;
+    const nextPins = { ...pins };
+    delete nextPins[name];
+    await persistPins(nextPins);
+    localStorage.removeItem('webauthn_cred_' + name);
+    setPinModal({ mode: 'setup', mechanic: name, stage: 'first', firstEntry: '' });
+    setPinInput('');
+    setPinError('');
+  };
+
+  const startChangePin = () => {
+    setPinError('');
+    setPinInput('');
+    setPinModal({ mode: 'setup', mechanic: currentMechanic, stage: 'first', firstEntry: '' });
+  };
+
+  const maybeOfferBiometric = async (name) => {
+    if (localStorage.getItem('webauthn_cred_' + name)) return;
+    const avail = await webauthnAvailable().catch(() => false);
+    if (avail) setOfferBiometric(name);
+  };
+
+  const toggleBiometric = async () => {
+    const key = 'webauthn_cred_' + currentMechanic;
+    if (localStorage.getItem(key)) {
+      localStorage.removeItem(key);
+      setBioMsg('Face ID / Touch ID turned off on this device.');
+    } else {
+      try {
+        await registerBiometric(currentMechanic);
+        setBioMsg('Face ID / Touch ID enabled on this device.');
+      } catch (e) {
+        setBioMsg('Could not set that up on this device.');
+      }
+    }
+    setTimeout(() => setBioMsg(''), 4000);
+  };
+
   const addTemplate = async (name, itemsText) => {
     const trimmedName = name.trim();
     const items = itemsText.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -498,14 +805,15 @@ function App() {
     await updateOrder(orderId, { checklist: { ...order.checklist, items } });
   };
 
-  const addMechanic = async () => {
+  const addMechanic = () => {
     const name = newMechanicName.trim();
     if (!name || mechanics.includes(name)) return;
-    const next = [...mechanics, name];
-    await persistMeta(next, units);
     setNewMechanicName('');
-    setCurrentMechanic(name);
-    setScreen('dashboard');
+    setPinError('');
+    setPinInput('');
+    // New mechanics set up a PIN before their name is added to the board —
+    // persistMeta happens once PIN setup completes, in submitPin().
+    setPinModal({ mode: 'setup', mechanic: name, stage: 'first', firstEntry: '' });
   };
 
   const addUnit = async () => {
@@ -574,6 +882,28 @@ function App() {
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="flex items-center justify-center font-display">
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} />
+        <PinModalOverlay
+          pinModal={pinModal}
+          pinInput={pinInput}
+          setPinInput={setPinInput}
+          pinError={pinError}
+          onSubmit={submitPin}
+          onCancel={cancelPinModal}
+          onForgot={forgotPin}
+        />
+        <BiometricOfferOverlay
+          mechanic={offerBiometric}
+          onEnable={async () => {
+            const name = offerBiometric;
+            setOfferBiometric(null);
+            try {
+              await registerBiometric(name);
+            } catch (e) {
+              // ignore — user can enable it later from the board
+            }
+          }}
+          onSkip={() => setOfferBiometric(null)}
+        />
         <span className="text-sm uppercase tracking-widest" style={{ color: COLORS.inkDim }}>Loading board…</span>
       </div>
     );
@@ -585,6 +915,28 @@ function App() {
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-6 flex flex-col items-center justify-center">
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} />
+        <PinModalOverlay
+          pinModal={pinModal}
+          pinInput={pinInput}
+          setPinInput={setPinInput}
+          pinError={pinError}
+          onSubmit={submitPin}
+          onCancel={cancelPinModal}
+          onForgot={forgotPin}
+        />
+        <BiometricOfferOverlay
+          mechanic={offerBiometric}
+          onEnable={async () => {
+            const name = offerBiometric;
+            setOfferBiometric(null);
+            try {
+              await registerBiometric(name);
+            } catch (e) {
+              // ignore — user can enable it later from the board
+            }
+          }}
+          onSkip={() => setOfferBiometric(null)}
+        />
         <div className="max-w-md w-full">
           <div className="text-center mb-10">
             <p className="font-display text-sm uppercase tracking-[0.3em] mb-2" style={{ color: COLORS.accent }}>Harder Contracting</p>
@@ -599,11 +951,14 @@ function App() {
                 {mechanics.map((m) => (
                   <button
                     key={m}
-                    onClick={() => { setCurrentMechanic(m); setScreen('dashboard'); }}
-                    className="rounded-lg px-4 py-5 font-medium text-center focus:outline-none focus:ring-2 transition-all hover:scale-105 active:scale-95"
+                    onClick={() => handleMechanicTap(m)}
+                    className="rounded-lg px-4 py-5 font-medium text-center focus:outline-none focus:ring-2 transition-all hover:scale-105 active:scale-95 relative"
                     style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}`, color: COLORS.ink }}
                   >
                     {m}
+                    {!!localStorage.getItem('webauthn_cred_' + m) && (
+                      <span className="absolute top-1.5 right-2 text-xs" title="Face ID / Touch ID available">🔓</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -646,6 +1001,28 @@ function App() {
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} />
+        <PinModalOverlay
+          pinModal={pinModal}
+          pinInput={pinInput}
+          setPinInput={setPinInput}
+          pinError={pinError}
+          onSubmit={submitPin}
+          onCancel={cancelPinModal}
+          onForgot={forgotPin}
+        />
+        <BiometricOfferOverlay
+          mechanic={offerBiometric}
+          onEnable={async () => {
+            const name = offerBiometric;
+            setOfferBiometric(null);
+            try {
+              await registerBiometric(name);
+            } catch (e) {
+              // ignore — user can enable it later from the board
+            }
+          }}
+          onSkip={() => setOfferBiometric(null)}
+        />
         <div className="max-w-5xl mx-auto">
           <div className="flex items-start justify-between mb-10">
             <div>
@@ -668,6 +1045,16 @@ function App() {
                 👤 {currentMechanic}
               </button>
             </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-4 -mt-7 mb-8">
+            <button onClick={startChangePin} className="text-xs underline" style={{ color: COLORS.inkDim }}>
+              Change PIN
+            </button>
+            <button onClick={toggleBiometric} className="text-xs underline" style={{ color: COLORS.inkDim }}>
+              {localStorage.getItem('webauthn_cred_' + currentMechanic) ? 'Turn off Face/Touch ID' : 'Enable Face/Touch ID'}
+            </button>
+            {bioMsg && <span className="text-xs font-semibold" style={{ color: COLORS.accent }}>{bioMsg}</span>}
           </div>
 
           <div className="flex items-center justify-between mb-5">
@@ -746,6 +1133,28 @@ function App() {
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} />
+        <PinModalOverlay
+          pinModal={pinModal}
+          pinInput={pinInput}
+          setPinInput={setPinInput}
+          pinError={pinError}
+          onSubmit={submitPin}
+          onCancel={cancelPinModal}
+          onForgot={forgotPin}
+        />
+        <BiometricOfferOverlay
+          mechanic={offerBiometric}
+          onEnable={async () => {
+            const name = offerBiometric;
+            setOfferBiometric(null);
+            try {
+              await registerBiometric(name);
+            } catch (e) {
+              // ignore — user can enable it later from the board
+            }
+          }}
+          onSkip={() => setOfferBiometric(null)}
+        />
         <div className="max-w-3xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
             ← Back to board
@@ -812,6 +1221,28 @@ function App() {
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} />
+        <PinModalOverlay
+          pinModal={pinModal}
+          pinInput={pinInput}
+          setPinInput={setPinInput}
+          pinError={pinError}
+          onSubmit={submitPin}
+          onCancel={cancelPinModal}
+          onForgot={forgotPin}
+        />
+        <BiometricOfferOverlay
+          mechanic={offerBiometric}
+          onEnable={async () => {
+            const name = offerBiometric;
+            setOfferBiometric(null);
+            try {
+              await registerBiometric(name);
+            } catch (e) {
+              // ignore — user can enable it later from the board
+            }
+          }}
+          onSkip={() => setOfferBiometric(null)}
+        />
         <div className="max-w-3xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
             ← Back to board
@@ -883,6 +1314,28 @@ function App() {
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} />
+        <PinModalOverlay
+          pinModal={pinModal}
+          pinInput={pinInput}
+          setPinInput={setPinInput}
+          pinError={pinError}
+          onSubmit={submitPin}
+          onCancel={cancelPinModal}
+          onForgot={forgotPin}
+        />
+        <BiometricOfferOverlay
+          mechanic={offerBiometric}
+          onEnable={async () => {
+            const name = offerBiometric;
+            setOfferBiometric(null);
+            try {
+              await registerBiometric(name);
+            } catch (e) {
+              // ignore — user can enable it later from the board
+            }
+          }}
+          onSkip={() => setOfferBiometric(null)}
+        />
         <div className="max-w-2xl mx-auto">
           <div className="flex items-center justify-between mb-6 no-print">
             <button onClick={() => setScreen('unit')} className="font-display text-xs uppercase tracking-wider focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>

@@ -68,3 +68,24 @@ write data (no login required) — this matches how the app works today,
 where mechanics just pick their name from a list. Fine for an internal
 tool, but be mindful about who you share the link with. If you ever want
 it locked down further, let me know and we can add that.
+
+## PIN codes & Face ID / Touch ID
+
+Each mechanic sets a 4-digit PIN the first time they tap their name (existing
+mechanics will be asked to set one the next time they sign in too). This
+keeps people from accidentally tapping into a coworker's name on the shared
+tablet.
+
+On a mechanic's own phone, after entering their PIN once, they'll be offered
+the option to use Face ID / Touch ID instead next time — this is a
+per-device shortcut only, not shared across phones. It can be turned on or
+off anytime from "Enable/Turn off Face ID" on the board.
+
+**Forgot a PIN?** Tap their name, then "Forgot PIN? Reset it" — this clears
+their PIN and lets them set a new one immediately. There's no email/password
+recovery since the app doesn't use accounts.
+
+**Honest security note:** this is a convenience/deterrence feature, not
+full-strength security — the database itself doesn't require login to reach
+directly. It's meant to prevent mix-ups on a shared device, not to defend
+against someone determined to get in another way.
