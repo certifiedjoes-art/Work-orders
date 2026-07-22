@@ -126,3 +126,30 @@ that helps the app work offline. From now on, whenever I hand you an
 updated `index.html`, I'll also bump a version number inside `sw.js` —
 **always upload both files together** when I mention `sw.js` changed, or
 phones can get stuck on an old cached version again.
+
+## Timesheets
+
+Every mechanic gets a "⏱️ Time Clock" button on the dashboard to:
+- Clock in / clock out for the day
+- Start/end a lunch break
+- Log which units or jobs they worked on with hours (free text — works for
+  unit numbers, "Labour," "Shop cleanup," anything)
+- Edit their own past shifts if they made a mistake
+
+**Mechanics can only see their own timesheet** — there's no way for them
+to view anyone else's hours.
+
+**Admins** (just Joe right now) get a separate "📊 Timesheets" screen to:
+- View everyone's shifts, filterable by person and date range
+- See total hours per person
+- Tap "Export & Share" to generate a CSV and open the share sheet
+  (choose Mail, and it'll come through as an attachment ready to send)
+
+There's also an email address field and an "automatic weekly email"
+toggle in that screen — the toggle is there and ready, but actually
+sending automatically needs one more setup step (a small backend + email
+service) whenever you're ready to take that on.
+
+**One rule mechanics need to know**: the app won't let them clock out for
+the day without either logging a lunch break or confirming they worked
+through it — a popup handles this automatically.

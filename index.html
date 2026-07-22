@@ -317,6 +317,25 @@ function fmtDate(d) {
   return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function fmtTime(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+// Total paid hours for a shift: clock-in to clock-out, minus any lunch break.
+function entryHours(entry) {
+  if (!entry.clockIn || !entry.clockOut) return 0;
+  let ms = new Date(entry.clockOut) - new Date(entry.clockIn);
+  if (entry.lunchStart && entry.lunchEnd) {
+    ms -= new Date(entry.lunchEnd) - new Date(entry.lunchStart);
+  }
+  return Math.max(0, ms / 1000 / 60 / 60);
+}
+
+function fmtHours(h) {
+  return h.toFixed(2).replace(/\.00$/, '');
+}
+
 // Resize + compress a photo before storing it, so the shared database stays fast
 // to sync over a mechanic's cell signal out in the field.
 function compressImage(file, maxDim = 1280, quality = 0.7) {
@@ -363,6 +382,14 @@ async function savePins(pins) {
 
 async function saveAdmins(admins) {
   try { await firebase.database().ref('admins').set(admins); } catch (e) { console.error('save admins failed', e); }
+}
+
+async function saveTimesheets(timesheets) {
+  try { await firebase.database().ref('timesheets').set(timesheets); } catch (e) { console.error('save timesheets failed', e); }
+}
+
+async function saveTimesheetSettings(settings) {
+  try { await firebase.database().ref('timesheetSettings').set(settings); } catch (e) { console.error('save timesheet settings failed', e); }
 }
 
 // One-way hash so raw PINs are never stored or sent anywhere in plain text.
@@ -598,6 +625,32 @@ function App() {
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(null);
   const [editingTemplateId, setEditingTemplateId] = useState(null);
   const [showAdHocChecklist, setShowAdHocChecklist] = useState(false);
+  const [timesheets, setTimesheets] = useState(() => cacheGet('timesheets', []));
+  const [timesheetSettings, setTimesheetSettings] = useState({ email: '', autoEmail: false });
+  const [lunchPrompt, setLunchPrompt] = useState(false);
+  const [editingEntryId, setEditingEntryId] = useState(null);
+  const [tsFilterMechanic, setTsFilterMechanic] = useState('');
+  const [tsFilterStart, setTsFilterStart] = useState('');
+  const [tsFilterEnd, setTsFilterEnd] = useState('');
+  const [tsEmailDraft, setTsEmailDraft] = useState(null);
+
+  useEffect(() => {
+    const tsRef = firebase.database().ref('timesheets');
+    const onTs = tsRef.on('value', (snap) => {
+      const val = snap.val() || [];
+      setTimesheets(val);
+      cacheSet('timesheets', val);
+    });
+    return () => tsRef.off('value', onTs);
+  }, []);
+
+  useEffect(() => {
+    const settingsRef = firebase.database().ref('timesheetSettings');
+    const onSettings = settingsRef.on('value', (snap) => {
+      setTimesheetSettings(snap.val() || { email: '', autoEmail: false });
+    });
+    return () => settingsRef.off('value', onSettings);
+  }, []);
 
   useEffect(() => {
     const connectedRef = firebase.database().ref('.info/connected');
@@ -940,6 +993,129 @@ function App() {
     await saveAdmins(nextAdmins);
   };
 
+  const persistTimesheets = async (next) => {
+    setTimesheets(next);
+    await saveTimesheets(next);
+  };
+
+  const todayStr = () => new Date().toISOString().slice(0, 10);
+
+  // The "open" entry for the current mechanic today: clocked in but not yet clocked out.
+  const openEntry = timesheets.find((t) => t.mechanic === currentMechanic && t.date === todayStr() && !t.clockOut);
+
+  const clockIn = async () => {
+    const entry = {
+      id: uid(),
+      mechanic: currentMechanic,
+      date: todayStr(),
+      clockIn: new Date().toISOString(),
+      lunchStart: null,
+      lunchEnd: null,
+      skippedLunch: false,
+      clockOut: null,
+      jobs: [],
+    };
+    await persistTimesheets([...timesheets, entry]);
+  };
+
+  const startLunch = async () => {
+    if (!openEntry) return;
+    const next = timesheets.map((t) => (t.id === openEntry.id ? { ...t, lunchStart: new Date().toISOString() } : t));
+    await persistTimesheets(next);
+  };
+
+  const endLunch = async () => {
+    if (!openEntry) return;
+    const next = timesheets.map((t) => (t.id === openEntry.id ? { ...t, lunchEnd: new Date().toISOString() } : t));
+    await persistTimesheets(next);
+  };
+
+  const clockOut = async (skippedLunch) => {
+    if (!openEntry) return;
+    const next = timesheets.map((t) =>
+      t.id === openEntry.id ? { ...t, clockOut: new Date().toISOString(), skippedLunch: !!skippedLunch } : t
+    );
+    await persistTimesheets(next);
+    setLunchPrompt(false);
+  };
+
+  const attemptClockOut = () => {
+    if (!openEntry) return;
+    const hasLunch = openEntry.lunchStart && openEntry.lunchEnd;
+    if (!hasLunch && !openEntry.skippedLunch) {
+      setLunchPrompt(true);
+      return;
+    }
+    clockOut(openEntry.skippedLunch);
+  };
+
+  const addTimesheetJob = async (entryId, unit, hours) => {
+    const trimmedUnit = unit.trim();
+    const parsedHours = parseFloat(hours);
+    if (!trimmedUnit || !parsedHours || parsedHours <= 0) return;
+    const next = timesheets.map((t) =>
+      t.id === entryId ? { ...t, jobs: [...(t.jobs || []), { id: uid(), unit: trimmedUnit, hours: parsedHours }] } : t
+    );
+    await persistTimesheets(next);
+  };
+
+  const removeTimesheetJob = async (entryId, jobId) => {
+    const next = timesheets.map((t) =>
+      t.id === entryId ? { ...t, jobs: (t.jobs || []).filter((j) => j.id !== jobId) } : t
+    );
+    await persistTimesheets(next);
+  };
+
+  const updateTimesheetEntry = async (entryId, patch) => {
+    const next = timesheets.map((t) => (t.id === entryId ? { ...t, ...patch } : t));
+    await persistTimesheets(next);
+  };
+
+  const deleteTimesheetEntry = async (entryId) => {
+    await persistTimesheets(timesheets.filter((t) => t.id !== entryId));
+  };
+
+  const exportTimesheets = async (entries) => {
+    const rows = [['Mechanic', 'Date', 'Clock In', 'Clock Out', 'Lunch Start', 'Lunch End', 'Worked Through Lunch', 'Paid Hours', 'Jobs (unit: hours)']];
+    entries.forEach((e) => {
+      const jobsStr = (e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`).join(' | ');
+      rows.push([
+        e.mechanic,
+        e.date,
+        fmtTime(e.clockIn),
+        fmtTime(e.clockOut),
+        fmtTime(e.lunchStart),
+        fmtTime(e.lunchEnd),
+        e.skippedLunch ? 'Yes' : 'No',
+        fmtHours(entryHours(e)),
+        jobsStr,
+      ]);
+    });
+    const csv = rows.map((r) => r.map((cell) => `"${String(cell || '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const filename = `timesheets-${todayStr()}.csv`;
+    const file = new File([csv], filename, { type: 'text/csv' });
+
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: 'Timesheets export',
+          text: timesheetSettings.email ? `Timesheets for ${timesheetSettings.email}` : 'Timesheets export',
+        });
+        return;
+      } catch (e) {
+        // user cancelled the share sheet — fall through to download
+      }
+    }
+    // Fallback: plain download if sharing isn't available on this device
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const addUnit = async () => {
     const name = newUnitName.trim();
     if (!name || units.includes(name)) return;
@@ -1201,7 +1377,23 @@ function App() {
               <p className="font-display text-xs uppercase tracking-[0.3em] mb-2" style={{ color: COLORS.accent }}>Harder Contracting</p>
               <h1 className="font-display text-3xl sm:text-4xl font-bold">Board</h1>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap justify-end">
+              <button
+                onClick={() => setScreen('timeclock')}
+                className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
+                style={{ color: openEntry ? '#1B1F19' : COLORS.accent, background: openEntry ? COLORS.accent : COLORS.surface, border: `1px solid ${COLORS.line}` }}
+              >
+                ⏱️ {openEntry ? 'Clocked In' : 'Time Clock'}
+              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => setScreen('timesheets')}
+                  className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
+                  style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+                >
+                  📊 Timesheets
+                </button>
+              )}
               {isAdmin && (
                 <button
                   onClick={() => setScreen('team')}
@@ -1421,6 +1613,265 @@ function App() {
     );
   }
 
+
+  // ---------- TIME CLOCK ----------
+  if (screen === 'timeclock') {
+    const myEntries = timesheets
+      .filter((t) => t.mechanic === currentMechanic)
+      .slice()
+      .sort((a, b) => b.date.localeCompare(a.date) || (b.clockIn || '').localeCompare(a.clockIn || ''));
+    const onLunch = openEntry && openEntry.lunchStart && !openEntry.lunchEnd;
+
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
+        {FONT_STYLE}
+        <OfflineBanner isOnline={isOnline} />
+        <div className="max-w-2xl mx-auto">
+          <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
+            ← Back to board
+          </button>
+          <h1 className="font-display text-3xl font-bold mb-2">Time Clock</h1>
+          <p className="text-sm mb-8" style={{ color: COLORS.inkDim }}>{currentMechanic}</p>
+
+          {/* Current status card */}
+          <div className="rounded-lg p-6 mb-8 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+            {!openEntry ? (
+              <React.Fragment>
+                <p className="text-base mb-5" style={{ color: COLORS.inkDim }}>Not clocked in</p>
+                <Btn onClick={clockIn}>Clock In</Btn>
+              </React.Fragment>
+            ) : (
+              <React.Fragment>
+                <p className="font-mono text-sm mb-1" style={{ color: COLORS.inkDim }}>Clocked in at</p>
+                <p className="font-display text-2xl font-bold mb-5">{fmtTime(openEntry.clockIn)}</p>
+
+                {onLunch ? (
+                  <React.Fragment>
+                    <p className="text-sm mb-4" style={{ color: COLORS.progress }}>🍽️ On lunch since {fmtTime(openEntry.lunchStart)}</p>
+                    <Btn onClick={endLunch}>End Lunch</Btn>
+                  </React.Fragment>
+                ) : (
+                  <div className="flex flex-col gap-3 items-center">
+                    {openEntry.lunchStart && openEntry.lunchEnd && (
+                      <p className="text-xs font-mono" style={{ color: COLORS.inkDim }}>
+                        Lunch: {fmtTime(openEntry.lunchStart)} – {fmtTime(openEntry.lunchEnd)}
+                      </p>
+                    )}
+                    <div className="flex gap-3">
+                      {!openEntry.lunchStart && (
+                        <Btn variant="ghost" onClick={startLunch}>Start Lunch</Btn>
+                      )}
+                      <Btn onClick={attemptClockOut}>Clock Out</Btn>
+                    </div>
+                  </div>
+                )}
+              </React.Fragment>
+            )}
+          </div>
+
+          {lunchPrompt && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.75)' }}>
+              <div className="w-full max-w-xs rounded-2xl p-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+                <p className="font-display text-lg font-bold mb-3 text-center">No lunch logged today</p>
+                <p className="text-sm mb-5 text-center" style={{ color: COLORS.inkDim }}>
+                  Go back and tap "Start Lunch" / "End Lunch" if you took one, or confirm you worked through lunch.
+                </p>
+                <div className="flex flex-col gap-2">
+                  <Btn variant="ghost" onClick={() => setLunchPrompt(false)}>Go back</Btn>
+                  <Btn variant="danger" onClick={() => clockOut(true)}>I worked through lunch — clock out</Btn>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Jobs worked on today */}
+          {openEntry && (
+            <div className="mb-8">
+              <h2 className="font-display text-lg font-semibold uppercase tracking-wide mb-4">What did you work on?</h2>
+              <TimesheetJobsEditor entry={openEntry} onAdd={addTimesheetJob} onRemove={removeTimesheetJob} />
+            </div>
+          )}
+
+          {/* Past entries */}
+          <h2 className="font-display text-lg font-semibold uppercase tracking-wide mb-4">Your recent shifts</h2>
+          {myEntries.length === 0 ? (
+            <p className="text-sm" style={{ color: COLORS.line }}>No shifts logged yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {myEntries.map((entry) => (
+                <TimesheetEntryCard
+                  key={entry.id}
+                  entry={entry}
+                  isEditing={editingEntryId === entry.id}
+                  onEdit={() => setEditingEntryId(entry.id)}
+                  onCancelEdit={() => setEditingEntryId(null)}
+                  onSave={async (patch) => {
+                    await updateTimesheetEntry(entry.id, patch);
+                    setEditingEntryId(null);
+                  }}
+                  onAddJob={addTimesheetJob}
+                  onRemoveJob={removeTimesheetJob}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- TIMESHEETS (admin only) ----------
+  if (screen === 'timesheets') {
+    if (!isAdmin) {
+      return (
+        <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8 flex items-center justify-center">
+          {FONT_STYLE}
+          <div className="text-center">
+            <p className="font-display text-lg font-bold mb-4">Admins only</p>
+            <Btn onClick={() => setScreen('dashboard')}>Back to board</Btn>
+          </div>
+        </div>
+      );
+    }
+
+    const filtered = timesheets.filter((t) => {
+      if (tsFilterMechanic && t.mechanic !== tsFilterMechanic) return false;
+      if (tsFilterStart && t.date < tsFilterStart) return false;
+      if (tsFilterEnd && t.date > tsFilterEnd) return false;
+      return true;
+    }).slice().sort((a, b) => b.date.localeCompare(a.date));
+
+    const totalsByMechanic = {};
+    filtered.forEach((e) => {
+      totalsByMechanic[e.mechanic] = (totalsByMechanic[e.mechanic] || 0) + entryHours(e);
+    });
+
+    const emailValue = tsEmailDraft !== null ? tsEmailDraft : (timesheetSettings.email || '');
+
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
+        {FONT_STYLE}
+        <OfflineBanner isOnline={isOnline} />
+        <div className="max-w-3xl mx-auto">
+          <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
+            ← Back to board
+          </button>
+          <h1 className="font-display text-3xl font-bold mb-8">Timesheets</h1>
+
+          {/* Email settings */}
+          <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+            <h2 className="font-display text-sm font-bold uppercase tracking-wide mb-3">Report email</h2>
+            <div className="flex gap-2 mb-4">
+              <input
+                value={emailValue}
+                onChange={(e) => setTsEmailDraft(e.target.value)}
+                placeholder="payroll@yourcompany.com"
+                type="email"
+                className="flex-1 rounded-lg px-4 py-2.5 text-base focus:outline-none focus:ring-2"
+                style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+              />
+              <Btn
+                onClick={async () => {
+                  await saveTimesheetSettings({ ...timesheetSettings, email: emailValue });
+                  setTsEmailDraft(null);
+                }}
+              >
+                Save
+              </Btn>
+            </div>
+            <label className="flex items-center justify-between gap-3 cursor-pointer">
+              <div>
+                <span className="text-sm font-semibold block" style={{ color: COLORS.ink }}>Send automatically every week</span>
+                <span className="text-xs" style={{ color: COLORS.line }}>Needs one more setup step — ask Claude when you're ready</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={!!timesheetSettings.autoEmail}
+                onChange={(e) => saveTimesheetSettings({ ...timesheetSettings, autoEmail: e.target.checked })}
+                className="w-5 h-5"
+                style={{ accentColor: COLORS.accent }}
+              />
+            </label>
+          </div>
+
+          {/* Filters */}
+          <div className="rounded-lg p-5 mb-6" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <select
+                value={tsFilterMechanic}
+                onChange={(e) => setTsFilterMechanic(e.target.value)}
+                className="rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+              >
+                <option value="">Everyone</option>
+                {mechanics.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <input
+                type="date"
+                value={tsFilterStart}
+                onChange={(e) => setTsFilterStart(e.target.value)}
+                className="rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
+                style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+              />
+              <input
+                type="date"
+                value={tsFilterEnd}
+                onChange={(e) => setTsFilterEnd(e.target.value)}
+                className="rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
+                style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-display text-lg font-semibold uppercase tracking-wide">Totals</h2>
+            <Btn variant="ghost" onClick={() => exportTimesheets(filtered)}>📤 Export & Share</Btn>
+          </div>
+
+          {Object.keys(totalsByMechanic).length === 0 ? (
+            <p className="text-sm mb-8" style={{ color: COLORS.line }}>No shifts in this range.</p>
+          ) : (
+            <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+              {Object.entries(totalsByMechanic).map(([name, hours]) => (
+                <div key={name} className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                  <span className="font-display font-semibold">{name}</span>
+                  <span className="font-mono">{fmtHours(hours)} hrs</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <h2 className="font-display text-lg font-semibold uppercase tracking-wide mb-4">All shifts</h2>
+          {filtered.length === 0 ? (
+            <p className="text-sm" style={{ color: COLORS.line }}>Nothing to show yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {filtered.map((entry) => (
+                <div key={entry.id} className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-display font-semibold">{entry.mechanic}</span>
+                    <span className="font-mono text-sm" style={{ color: COLORS.inkDim }}>{fmtDate(entry.date)}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-4 text-xs font-mono mb-2" style={{ color: COLORS.inkDim }}>
+                    <span>In {fmtTime(entry.clockIn)}</span>
+                    <span>Out {entry.clockOut ? fmtTime(entry.clockOut) : '—'}</span>
+                    {entry.lunchStart && entry.lunchEnd && <span>Lunch {fmtTime(entry.lunchStart)}–{fmtTime(entry.lunchEnd)}</span>}
+                    {entry.skippedLunch && <span>No lunch taken</span>}
+                    <span className="font-bold" style={{ color: COLORS.accent }}>{fmtHours(entryHours(entry))} hrs</span>
+                  </div>
+                  {(entry.jobs || []).length > 0 && (
+                    <p className="text-xs" style={{ color: COLORS.line }}>
+                      {entry.jobs.map((j) => `${j.unit} (${j.hours}h)`).join(' • ')}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   // ---------- TEAM (admin only) ----------
   if (screen === 'team') {
@@ -1992,6 +2443,131 @@ function NewTemplateForm({ onSubmit, onCancel, initialName, initialItemsText, is
         <Btn onClick={() => name.trim() && itemsText.trim() && onSubmit(name, itemsText)}>{isEdit ? 'Save changes' : 'Save checklist'}</Btn>
         <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
       </div>
+    </div>
+  );
+}
+
+function TimesheetJobsEditor({ entry, onAdd, onRemove }) {
+  const [unit, setUnit] = useState('');
+  const [hours, setHours] = useState('');
+
+  return (
+    <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      {(entry.jobs || []).length > 0 && (
+        <div className="space-y-2 mb-4">
+          {entry.jobs.map((j) => (
+            <div key={j.id} className="flex items-center justify-between rounded-lg px-4 py-2.5" style={{ background: COLORS.surfaceRaised }}>
+              <span className="font-mono text-sm">{j.unit} — {j.hours}h</span>
+              <button onClick={() => onRemove(entry.id, j.id)} className="text-sm" style={{ color: '#E07A5F' }}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <input
+          value={unit}
+          onChange={(e) => setUnit(e.target.value)}
+          placeholder="Unit # or job (e.g. Labour, Shop cleanup)"
+          className="flex-1 rounded-lg px-4 py-2.5 text-base focus:outline-none focus:ring-2"
+          style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+        />
+        <input
+          value={hours}
+          onChange={(e) => setHours(e.target.value)}
+          placeholder="Hrs"
+          type="number"
+          step="0.25"
+          className="w-20 rounded-lg px-3 py-2.5 text-base font-mono focus:outline-none focus:ring-2"
+          style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+        />
+        <Btn
+          onClick={() => {
+            if (unit.trim() && parseFloat(hours) > 0) {
+              onAdd(entry.id, unit, hours);
+              setUnit('');
+              setHours('');
+            }
+          }}
+        >
+          Add
+        </Btn>
+      </div>
+    </div>
+  );
+}
+
+function TimesheetEntryCard({ entry, isEditing, onEdit, onCancelEdit, onSave, onAddJob, onRemoveJob }) {
+  const toLocalInput = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const [clockIn, setClockIn] = useState(toLocalInput(entry.clockIn));
+  const [clockOut, setClockOut] = useState(toLocalInput(entry.clockOut));
+  const [lunchStart, setLunchStart] = useState(toLocalInput(entry.lunchStart));
+  const [lunchEnd, setLunchEnd] = useState(toLocalInput(entry.lunchEnd));
+
+  if (isEditing) {
+    return (
+      <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
+        <p className="font-display font-semibold mb-4">{fmtDate(entry.date)}</p>
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <label className="block">
+            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock in</span>
+            <input type="datetime-local" value={clockIn} onChange={(e) => setClockIn(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+          </label>
+          <label className="block">
+            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock out</span>
+            <input type="datetime-local" value={clockOut} onChange={(e) => setClockOut(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+          </label>
+          <label className="block">
+            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Lunch start</span>
+            <input type="datetime-local" value={lunchStart} onChange={(e) => setLunchStart(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+          </label>
+          <label className="block">
+            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Lunch end</span>
+            <input type="datetime-local" value={lunchEnd} onChange={(e) => setLunchEnd(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+          </label>
+        </div>
+        <TimesheetJobsEditor entry={entry} onAdd={onAddJob} onRemove={onRemoveJob} />
+        <div className="flex gap-2 mt-4">
+          <Btn
+            onClick={() =>
+              onSave({
+                clockIn: clockIn ? new Date(clockIn).toISOString() : null,
+                clockOut: clockOut ? new Date(clockOut).toISOString() : null,
+                lunchStart: lunchStart ? new Date(lunchStart).toISOString() : null,
+                lunchEnd: lunchEnd ? new Date(lunchEnd).toISOString() : null,
+              })
+            }
+          >
+            Save changes
+          </Btn>
+          <Btn variant="ghost" onClick={onCancelEdit}>Cancel</Btn>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="font-display font-semibold">{fmtDate(entry.date)}</span>
+        <button onClick={onEdit} className="text-xs underline" style={{ color: COLORS.accent }}>Edit</button>
+      </div>
+      <div className="flex flex-wrap gap-4 text-xs font-mono mb-2" style={{ color: COLORS.inkDim }}>
+        <span>In {fmtTime(entry.clockIn)}</span>
+        <span>Out {entry.clockOut ? fmtTime(entry.clockOut) : '—'}</span>
+        {entry.lunchStart && entry.lunchEnd && <span>Lunch {fmtTime(entry.lunchStart)}–{fmtTime(entry.lunchEnd)}</span>}
+        {entry.skippedLunch && <span>No lunch taken</span>}
+        {entry.clockOut && <span className="font-bold" style={{ color: COLORS.accent }}>{fmtHours(entryHours(entry))} hrs</span>}
+      </div>
+      {(entry.jobs || []).length > 0 && (
+        <p className="text-xs" style={{ color: COLORS.line }}>
+          {entry.jobs.map((j) => `${j.unit} (${j.hours}h)`).join(' • ')}
+        </p>
+      )}
     </div>
   );
 }
