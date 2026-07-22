@@ -89,3 +89,22 @@ recovery since the app doesn't use accounts.
 full-strength security — the database itself doesn't require login to reach
 directly. It's meant to prevent mix-ups on a shared device, not to defend
 against someone determined to get in another way.
+
+## Team management (admin only)
+
+Joe is set up as the first admin. Admins see a "⚙️ Team" button on the
+dashboard where they can:
+- Promote/demote other admins
+- Remove someone from the team (e.g. when employment ends) — this removes
+  their name and PIN so they can no longer sign in, but keeps all their
+  past work orders on record for history
+
+You can't remove or demote yourself from the Team screen (to avoid
+accidentally locking yourself out) — ask another admin if you ever need
+that changed.
+
+## Editable checklists
+
+All checklists — including the built-in machine ones (Buncher, Excavator,
+Crawler, Processor, Skidder) — can now be edited from the Checklists page.
+Tap "Edit" on any checklist to change its name or steps.

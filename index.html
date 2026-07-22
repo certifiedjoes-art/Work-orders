@@ -341,6 +341,10 @@ async function savePins(pins) {
   try { await firebase.database().ref('pins').set(pins); } catch (e) { console.error('save pins failed', e); }
 }
 
+async function saveAdmins(admins) {
+  try { await firebase.database().ref('admins').set(admins); } catch (e) { console.error('save admins failed', e); }
+}
+
 // One-way hash so raw PINs are never stored or sent anywhere in plain text.
 async function sha256Hex(text) {
   const enc = new TextEncoder().encode(text);
@@ -566,6 +570,9 @@ function App() {
   const [offerBiometric, setOfferBiometric] = useState(null);
   const [bioMsg, setBioMsg] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [admins, setAdmins] = useState([]);
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(null);
+  const [editingTemplateId, setEditingTemplateId] = useState(null);
 
   useEffect(() => {
     const connectedRef = firebase.database().ref('.info/connected');
@@ -581,6 +588,21 @@ function App() {
       setPins(snap.val() || {});
     });
     return () => pinsRef.off('value', onPins);
+  }, []);
+
+  useEffect(() => {
+    const adminsRef = firebase.database().ref('admins');
+    const onAdmins = adminsRef.on('value', (snap) => {
+      const val = snap.val();
+      if (val && val.length > 0) {
+        setAdmins(val);
+      } else {
+        // Seed the very first admin so someone can always manage the team.
+        adminsRef.set(['Joe']);
+        setAdmins(['Joe']);
+      }
+    });
+    return () => adminsRef.off('value', onAdmins);
   }, []);
 
   useEffect(() => {
@@ -774,6 +796,15 @@ function App() {
     setConfirmDeleteTemplate(null);
   };
 
+  const updateTemplate = async (id, name, itemsText) => {
+    const trimmedName = name.trim();
+    const items = itemsText.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (!trimmedName || items.length === 0) return;
+    const next = templates.map((t) => (t.id === id ? { ...t, name: trimmedName, items } : t));
+    await persistTemplates(next);
+    setEditingTemplateId(null);
+  };
+
   const attachChecklist = async (orderId, templateId) => {
     const template = templates.find((t) => t.id === templateId);
     if (!template) return;
@@ -815,6 +846,28 @@ function App() {
     // New mechanics set up a PIN before their name is added to the board —
     // persistMeta happens once PIN setup completes, in submitPin().
     setPinModal({ mode: 'setup', mechanic: name, stage: 'first', firstEntry: '' });
+  };
+
+  const isAdmin = admins.includes(currentMechanic);
+
+  const removeMechanic = async (name) => {
+    const nextMechanics = mechanics.filter((m) => m !== name);
+    await persistMeta(nextMechanics, units);
+    const nextPins = { ...pins };
+    delete nextPins[name];
+    await persistPins(nextPins);
+    if (admins.includes(name)) {
+      const nextAdmins = admins.filter((a) => a !== name);
+      setAdmins(nextAdmins);
+      await saveAdmins(nextAdmins);
+    }
+    setShowRemoveConfirm(null);
+  };
+
+  const toggleAdmin = async (name) => {
+    const nextAdmins = admins.includes(name) ? admins.filter((a) => a !== name) : [...admins, name];
+    setAdmins(nextAdmins);
+    await saveAdmins(nextAdmins);
   };
 
   const addUnit = async () => {
@@ -1079,6 +1132,15 @@ function App() {
               <h1 className="font-display text-3xl sm:text-4xl font-bold">Board</h1>
             </div>
             <div className="flex items-center gap-3">
+              {isAdmin && (
+                <button
+                  onClick={() => setScreen('team')}
+                  className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
+                  style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+                >
+                  ⚙️ Team
+                </button>
+              )}
               <button
                 onClick={() => setScreen('checklists')}
                 className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
@@ -1290,6 +1352,93 @@ function App() {
   }
 
 
+  // ---------- TEAM (admin only) ----------
+  if (screen === 'team') {
+    if (!isAdmin) {
+      return (
+        <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8 flex items-center justify-center">
+          {FONT_STYLE}
+          <div className="text-center">
+            <p className="font-display text-lg font-bold mb-4">Admins only</p>
+            <Btn onClick={() => setScreen('dashboard')}>Back to board</Btn>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
+        {FONT_STYLE}
+        <OfflineBanner isOnline={isOnline} />
+        <div className="max-w-2xl mx-auto">
+          <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
+            ← Back to board
+          </button>
+          <h1 className="font-display text-3xl font-bold mb-2">Team</h1>
+          <p className="text-sm mb-8" style={{ color: COLORS.inkDim }}>
+            Manage who can sign in, and who has admin access like you.
+          </p>
+
+          <div className="space-y-3">
+            {mechanics.map((m) => {
+              const isSelf = m === currentMechanic;
+              const mIsAdmin = admins.includes(m);
+              return (
+                <div key={m} className="rounded-lg p-4" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <div className="flex items-center gap-2">
+                      <p className="font-display font-bold text-lg">{m}</p>
+                      {mIsAdmin && (
+                        <span
+                          className="text-xs font-display font-bold uppercase tracking-wide px-2 py-0.5 rounded-full"
+                          style={{ background: COLORS.accent, color: '#1B1F19' }}
+                        >
+                          Admin
+                        </span>
+                      )}
+                      {isSelf && <span className="text-xs" style={{ color: COLORS.inkDim }}>(you)</span>}
+                    </div>
+                  </div>
+
+                  {showRemoveConfirm === m ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm" style={{ color: COLORS.inkDim }}>Remove {m}? Their past work orders stay on record.</span>
+                      <Btn variant="danger" onClick={() => removeMechanic(m)}>Yes, remove</Btn>
+                      <Btn variant="ghost" onClick={() => setShowRemoveConfirm(null)}>Cancel</Btn>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      {!isSelf && (
+                        <button
+                          onClick={() => toggleAdmin(m)}
+                          className="text-xs font-display uppercase tracking-wider font-semibold px-3 py-2 rounded-lg"
+                          style={{ color: COLORS.inkDim, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}
+                        >
+                          {mIsAdmin ? 'Remove admin' : 'Make admin'}
+                        </button>
+                      )}
+                      {!isSelf && (
+                        <button
+                          onClick={() => setShowRemoveConfirm(m)}
+                          className="text-xs font-display uppercase tracking-wider font-semibold px-3 py-2 rounded-lg"
+                          style={{ color: '#E07A5F', background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}
+                        >
+                          Remove from team
+                        </button>
+                      )}
+                      {isSelf && (
+                        <span className="text-xs" style={{ color: COLORS.line }}>Ask another admin to change your access</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ---------- CHECKLIST TEMPLATES ----------
   if (screen === 'checklists') {
     return (
@@ -1340,6 +1489,18 @@ function App() {
             <div className="space-y-4">
               {templates.map((t) => {
                 const isDefault = ['buncher-b4', 'excavator-ex1', 'crawler', 'processor', 'skidder'].includes(t.id);
+                if (editingTemplateId === t.id) {
+                  return (
+                    <NewTemplateForm
+                      key={t.id}
+                      isEdit
+                      initialName={t.name}
+                      initialItemsText={t.items.join('\n')}
+                      onCancel={() => setEditingTemplateId(null)}
+                      onSubmit={(name, itemsText) => updateTemplate(t.id, name, itemsText)}
+                    />
+                  );
+                }
                 return (
                   <div key={t.id} className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
                     <div className="flex items-start justify-between gap-3 mb-3">
@@ -1347,15 +1508,24 @@ function App() {
                         <p className="font-display font-bold text-lg">{t.name}</p>
                         <p className="text-sm" style={{ color: COLORS.line }}>{t.items.length} steps</p>
                       </div>
-                      {!isDefault && (
-                        <button 
-                          onClick={() => setConfirmDeleteTemplate(confirmDeleteTemplate === t.id ? null : t.id)} 
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => setEditingTemplateId(t.id)}
                           className="text-xs font-display uppercase tracking-wider hover:opacity-70"
-                          style={{ color: '#D6604A' }}
+                          style={{ color: COLORS.accent }}
                         >
-                          {confirmDeleteTemplate === t.id ? '✕ Close' : 'Delete'}
+                          Edit
                         </button>
-                      )}
+                        {!isDefault && (
+                          <button 
+                            onClick={() => setConfirmDeleteTemplate(confirmDeleteTemplate === t.id ? null : t.id)} 
+                            className="text-xs font-display uppercase tracking-wider hover:opacity-70"
+                            style={{ color: '#D6604A' }}
+                          >
+                            {confirmDeleteTemplate === t.id ? '✕ Close' : 'Delete'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>
                       {t.items.slice(0, 3).join(' • ')}
@@ -1704,12 +1874,12 @@ function App() {
   return null;
 }
 
-function NewTemplateForm({ onSubmit, onCancel }) {
-  const [name, setName] = useState('');
-  const [itemsText, setItemsText] = useState('');
+function NewTemplateForm({ onSubmit, onCancel, initialName, initialItemsText, isEdit }) {
+  const [name, setName] = useState(initialName || '');
+  const [itemsText, setItemsText] = useState(initialItemsText || '');
   return (
     <div className="rounded-lg p-6 mb-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
-      <h3 className="font-display text-lg font-bold mb-4">Create a new checklist</h3>
+      <h3 className="font-display text-lg font-bold mb-4">{isEdit ? 'Edit checklist' : 'Create a new checklist'}</h3>
       <TextField label="What's this checklist for?" value={name} onChange={setName} placeholder="e.g. Engine rebuild, Pre-shift inspection" helper="Give it a clear, descriptive name" />
       <label className="block mb-4">
         <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>Steps to complete</span>
@@ -1724,7 +1894,7 @@ function NewTemplateForm({ onSubmit, onCancel }) {
         />
       </label>
       <div className="flex gap-2">
-        <Btn onClick={() => name.trim() && itemsText.trim() && onSubmit(name, itemsText)}>Save checklist</Btn>
+        <Btn onClick={() => name.trim() && itemsText.trim() && onSubmit(name, itemsText)}>{isEdit ? 'Save changes' : 'Save checklist'}</Btn>
         <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
       </div>
     </div>
