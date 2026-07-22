@@ -835,51 +835,76 @@ function App() {
     setEditingTemplateId(null);
   };
 
+  // A work order can hold several checklists at once (e.g. the standard
+  // summer checklist plus an off-season repair checklist). Older orders
+  // saved before this existed have a single `checklist` field instead of
+  // a `checklists` array — this helper reads either shape transparently.
+  const getChecklists = (order) => {
+    if (order.checklists) return order.checklists;
+    if (order.checklist) return [{ id: 'legacy', ...order.checklist }];
+    return [];
+  };
+
   const attachChecklist = async (orderId, templateId) => {
     const template = templates.find((t) => t.id === templateId);
     if (!template) return;
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return;
     const checklist = {
+      id: uid(),
       templateId: template.id,
       templateName: template.name,
       items: template.items.map((text) => ({ id: uid(), text, checked: false, checkedBy: null, checkedAt: null })),
     };
-    await updateOrder(orderId, { checklist });
+    const nextChecklists = [...getChecklists(order), checklist];
+    await updateOrder(orderId, { checklists: nextChecklists, checklist: null });
     setAttachTemplateId('');
   };
 
-  const detachChecklist = async (orderId) => {
-    await updateOrder(orderId, { checklist: null });
+  const detachChecklist = async (orderId, checklistId) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return;
+    const nextChecklists = getChecklists(order).filter((c) => c.id !== checklistId);
+    await updateOrder(orderId, { checklists: nextChecklists, checklist: null });
   };
 
   const createAdHocChecklist = async (orderId, name, itemsText, saveAsTemplate) => {
     const trimmedName = name.trim();
     const items = itemsText.split('\n').map((l) => l.trim()).filter(Boolean);
     if (!trimmedName || items.length === 0) return;
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return;
     const checklist = {
+      id: uid(),
       templateId: null,
       templateName: trimmedName,
       items: items.map((text) => ({ id: uid(), text, checked: false, checkedBy: null, checkedAt: null })),
     };
-    await updateOrder(orderId, { checklist });
+    const nextChecklists = [...getChecklists(order), checklist];
+    await updateOrder(orderId, { checklists: nextChecklists, checklist: null });
     if (saveAsTemplate) {
       await persistTemplates([...templates, { id: uid(), name: trimmedName, items }]);
     }
   };
 
-  const toggleChecklistItem = async (orderId, itemId) => {
+  const toggleChecklistItem = async (orderId, checklistId, itemId) => {
     const order = orders.find((o) => o.id === orderId);
-    if (!order || !order.checklist) return;
-    const items = order.checklist.items.map((it) => {
-      if (it.id !== itemId) return it;
-      const nowChecked = !it.checked;
-      return {
-        ...it,
-        checked: nowChecked,
-        checkedBy: nowChecked ? currentMechanic : null,
-        checkedAt: nowChecked ? new Date().toISOString() : null,
-      };
+    if (!order) return;
+    const nextChecklists = getChecklists(order).map((c) => {
+      if (c.id !== checklistId) return c;
+      const items = c.items.map((it) => {
+        if (it.id !== itemId) return it;
+        const nowChecked = !it.checked;
+        return {
+          ...it,
+          checked: nowChecked,
+          checkedBy: nowChecked ? currentMechanic : null,
+          checkedAt: nowChecked ? new Date().toISOString() : null,
+        };
+      });
+      return { ...c, items };
     });
-    await updateOrder(orderId, { checklist: { ...order.checklist, items } });
+    await updateOrder(orderId, { checklists: nextChecklists, checklist: null });
   };
 
   const addMechanic = () => {
@@ -1808,87 +1833,96 @@ function App() {
           </div>
 
           <div className="mt-8">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-display text-lg font-bold">Checklist</h3>
-              {order.checklist && (
-                <button onClick={() => detachChecklist(order.id)} className="text-xs font-display uppercase tracking-wider text-red-400 hover:opacity-70 focus:outline-none" style={{ color: '#D6604A' }}>
-                  Remove
-                </button>
-              )}
-            </div>
-            {!order.checklist ? (
-              <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
-                {templates.length > 0 && !showAdHocChecklist && (
-                  <div className="mb-4">
-                    <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>Pick a checklist to use for this job:</p>
-                    <div className="flex gap-2">
-                      <select
-                        value={attachTemplateId}
-                        onChange={(e) => setAttachTemplateId(e.target.value)}
-                        className="flex-1 rounded-lg px-4 py-2 text-base focus:outline-none focus:ring-2"
-                        style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
-                      >
-                        <option value="">Select a checklist…</option>
-                        {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                      </select>
-                      <Btn disabled={!attachTemplateId} onClick={() => attachChecklist(order.id, attachTemplateId)}>Add</Btn>
+            <h3 className="font-display text-lg font-bold mb-4">Checklists</h3>
+
+            {getChecklists(order).length > 0 && (
+              <div className="space-y-4 mb-4">
+                {getChecklists(order).map((c) => (
+                  <div key={c.id} className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+                    <div className="flex items-center justify-between mb-4 pb-4" style={{ borderBottomColor: COLORS.line, borderBottomWidth: '1px' }}>
+                      <p className="font-display font-semibold" style={{ color: COLORS.accent }}>
+                        {c.templateName}
+                      </p>
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono text-sm font-bold" style={{ color: COLORS.accent }}>
+                          {c.items.filter((i) => i.checked).length}/{c.items.length}
+                        </span>
+                        <button
+                          onClick={() => detachChecklist(order.id, c.id)}
+                          className="text-xs font-display uppercase tracking-wider hover:opacity-70"
+                          style={{ color: '#D6604A' }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-3">
+                      {c.items.map((it) => (
+                        <label key={it.id} className="flex items-start gap-3 cursor-pointer group">
+                          <input
+                            type="checkbox"
+                            checked={it.checked}
+                            onChange={() => toggleChecklistItem(order.id, c.id, it.id)}
+                            className="mt-1 w-5 h-5 rounded focus:outline-none focus:ring-2 cursor-pointer"
+                            style={{ accentColor: COLORS.accent }}
+                          />
+                          <div className="flex-1">
+                            <span className="text-base" style={{ color: it.checked ? COLORS.line : COLORS.ink, textDecoration: it.checked ? 'line-through' : 'none' }}>
+                              {it.text}
+                            </span>
+                            {it.checked && it.checkedBy && (
+                              <span className="block font-mono text-xs mt-1" style={{ color: COLORS.line }}>
+                                ✓ {it.checkedBy} on {new Date(it.checkedAt).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                        </label>
+                      ))}
                     </div>
                   </div>
-                )}
-
-                {!showAdHocChecklist ? (
-                  <button
-                    onClick={() => setShowAdHocChecklist(true)}
-                    className="text-sm underline"
-                    style={{ color: COLORS.accent }}
-                  >
-                    + Create a checklist just for this job
-                  </button>
-                ) : (
-                  <AdHocChecklistForm
-                    onCancel={() => setShowAdHocChecklist(false)}
-                    onSubmit={async (name, itemsText, saveAsTemplate) => {
-                      await createAdHocChecklist(order.id, name, itemsText, saveAsTemplate);
-                      setShowAdHocChecklist(false);
-                    }}
-                  />
-                )}
-              </div>
-            ) : (
-              <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
-                <div className="flex items-center justify-between mb-4 pb-4" style={{ borderBottomColor: COLORS.line, borderBottomWidth: '1px' }}>
-                  <p className="font-display font-semibold" style={{ color: COLORS.accent }}>
-                    {order.checklist.templateName}
-                  </p>
-                  <span className="font-mono text-sm font-bold" style={{ color: COLORS.accent }}>
-                    {order.checklist.items.filter((i) => i.checked).length}/{order.checklist.items.length}
-                  </span>
-                </div>
-                <div className="space-y-3">
-                  {order.checklist.items.map((it) => (
-                    <label key={it.id} className="flex items-start gap-3 cursor-pointer group">
-                      <input
-                        type="checkbox"
-                        checked={it.checked}
-                        onChange={() => toggleChecklistItem(order.id, it.id)}
-                        className="mt-1 w-5 h-5 rounded focus:outline-none focus:ring-2 cursor-pointer"
-                        style={{ accentColor: COLORS.accent }}
-                      />
-                      <div className="flex-1">
-                        <span className="text-base" style={{ color: it.checked ? COLORS.line : COLORS.ink, textDecoration: it.checked ? 'line-through' : 'none' }}>
-                          {it.text}
-                        </span>
-                        {it.checked && it.checkedBy && (
-                          <span className="block font-mono text-xs mt-1" style={{ color: COLORS.line }}>
-                            ✓ {it.checkedBy} on {new Date(it.checkedAt).toLocaleDateString()}
-                          </span>
-                        )}
-                      </div>
-                    </label>
-                  ))}
-                </div>
+                ))}
               </div>
             )}
+
+            <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
+              {templates.length > 0 && !showAdHocChecklist && (
+                <div className="mb-4">
+                  <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>
+                    {getChecklists(order).length > 0 ? 'Add another checklist to this job:' : 'Pick a checklist to use for this job:'}
+                  </p>
+                  <div className="flex gap-2">
+                    <select
+                      value={attachTemplateId}
+                      onChange={(e) => setAttachTemplateId(e.target.value)}
+                      className="flex-1 rounded-lg px-4 py-2 text-base focus:outline-none focus:ring-2"
+                      style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                    >
+                      <option value="">Select a checklist…</option>
+                      {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                    <Btn disabled={!attachTemplateId} onClick={() => attachChecklist(order.id, attachTemplateId)}>Add</Btn>
+                  </div>
+                </div>
+              )}
+
+              {!showAdHocChecklist ? (
+                <button
+                  onClick={() => setShowAdHocChecklist(true)}
+                  className="text-sm underline"
+                  style={{ color: COLORS.accent }}
+                >
+                  + Create a checklist just for this job
+                </button>
+              ) : (
+                <AdHocChecklistForm
+                  onCancel={() => setShowAdHocChecklist(false)}
+                  onSubmit={async (name, itemsText, saveAsTemplate) => {
+                    await createAdHocChecklist(order.id, name, itemsText, saveAsTemplate);
+                    setShowAdHocChecklist(false);
+                  }}
+                />
+              )}
+            </div>
           </div>
 
           <PhotosSection
