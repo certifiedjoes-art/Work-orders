@@ -565,6 +565,7 @@ function App() {
   const [pinError, setPinError] = useState('');
   const [offerBiometric, setOfferBiometric] = useState(null);
   const [bioMsg, setBioMsg] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     const connectedRef = firebase.database().ref('.info/connected');
@@ -997,6 +998,22 @@ function App() {
         Done: list.filter((o) => o.status === 'Done').length,
       };
     };
+    const q = searchQuery.trim().toLowerCase();
+    const searchResults = q
+      ? orders.filter((o) => {
+          const haystack = [
+            o.description,
+            o.unit,
+            o.assignedMechanic,
+            o.status,
+            ...(o.notes || []).map((n) => n.text),
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          return haystack.includes(q);
+        })
+      : [];
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
@@ -1057,6 +1074,65 @@ function App() {
             {bioMsg && <span className="text-xs font-semibold" style={{ color: COLORS.accent }}>{bioMsg}</span>}
           </div>
 
+          <div className="relative mb-8">
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="🔍 Search work orders — a name, a unit, a word like 'brake'…"
+              className="w-full rounded-xl px-5 py-4 text-base focus:outline-none focus:ring-2"
+              style={{ background: COLORS.surface, color: COLORS.ink, border: `2px solid ${COLORS.line}` }}
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-lg"
+                style={{ color: COLORS.inkDim }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          {q ? (
+            <div>
+              <h2 className="font-display text-lg font-semibold uppercase tracking-wide mb-5">
+                {searchResults.length} result{searchResults.length !== 1 ? 's' : ''} for "{searchQuery}"
+              </h2>
+              {searchResults.length === 0 ? (
+                <div className="rounded-lg p-10 text-center" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
+                  <p className="text-base" style={{ color: COLORS.inkDim }}>No work orders match that search.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {searchResults.map((o) => {
+                    const isDone = o.status === 'Done';
+                    return (
+                      <button
+                        key={o.id}
+                        onClick={() => { setActiveUnit(o.unit); setActiveOrderId(o.id); setScreen('order'); setConfirmDelete(false); }}
+                        style={{ background: isDone ? COLORS.line : COLORS.manila, color: isDone ? COLORS.inkDim : COLORS.ink2 }}
+                        className="relative rounded-lg p-5 pl-8 text-left w-full focus:outline-none focus:ring-2 transition-all hover:scale-102 active:scale-98"
+                      >
+                        <PunchHole bg={isDone ? COLORS.line : COLORS.manila} />
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-mono text-xs mb-1 font-semibold" style={{ color: isDone ? COLORS.line : '#5B5342' }}>{o.unit}</p>
+                            <p className="font-body font-semibold text-base leading-snug mb-2">{o.description || '(no description)'}</p>
+                            <div className="flex flex-wrap items-center gap-4 font-mono text-xs" style={{ color: isDone ? COLORS.line : '#5B5342', opacity: isDone ? 0.6 : 1 }}>
+                              {o.assignedMechanic && <span>👤 {o.assignedMechanic}</span>}
+                              {o.dueDate && <span>📅 {fmtDate(o.dueDate)}</span>}
+                            </div>
+                          </div>
+                          <StatusStamp status={o.status} small />
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+          <React.Fragment>
           <div className="flex items-center justify-between mb-5">
             <h2 className="font-display text-lg font-semibold uppercase tracking-wide">Your machines</h2>
             <Btn variant="ghost" onClick={() => setShowAddUnit((s) => !s)}>+ Add machine</Btn>
@@ -1119,6 +1195,8 @@ function App() {
                 );
               })}
             </div>
+          )}
+          </React.Fragment>
           )}
 
           <p className="font-body text-xs mt-12 text-center" style={{ color: COLORS.line }}>All mechanics see the same board in real time</p>
