@@ -597,6 +597,7 @@ function App() {
   const [admins, setAdmins] = useState([]);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(null);
   const [editingTemplateId, setEditingTemplateId] = useState(null);
+  const [showAdHocChecklist, setShowAdHocChecklist] = useState(false);
 
   useEffect(() => {
     const connectedRef = firebase.database().ref('.info/connected');
@@ -848,6 +849,21 @@ function App() {
 
   const detachChecklist = async (orderId) => {
     await updateOrder(orderId, { checklist: null });
+  };
+
+  const createAdHocChecklist = async (orderId, name, itemsText, saveAsTemplate) => {
+    const trimmedName = name.trim();
+    const items = itemsText.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (!trimmedName || items.length === 0) return;
+    const checklist = {
+      templateId: null,
+      templateName: trimmedName,
+      items: items.map((text) => ({ id: uid(), text, checked: false, checkedBy: null, checkedAt: null })),
+    };
+    await updateOrder(orderId, { checklist });
+    if (saveAsTemplate) {
+      await persistTemplates([...templates, { id: uid(), name: trimmedName, items }]);
+    }
   };
 
   const toggleChecklistItem = async (orderId, itemId) => {
@@ -1802,10 +1818,8 @@ function App() {
             </div>
             {!order.checklist ? (
               <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
-                {templates.length === 0 ? (
-                  <p className="text-sm" style={{ color: COLORS.inkDim }}>No checklists yet. Go to Checklists on the board to create one, or use the built-in templates.</p>
-                ) : (
-                  <div>
+                {templates.length > 0 && !showAdHocChecklist && (
+                  <div className="mb-4">
                     <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>Pick a checklist to use for this job:</p>
                     <div className="flex gap-2">
                       <select
@@ -1820,6 +1834,24 @@ function App() {
                       <Btn disabled={!attachTemplateId} onClick={() => attachChecklist(order.id, attachTemplateId)}>Add</Btn>
                     </div>
                   </div>
+                )}
+
+                {!showAdHocChecklist ? (
+                  <button
+                    onClick={() => setShowAdHocChecklist(true)}
+                    className="text-sm underline"
+                    style={{ color: COLORS.accent }}
+                  >
+                    + Create a checklist just for this job
+                  </button>
+                ) : (
+                  <AdHocChecklistForm
+                    onCancel={() => setShowAdHocChecklist(false)}
+                    onSubmit={async (name, itemsText, saveAsTemplate) => {
+                      await createAdHocChecklist(order.id, name, itemsText, saveAsTemplate);
+                      setShowAdHocChecklist(false);
+                    }}
+                  />
                 )}
               </div>
             ) : (
@@ -1924,6 +1956,45 @@ function NewTemplateForm({ onSubmit, onCancel, initialName, initialItemsText, is
       </label>
       <div className="flex gap-2">
         <Btn onClick={() => name.trim() && itemsText.trim() && onSubmit(name, itemsText)}>{isEdit ? 'Save changes' : 'Save checklist'}</Btn>
+        <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
+function AdHocChecklistForm({ onSubmit, onCancel }) {
+  const [name, setName] = useState('');
+  const [itemsText, setItemsText] = useState('');
+  const [saveAsTemplate, setSaveAsTemplate] = useState(false);
+  const canSubmit = name.trim() && itemsText.trim();
+
+  return (
+    <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+      <TextField label="What's this checklist for?" value={name} onChange={setName} placeholder="e.g. Off-season transmission rebuild" />
+      <label className="block mb-4">
+        <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>Steps to complete</span>
+        <span className="text-xs block mb-2" style={{ color: COLORS.inkDim }}>Type one step per line</span>
+        <textarea
+          value={itemsText}
+          onChange={(e) => setItemsText(e.target.value)}
+          rows={6}
+          placeholder={'Drain transmission fluid\nRemove pan and inspect\nReplace filter\nRefill and torque test'}
+          className="w-full rounded-lg px-4 py-3 text-base font-body focus:outline-none focus:ring-2 resize-none"
+          style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+        />
+      </label>
+      <label className="flex items-center gap-2 mb-4 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={saveAsTemplate}
+          onChange={(e) => setSaveAsTemplate(e.target.checked)}
+          className="w-4 h-4"
+          style={{ accentColor: COLORS.accent }}
+        />
+        <span className="text-sm" style={{ color: COLORS.inkDim }}>Also save this to the checklist library for future jobs</span>
+      </label>
+      <div className="flex gap-2">
+        <Btn disabled={!canSubmit} onClick={() => onSubmit(name, itemsText, saveAsTemplate)}>Add to this job</Btn>
         <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
       </div>
     </div>
