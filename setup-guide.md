@@ -108,3 +108,21 @@ that changed.
 All checklists — including the built-in machine ones (Buncher, Excavator,
 Crawler, Processor, Skidder) — can now be edited from the Checklists page.
 Tap "Edit" on any checklist to change its name or steps.
+
+## Offline support
+
+The app now works with no signal at all:
+- The app itself (not just your data) loads even with zero connection,
+  once it's been opened at least once with a connection first
+- Your existing work orders, machines, and checklists are still visible
+  offline (from the last time the app synced)
+- Changes you make offline are queued by Firebase and sync automatically
+  once you're back in range — **as long as you don't fully close the app
+  before reconnecting**. If you do force-close it while offline, that one
+  unsaved change may need to be re-entered once you're back online.
+
+**Important for future updates**: this update added a file called `sw.js`
+that helps the app work offline. From now on, whenever I hand you an
+updated `index.html`, I'll also bump a version number inside `sw.js` —
+**always upload both files together** when I mention `sw.js` changed, or
+phones can get stuck on an old cached version again.

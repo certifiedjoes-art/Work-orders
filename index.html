@@ -131,16 +131,15 @@
   }
 </script>
 
-<!-- Remove any previously-registered service worker and its caches so
-     phones always load the latest version instead of a stale cached copy -->
+<!-- Register the service worker so the app itself (not just its data) works
+     with no signal at all. sw.js uses a versioned cache name — whenever this
+     app is updated, sw.js's CACHE_NAME is bumped too, which is what makes
+     phones pick up the new version instead of getting stuck on an old one. -->
 <script>
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.getRegistrations().then((regs) => {
-      regs.forEach((r) => r.unregister());
-    }).catch(() => {});
-  }
-  if (window.caches) {
-    caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
   }
 </script>
 
@@ -284,6 +283,27 @@ function statusColor(s) {
   if (s === 'Open') return COLORS.open;
   if (s === 'In Progress') return COLORS.progress;
   return COLORS.done;
+}
+
+// Mirrors the last-known data into localStorage so mechanics can still SEE
+// their board (read-only) even opening the app fresh with zero signal.
+// New changes made offline still rely on Firebase's own queue-and-sync,
+// which only survives as long as the app isn't fully closed before
+// reconnecting — this cache is purely for offline viewing, not writes.
+function cacheGet(key, fallback) {
+  try {
+    const raw = localStorage.getItem('cache_' + key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+function cacheSet(key, value) {
+  try {
+    localStorage.setItem('cache_' + key, JSON.stringify(value));
+  } catch (e) {
+    // storage full or unavailable — offline viewing just won't have this data
+  }
 }
 
 function uid() {
@@ -545,10 +565,14 @@ function TextField({ label, value, onChange, placeholder, type = 'text', mono, h
 }
 
 function App() {
-  const [loading, setLoading] = useState(true);
-  const [mechanics, setMechanics] = useState([]);
-  const [units, setUnits] = useState([]);
-  const [orders, setOrders] = useState([]);
+  // If we already have cached data from a previous session, skip the loading
+  // screen entirely — show it immediately, then let Firebase update it live
+  // once (if) a connection is available. Only show "loading" on a true first
+  // run with nothing cached yet.
+  const [loading, setLoading] = useState(() => cacheGet('orders', null) === null);
+  const [mechanics, setMechanics] = useState(() => cacheGet('mechanics', []));
+  const [units, setUnits] = useState(() => cacheGet('units', []));
+  const [orders, setOrders] = useState(() => cacheGet('orders', []));
   const [currentMechanic, setCurrentMechanic] = useState(null);
   const [screen, setScreen] = useState('login');
   const [activeUnit, setActiveUnit] = useState(null);
@@ -558,7 +582,7 @@ function App() {
   const [showAddUnit, setShowAddUnit] = useState(false);
   const [showAddOrder, setShowAddOrder] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [templates, setTemplates] = useState([]);
+  const [templates, setTemplates] = useState(() => cacheGet('templates', []));
   const [showNewTemplate, setShowNewTemplate] = useState(false);
   const [confirmDeleteTemplate, setConfirmDeleteTemplate] = useState(null);
   const [attachTemplateId, setAttachTemplateId] = useState('');
@@ -626,11 +650,15 @@ function App() {
       const meta = snap.val() || { mechanics: [], units: [] };
       setMechanics(meta.mechanics || []);
       setUnits(meta.units || []);
+      cacheSet('mechanics', meta.mechanics || []);
+      cacheSet('units', meta.units || []);
       ready.meta = true;
       checkReady();
     });
     const onOrders = ordersRef.on('value', (snap) => {
-      setOrders(snap.val() || []);
+      const val = snap.val() || [];
+      setOrders(val);
+      cacheSet('orders', val);
       ready.orders = true;
       checkReady();
     });
@@ -638,6 +666,7 @@ function App() {
       const t = snap.val();
       if (t) {
         setTemplates(t);
+        cacheSet('templates', t);
       } else {
         templatesRef.set(DEFAULT_TEMPLATES);
       }
