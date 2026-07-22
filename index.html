@@ -279,6 +279,25 @@ function BiometricOfferOverlay({ mechanic, onEnable, onSkip }) {
   );
 }
 
+function ClockInPromptOverlay({ show, mechanic, onClockIn, onSkip }) {
+  if (!show) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.75)' }}>
+      <div className="w-full max-w-xs rounded-2xl p-6 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+        <p className="text-4xl mb-3">⏱️</p>
+        <p className="font-display text-lg font-bold mb-2">Clock in, {mechanic}?</p>
+        <p className="text-sm mb-5" style={{ color: COLORS.inkDim }}>
+          Looks like you haven't clocked in yet today.
+        </p>
+        <div className="flex flex-col gap-2">
+          <Btn onClick={onClockIn}>Clock In Now</Btn>
+          <Btn variant="ghost" onClick={onSkip}>Not right now</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function statusColor(s) {
   if (s === 'Open') return COLORS.open;
   if (s === 'In Progress') return COLORS.progress;
@@ -633,6 +652,7 @@ function App() {
   const [tsFilterStart, setTsFilterStart] = useState('');
   const [tsFilterEnd, setTsFilterEnd] = useState('');
   const [tsEmailDraft, setTsEmailDraft] = useState(null);
+  const [showClockInPrompt, setShowClockInPrompt] = useState(false);
 
   useEffect(() => {
     const tsRef = firebase.database().ref('timesheets');
@@ -1003,6 +1023,14 @@ function App() {
   // The "open" entry for the current mechanic today: clocked in but not yet clocked out.
   const openEntry = timesheets.find((t) => t.mechanic === currentMechanic && t.date === todayStr() && !t.clockOut);
 
+  // Prompt to clock in once per login, if they haven't already for today.
+  useEffect(() => {
+    if (currentMechanic && !openEntry) {
+      setShowClockInPrompt(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentMechanic]);
+
   const clockIn = async () => {
     const entry = {
       id: uid(),
@@ -1371,6 +1399,15 @@ function App() {
           }}
           onSkip={() => setOfferBiometric(null)}
         />
+        <ClockInPromptOverlay
+          show={showClockInPrompt}
+          mechanic={currentMechanic}
+          onClockIn={async () => {
+            setShowClockInPrompt(false);
+            await clockIn();
+          }}
+          onSkip={() => setShowClockInPrompt(false)}
+        />
         <div className="max-w-5xl mx-auto">
           <div className="flex items-start justify-between mb-10">
             <div>
@@ -1378,13 +1415,6 @@ function App() {
               <h1 className="font-display text-3xl sm:text-4xl font-bold">Board</h1>
             </div>
             <div className="flex items-center gap-3 flex-wrap justify-end">
-              <button
-                onClick={() => setScreen('timeclock')}
-                className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
-                style={{ color: openEntry ? '#1B1F19' : COLORS.accent, background: openEntry ? COLORS.accent : COLORS.surface, border: `1px solid ${COLORS.line}` }}
-              >
-                ⏱️ {openEntry ? 'Clocked In' : 'Time Clock'}
-              </button>
               {isAdmin && (
                 <button
                   onClick={() => setScreen('timesheets')}
@@ -1411,7 +1441,7 @@ function App() {
                 📋 Checklists
               </button>
               <button
-                onClick={() => { setCurrentMechanic(null); setScreen('login'); }}
+                onClick={() => { setCurrentMechanic(null); setScreen('login'); setShowClockInPrompt(false); }}
                 className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
                 style={{ color: COLORS.inkDim, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
               >
@@ -1429,6 +1459,34 @@ function App() {
             </button>
             {bioMsg && <span className="text-xs font-semibold" style={{ color: COLORS.accent }}>{bioMsg}</span>}
           </div>
+
+          <button
+            onClick={() => setScreen('timeclock')}
+            className="w-full flex items-center justify-between rounded-2xl px-6 py-6 mb-8 transition-all hover:scale-102 active:scale-98 focus:outline-none focus:ring-2"
+            style={{
+              background: openEntry ? COLORS.accent : COLORS.surface,
+              border: `3px solid ${openEntry ? COLORS.accent : COLORS.line}`,
+            }}
+          >
+            <div className="flex items-center gap-4">
+              <span style={{ fontSize: '2.5rem' }}>⏱️</span>
+              <div className="text-left">
+                <p
+                  className="font-display text-xl font-bold"
+                  style={{ color: openEntry ? '#1B1F19' : COLORS.ink }}
+                >
+                  {openEntry ? 'Clocked In' : 'Time Clock'}
+                </p>
+                <p
+                  className="text-sm"
+                  style={{ color: openEntry ? '#1B1F19' : COLORS.inkDim, opacity: openEntry ? 0.75 : 1 }}
+                >
+                  {openEntry ? `Since ${fmtTime(openEntry.clockIn)} — tap to clock out or log hours` : 'Tap to clock in for the day'}
+                </p>
+              </div>
+            </div>
+            <span style={{ fontSize: '2rem', color: openEntry ? '#1B1F19' : COLORS.inkDim }}>→</span>
+          </button>
 
           <div className="relative mb-8">
             <input
