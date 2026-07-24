@@ -176,3 +176,13 @@ through it — a popup handles this automatically.
   same one for everyone, changes daily) — dismissible with the ✕
 - Subtle background gradient and a faint tree silhouette on the login
   screen for a bit more polish, echoing your logo
+
+## Milestones
+
+Each mechanic's completed work orders are tracked automatically:
+- **5 and 10 completed** — auto-posts a shoutout to the team feed, no
+  action needed
+- **50, 100, and every 50 after that** — instead of auto-posting, you
+  (as admin) get a popup asking to add a personal note. Skip it and a
+  solid default message still gets posted, so nobody's big milestone
+  goes unrecognized even on a busy day
