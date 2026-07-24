@@ -43,7 +43,12 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js" onload="window.__loadStatus['firebase-db']='ok'" onerror="window.__loadStatus['firebase-db']='FAILED'"></script>
 
 <style>
-  html, body { background: #1B1E20; margin: 0; padding: 0; }
+  html, body {
+    background: #1B1F19;
+    background: radial-gradient(ellipse 120% 80% at 50% -10%, #232D20 0%, #1B1F19 55%);
+    margin: 0; padding: 0;
+  }
+  .shop-card { box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
   #root { min-height: 100vh; }
   #config-warning { display: none; }
   /* Keep content clear of the iPhone notch/status bar and the home indicator */
@@ -279,6 +284,21 @@ function BiometricOfferOverlay({ mechanic, onEnable, onSkip }) {
   );
 }
 
+function JokeBanner() {
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed) return null;
+  return (
+    <div
+      className="rounded-xl px-5 py-3.5 mb-6 flex items-center gap-3"
+      style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+    >
+      <span style={{ fontSize: '1.4rem' }}>😄</span>
+      <p className="flex-1 text-sm italic" style={{ color: COLORS.inkDim }}>{jokeOfTheDay()}</p>
+      <button onClick={() => setDismissed(true)} className="text-sm" style={{ color: COLORS.line }}>✕</button>
+    </div>
+  );
+}
+
 function ClockInPromptOverlay({ show, mechanic, onClockIn, onSkip }) {
   if (!show) return null;
   return (
@@ -341,7 +361,7 @@ function fmtTime(iso) {
   return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
-// Total paid hours for a shift: clock-in to clock-out, minus any lunch break.
+// Total paid hours for a shift: clock-in to clock-out, minus any unpaid break.
 function entryHours(entry) {
   if (!entry.clockIn || !entry.clockOut) return 0;
   let ms = new Date(entry.clockOut) - new Date(entry.clockIn);
@@ -353,6 +373,23 @@ function entryHours(entry) {
 
 function fmtHours(h) {
   return h.toFixed(2).replace(/\.00$/, '');
+}
+
+// Pay week runs Sunday–Saturday. Given any date string ('YYYY-MM-DD'),
+// return that week's Sunday as the week's identifying key.
+function weekStartOf(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() - d.getDay());
+  return d.toISOString().slice(0, 10);
+}
+function weekEndOf(weekStart) {
+  const d = new Date(weekStart + 'T00:00:00');
+  d.setDate(d.getDate() + 6);
+  return d.toISOString().slice(0, 10);
+}
+function fmtWeekRange(weekStart) {
+  const end = weekEndOf(weekStart);
+  return `${fmtDate(weekStart)} – ${fmtDate(end)}`;
 }
 
 // Resize + compress a photo before storing it, so the shared database stays fast
@@ -409,6 +446,10 @@ async function saveTimesheets(timesheets) {
 
 async function saveTimesheetSettings(settings) {
   try { await firebase.database().ref('timesheetSettings').set(settings); } catch (e) { console.error('save timesheet settings failed', e); }
+}
+
+async function saveTimesheetApprovals(approvals) {
+  try { await firebase.database().ref('timesheetApprovals').set(approvals); } catch (e) { console.error('save timesheet approvals failed', e); }
 }
 
 // One-way hash so raw PINs are never stored or sent anywhere in plain text.
@@ -473,6 +514,53 @@ async function verifyBiometric(name) {
   } catch (e) {
     return false;
   }
+}
+
+// Clean, work-friendly jokes only — rotates once per day, same joke for everyone that day.
+const JOKES = [
+  "Why don't scientists trust atoms? Because they make up everything.",
+  "I used to be a banker, but I lost interest.",
+  "Why did the scarecrow win an award? He was outstanding in his field.",
+  "What do you call a fish with no eyes? A fsh.",
+  "I'm reading a book about anti-gravity. It's impossible to put down.",
+  "Why don't skeletons fight each other? They don't have the guts.",
+  "What do you call a factory that makes okay products? A satisfactory.",
+  "I only know 25 letters of the alphabet. I don't know y.",
+  "Why did the coffee file a police report? It got mugged.",
+  "What do you call a bear with no teeth? A gummy bear.",
+  "I told my wife she should embrace her mistakes. She gave me a hug.",
+  "Why can't you give Elsa a balloon? She'll let it go.",
+  "What did the ocean say to the beach? Nothing, it just waved.",
+  "Why did the bicycle fall over? It was two-tired.",
+  "How do you organize a space party? You planet.",
+  "I would tell you a construction joke, but I'm still working on it.",
+  "Why did the golfer bring two pairs of pants? In case he got a hole in one.",
+  "What do you call a dinosaur that crashes his car? Tyrannosaurus wrecks.",
+  "Why don't eggs tell jokes? They'd crack each other up.",
+  "I used to hate facial hair, but then it grew on me.",
+  "What's the best time to go to the dentist? Tooth-hurty.",
+  "Why did the tomato turn red? Because it saw the salad dressing.",
+  "How does a penguin build its house? Igloos it together.",
+  "I'm on a seafood diet. I see food and I eat it.",
+  "Why did the invisible man turn down the job offer? He couldn't see himself doing it.",
+  "What do you call cheese that isn't yours? Nacho cheese.",
+  "Why did the math book look sad? It had too many problems.",
+  "What did one wall say to the other? I'll meet you at the corner.",
+  "Why don't oysters share? Because they're shellfish.",
+  "I got a job at a bakery because I kneaded dough.",
+  "What do you call a can opener that doesn't work? A can't opener.",
+  "Why did the worker get fired from the calendar factory? He took a day off.",
+  "How do trees get on the internet? They log in.",
+  "What's a mechanic's favorite type of music? Heavy metal.",
+  "Why did the truck driver bring extra socks? In case he got a flat.",
+  "What do you call a lazy kangaroo? Pouch potato.",
+];
+
+function jokeOfTheDay() {
+  const start = new Date(new Date().getFullYear(), 0, 0);
+  const diff = new Date() - start;
+  const dayOfYear = Math.floor(diff / (1000 * 60 * 60 * 24));
+  return JOKES[dayOfYear % JOKES.length];
 }
 
 const DEFAULT_TEMPLATES = [
@@ -655,6 +743,18 @@ function App() {
   const [showClockInPrompt, setShowClockInPrompt] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState(null);
   const [editingOrderChecklistId, setEditingOrderChecklistId] = useState(null);
+  const [timesheetApprovals, setTimesheetApprovals] = useState({});
+  const [tsWeekOffset, setTsWeekOffset] = useState(0);
+  const [mySummaryStart, setMySummaryStart] = useState('');
+  const [mySummaryEnd, setMySummaryEnd] = useState('');
+
+  useEffect(() => {
+    const apRef = firebase.database().ref('timesheetApprovals');
+    const onAp = apRef.on('value', (snap) => {
+      setTimesheetApprovals(snap.val() || {});
+    });
+    return () => apRef.off('value', onAp);
+  }, []);
 
   useEffect(() => {
     const tsRef = firebase.database().ref('timesheets');
@@ -1124,8 +1224,23 @@ function App() {
     await persistTimesheets(timesheets.filter((t) => t.id !== entryId));
   };
 
+  const isWeekApproved = (weekStart) => !!timesheetApprovals[weekStart];
+
+  const approveWeek = async (weekStart) => {
+    const next = { ...timesheetApprovals, [weekStart]: { approvedBy: currentMechanic, approvedAt: new Date().toISOString() } };
+    setTimesheetApprovals(next);
+    await saveTimesheetApprovals(next);
+  };
+
+  const unapproveWeek = async (weekStart) => {
+    const next = { ...timesheetApprovals };
+    delete next[weekStart];
+    setTimesheetApprovals(next);
+    await saveTimesheetApprovals(next);
+  };
+
   const exportTimesheets = async (entries) => {
-    const rows = [['Mechanic', 'Date', 'Clock In', 'Clock Out', 'Lunch Start', 'Lunch End', 'Worked Through Lunch', 'Paid Hours', 'Jobs (unit: hours)']];
+    const rows = [['Mechanic', 'Date', 'Clock In', 'Clock Out', 'Break Start', 'Break End', 'Worked Through Break', 'Paid Hours', 'Jobs (unit: hours)']];
     entries.forEach((e) => {
       const jobsStr = (e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`).join(' | ');
       rows.push([
@@ -1277,8 +1392,18 @@ function App() {
   // ---------- LOGIN ----------
   if (screen === 'login' || !currentMechanic) {
     return (
-      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-6 flex flex-col items-center justify-center">
+      <div style={{ color: COLORS.ink, minHeight: '100vh', position: 'relative', overflow: 'hidden' }} className="font-body p-6 flex flex-col items-center justify-center">
         {FONT_STYLE}
+        <svg
+          viewBox="0 0 400 200"
+          preserveAspectRatio="xMidYMax slice"
+          style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '35vh', opacity: 0.12, pointerEvents: 'none' }}
+        >
+          <path d="M40 200 L40 140 L20 140 L45 90 L28 90 L55 40 L82 90 L65 90 L90 140 L70 140 L70 200 Z" fill={COLORS.accent} />
+          <path d="M130 200 L130 120 L105 120 L135 60 L114 60 L148 0 L182 60 L161 60 L191 120 L166 120 L166 200 Z" fill={COLORS.accent} />
+          <path d="M250 200 L250 130 L228 130 L255 75 L238 75 L265 25 L292 75 L275 75 L302 130 L280 130 L280 200 Z" fill={COLORS.accent} />
+          <path d="M345 200 L345 145 L327 145 L350 100 L335 100 L358 55 L381 100 L366 100 L389 145 L371 145 L371 200 Z" fill={COLORS.accent} />
+        </svg>
         <OfflineBanner isOnline={isOnline} />
         <PinModalOverlay
           pinModal={pinModal}
@@ -1302,7 +1427,7 @@ function App() {
           }}
           onSkip={() => setOfferBiometric(null)}
         />
-        <div className="max-w-md w-full">
+        <div className="max-w-md w-full" style={{ position: 'relative', zIndex: 1 }}>
           <div className="text-center mb-10">
             <p className="font-display text-sm uppercase tracking-[0.3em] mb-2" style={{ color: COLORS.accent }}>Harder Contracting</p>
             <h1 className="font-display text-4xl font-bold mb-2">Work Order Board</h1>
@@ -1331,7 +1456,7 @@ function App() {
             </div>
           )}
 
-          <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>
+          <div className="rounded-lg p-5 shop-card" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>
             <p className="font-display text-sm uppercase tracking-wide mb-3 block" style={{ color: COLORS.accent }}>First time here?</p>
             <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>Enter your name to sign in:</p>
             <div className="flex gap-2">
@@ -1482,7 +1607,9 @@ function App() {
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-4 -mt-7 mb-8">
+          <JokeBanner />
+
+          <div className="flex items-center justify-end gap-4 -mt-2 mb-8">
             <button onClick={startChangePin} className="text-xs underline" style={{ color: COLORS.inkDim }}>
               Change PIN
             </button>
@@ -1494,7 +1621,7 @@ function App() {
 
           <button
             onClick={() => setScreen('timeclock')}
-            className="w-full flex items-center justify-between rounded-2xl px-6 py-6 mb-8 transition-all hover:scale-102 active:scale-98 focus:outline-none focus:ring-2"
+            className="w-full flex items-center justify-between rounded-2xl px-6 py-6 mb-8 transition-all hover:scale-102 active:scale-98 focus:outline-none focus:ring-2 shop-card"
             style={{
               background: openEntry ? COLORS.accent : COLORS.surface,
               border: `3px solid ${openEntry ? COLORS.accent : COLORS.line}`,
@@ -1737,19 +1864,19 @@ function App() {
 
                 {onLunch ? (
                   <React.Fragment>
-                    <p className="text-sm mb-4" style={{ color: COLORS.progress }}>🍽️ On lunch since {fmtTime(openEntry.lunchStart)}</p>
-                    <Btn onClick={endLunch}>End Lunch</Btn>
+                    <p className="text-sm mb-4" style={{ color: COLORS.progress }}>☕ On break since {fmtTime(openEntry.lunchStart)}</p>
+                    <Btn onClick={endLunch}>End Break</Btn>
                   </React.Fragment>
                 ) : (
                   <div className="flex flex-col gap-3 items-center">
                     {openEntry.lunchStart && openEntry.lunchEnd && (
                       <p className="text-xs font-mono" style={{ color: COLORS.inkDim }}>
-                        Lunch: {fmtTime(openEntry.lunchStart)} – {fmtTime(openEntry.lunchEnd)}
+                        Break: {fmtTime(openEntry.lunchStart)} – {fmtTime(openEntry.lunchEnd)}
                       </p>
                     )}
                     <div className="flex gap-3">
                       {!openEntry.lunchStart && (
-                        <Btn variant="ghost" onClick={startLunch}>Start Lunch</Btn>
+                        <Btn variant="ghost" onClick={startLunch}>Start Break</Btn>
                       )}
                       <Btn onClick={attemptClockOut}>Clock Out</Btn>
                     </div>
@@ -1762,13 +1889,13 @@ function App() {
           {lunchPrompt && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.75)' }}>
               <div className="w-full max-w-xs rounded-2xl p-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
-                <p className="font-display text-lg font-bold mb-3 text-center">No lunch logged today</p>
+                <p className="font-display text-lg font-bold mb-3 text-center">No break logged today</p>
                 <p className="text-sm mb-5 text-center" style={{ color: COLORS.inkDim }}>
-                  Go back and tap "Start Lunch" / "End Lunch" if you took one, or confirm you worked through lunch.
+                  Go back and tap "Start Break" / "End Break" if you took one, or confirm you worked straight through.
                 </p>
                 <div className="flex flex-col gap-2">
                   <Btn variant="ghost" onClick={() => setLunchPrompt(false)}>Go back</Btn>
-                  <Btn variant="danger" onClick={() => clockOut(true)}>I worked through lunch — clock out</Btn>
+                  <Btn variant="danger" onClick={() => clockOut(true)}>I worked straight through — clock out</Btn>
                 </div>
               </div>
             </div>
@@ -1783,6 +1910,42 @@ function App() {
           )}
 
           {/* Past entries */}
+          {/* Pick a date range to see total hours worked */}
+          <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+            <h2 className="font-display text-sm font-bold uppercase tracking-wide mb-3">How much have I worked?</h2>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <label className="block">
+                <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>From</span>
+                <input
+                  type="date"
+                  value={mySummaryStart}
+                  onChange={(e) => setMySummaryStart(e.target.value)}
+                  className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
+                  style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>To</span>
+                <input
+                  type="date"
+                  value={mySummaryEnd}
+                  onChange={(e) => setMySummaryEnd(e.target.value)}
+                  className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
+                  style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                />
+              </label>
+            </div>
+            {mySummaryStart && mySummaryEnd && (
+              <p className="font-display text-xl font-bold" style={{ color: COLORS.accent }}>
+                {fmtHours(
+                  myEntries
+                    .filter((e) => e.date >= mySummaryStart && e.date <= mySummaryEnd)
+                    .reduce((sum, e) => sum + entryHours(e), 0)
+                )} hrs worked
+              </p>
+            )}
+          </div>
+
           <h2 className="font-display text-lg font-semibold uppercase tracking-wide mb-4">Your recent shifts</h2>
           {myEntries.length === 0 ? (
             <p className="text-sm" style={{ color: COLORS.line }}>No shifts logged yet.</p>
@@ -1792,6 +1955,7 @@ function App() {
                 <TimesheetEntryCard
                   key={entry.id}
                   entry={entry}
+                  locked={isWeekApproved(weekStartOf(entry.date))}
                   isEditing={editingEntryId === entry.id}
                   onEdit={() => setEditingEntryId(entry.id)}
                   onCancelEdit={() => setEditingEntryId(null)}
@@ -1838,6 +2002,23 @@ function App() {
 
     const emailValue = tsEmailDraft !== null ? tsEmailDraft : (timesheetSettings.email || '');
 
+    const clockedInNow = timesheets.filter((t) => !t.clockOut && t.date === todayStr());
+
+    // Weekly view for the overtime flag + approval workflow
+    const baseWeekStart = weekStartOf(todayStr());
+    const viewedWeekStart = (() => {
+      const d = new Date(baseWeekStart + 'T00:00:00');
+      d.setDate(d.getDate() + tsWeekOffset * 7);
+      return d.toISOString().slice(0, 10);
+    })();
+    const viewedWeekEnd = weekEndOf(viewedWeekStart);
+    const weekEntries = timesheets.filter((t) => t.date >= viewedWeekStart && t.date <= viewedWeekEnd);
+    const weekTotalsByMechanic = {};
+    weekEntries.forEach((e) => {
+      weekTotalsByMechanic[e.mechanic] = (weekTotalsByMechanic[e.mechanic] || 0) + entryHours(e);
+    });
+    const weekApproved = isWeekApproved(viewedWeekStart);
+
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
@@ -1847,6 +2028,75 @@ function App() {
             ← Back to board
           </button>
           <h1 className="font-display text-3xl font-bold mb-8">Timesheets</h1>
+
+          {/* Who's clocked in right now */}
+          <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+            <h2 className="font-display text-sm font-bold uppercase tracking-wide mb-3">Clocked in right now</h2>
+            {clockedInNow.length === 0 ? (
+              <p className="text-sm" style={{ color: COLORS.line }}>Nobody's clocked in at the moment.</p>
+            ) : (
+              <div className="space-y-2">
+                {clockedInNow.map((t) => (
+                  <div key={t.id} className="flex items-center justify-between">
+                    <span className="font-display font-semibold">🟢 {t.mechanic}</span>
+                    <span className="font-mono text-sm" style={{ color: COLORS.inkDim }}>
+                      since {fmtTime(t.clockIn)}{t.lunchStart && !t.lunchEnd ? ' (on break)' : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Weekly totals, overtime flag, and approval */}
+          <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+            <div className="flex items-center justify-between mb-4">
+              <button onClick={() => setTsWeekOffset(tsWeekOffset - 1)} className="text-lg px-2" style={{ color: COLORS.inkDim }}>←</button>
+              <div className="text-center">
+                <p className="font-display font-bold">{fmtWeekRange(viewedWeekStart)}</p>
+                {weekApproved && (
+                  <p className="text-xs font-semibold mt-1" style={{ color: COLORS.done }}>
+                    ✓ Approved by {timesheetApprovals[viewedWeekStart].approvedBy}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => setTsWeekOffset(Math.min(0, tsWeekOffset + 1))}
+                disabled={tsWeekOffset >= 0}
+                className="text-lg px-2"
+                style={{ color: COLORS.inkDim, opacity: tsWeekOffset >= 0 ? 0.3 : 1 }}
+              >
+                →
+              </button>
+            </div>
+
+            {Object.keys(weekTotalsByMechanic).length === 0 ? (
+              <p className="text-sm text-center mb-4" style={{ color: COLORS.line }}>No shifts this week.</p>
+            ) : (
+              <div className="space-y-2 mb-4">
+                {Object.entries(weekTotalsByMechanic).map(([name, hours]) => (
+                  <div key={name} className="flex items-center justify-between py-1">
+                    <span className="font-display font-semibold">{name}</span>
+                    <span className="font-mono flex items-center gap-2">
+                      {hours > 40 && <span title="Over 40 hours">⚠️</span>}
+                      <span style={{ color: hours > 40 ? '#E3A23C' : COLORS.ink }}>{fmtHours(hours)} hrs</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {weekApproved ? (
+              <Btn variant="ghost" onClick={() => unapproveWeek(viewedWeekStart)}>Un-approve this week</Btn>
+            ) : (
+              <Btn onClick={() => approveWeek(viewedWeekStart)} disabled={Object.keys(weekTotalsByMechanic).length === 0}>
+                Approve this week
+              </Btn>
+            )}
+            <p className="text-xs mt-3" style={{ color: COLORS.line }}>
+              Approving a week locks it — mechanics can no longer edit shifts within it themselves.
+            </p>
+          </div>
 
           {/* Email settings */}
           <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
@@ -1945,8 +2195,8 @@ function App() {
                   <div className="flex flex-wrap gap-4 text-xs font-mono mb-2" style={{ color: COLORS.inkDim }}>
                     <span>In {fmtTime(entry.clockIn)}</span>
                     <span>Out {entry.clockOut ? fmtTime(entry.clockOut) : '—'}</span>
-                    {entry.lunchStart && entry.lunchEnd && <span>Lunch {fmtTime(entry.lunchStart)}–{fmtTime(entry.lunchEnd)}</span>}
-                    {entry.skippedLunch && <span>No lunch taken</span>}
+                    {entry.lunchStart && entry.lunchEnd && <span>Break {fmtTime(entry.lunchStart)}–{fmtTime(entry.lunchEnd)}</span>}
+                    {entry.skippedLunch && <span>No break taken</span>}
                     <span className="font-bold" style={{ color: COLORS.accent }}>{fmtHours(entryHours(entry))} hrs</span>
                   </div>
                   {(entry.jobs || []).length > 0 && (
@@ -2604,7 +2854,7 @@ function TimesheetJobsEditor({ entry, onAdd, onRemove }) {
   );
 }
 
-function TimesheetEntryCard({ entry, isEditing, onEdit, onCancelEdit, onSave, onAddJob, onRemoveJob }) {
+function TimesheetEntryCard({ entry, locked, isEditing, onEdit, onCancelEdit, onSave, onAddJob, onRemoveJob }) {
   const toLocalInput = (iso) => {
     if (!iso) return '';
     const d = new Date(iso);
@@ -2630,11 +2880,11 @@ function TimesheetEntryCard({ entry, isEditing, onEdit, onCancelEdit, onSave, on
             <input type="datetime-local" value={clockOut} onChange={(e) => setClockOut(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
           </label>
           <label className="block">
-            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Lunch start</span>
+            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Break start</span>
             <input type="datetime-local" value={lunchStart} onChange={(e) => setLunchStart(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
           </label>
           <label className="block">
-            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Lunch end</span>
+            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Break end</span>
             <input type="datetime-local" value={lunchEnd} onChange={(e) => setLunchEnd(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
           </label>
         </div>
@@ -2662,13 +2912,17 @@ function TimesheetEntryCard({ entry, isEditing, onEdit, onCancelEdit, onSave, on
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <div className="flex items-center justify-between mb-2">
         <span className="font-display font-semibold">{fmtDate(entry.date)}</span>
-        <button onClick={onEdit} className="text-xs underline" style={{ color: COLORS.accent }}>Edit</button>
+        {locked ? (
+          <span className="text-xs font-semibold" style={{ color: COLORS.done }}>🔒 Approved</span>
+        ) : (
+          <button onClick={onEdit} className="text-xs underline" style={{ color: COLORS.accent }}>Edit</button>
+        )}
       </div>
       <div className="flex flex-wrap gap-4 text-xs font-mono mb-2" style={{ color: COLORS.inkDim }}>
         <span>In {fmtTime(entry.clockIn)}</span>
         <span>Out {entry.clockOut ? fmtTime(entry.clockOut) : '—'}</span>
-        {entry.lunchStart && entry.lunchEnd && <span>Lunch {fmtTime(entry.lunchStart)}–{fmtTime(entry.lunchEnd)}</span>}
-        {entry.skippedLunch && <span>No lunch taken</span>}
+        {entry.lunchStart && entry.lunchEnd && <span>Break {fmtTime(entry.lunchStart)}–{fmtTime(entry.lunchEnd)}</span>}
+        {entry.skippedLunch && <span>No break taken</span>}
         {entry.clockOut && <span className="font-bold" style={{ color: COLORS.accent }}>{fmtHours(entryHours(entry))} hrs</span>}
       </div>
       {(entry.jobs || []).length > 0 && (

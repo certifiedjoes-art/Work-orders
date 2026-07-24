@@ -153,3 +153,26 @@ service) whenever you're ready to take that on.
 **One rule mechanics need to know**: the app won't let them clock out for
 the day without either logging a lunch break or confirming they worked
 through it — a popup handles this automatically.
+
+## Timesheet upgrades
+
+- **"Break" instead of "Lunch"** — the button now says Start/End Break,
+  since it doesn't have to specifically be lunch. Still unpaid time,
+  same as before.
+- **Who's clocked in right now** — admins see a live list at the top of
+  the Timesheets screen.
+- **Weekly view with overtime flag** — admins can page week by week
+  (Sunday-Saturday) and see a ⚠️ next to anyone over 40 hours that week.
+- **Weekly approval** — tap "Approve this week" to lock it. Once
+  approved, mechanics can no longer edit their own shifts from that week
+  (they'll see a 🔒 instead of an Edit button). Un-approve anytime if you
+  need to reopen it.
+- **"How much have I worked?"** — mechanics can pick any two dates on
+  their own Time Clock screen and see total hours in that range.
+
+## Look and feel
+
+- Joke of the day banner at the top of the dashboard (clean jokes only,
+  same one for everyone, changes daily) — dismissible with the ✕
+- Subtle background gradient and a faint tree silhouette on the login
+  screen for a bit more polish, echoing your logo
