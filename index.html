@@ -653,6 +653,8 @@ function App() {
   const [tsFilterEnd, setTsFilterEnd] = useState('');
   const [tsEmailDraft, setTsEmailDraft] = useState(null);
   const [showClockInPrompt, setShowClockInPrompt] = useState(false);
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editingOrderChecklistId, setEditingOrderChecklistId] = useState(null);
 
   useEffect(() => {
     const tsRef = firebase.database().ref('timesheets');
@@ -980,6 +982,25 @@ function App() {
     await updateOrder(orderId, { checklists: nextChecklists, checklist: null });
   };
 
+  const updateOrderChecklist = async (orderId, checklistId, name, itemsText) => {
+    const trimmedName = name.trim();
+    const lines = itemsText.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (!trimmedName || lines.length === 0) return;
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return;
+    const existing = getChecklists(order).find((c) => c.id === checklistId);
+    const existingByText = {};
+    (existing ? existing.items : []).forEach((it) => { existingByText[it.text] = it; });
+    // Keep the checked state for any item whose text didn't change; new/edited
+    // lines start fresh so a corrected item doesn't stay marked done by mistake.
+    const items = lines.map((text) => existingByText[text] || { id: uid(), text, checked: false, checkedBy: null, checkedAt: null });
+    const nextChecklists = getChecklists(order).map((c) =>
+      c.id === checklistId ? { ...c, templateName: trimmedName, items } : c
+    );
+    await updateOrder(orderId, { checklists: nextChecklists, checklist: null });
+    setEditingOrderChecklistId(null);
+  };
+
   const addMechanic = () => {
     const name = newMechanicName.trim();
     if (!name || mechanics.includes(name)) return;
@@ -1184,6 +1205,17 @@ function App() {
     const note = { id: uid(), author: currentMechanic, text: text.trim(), ts: new Date().toISOString() };
     const next = orders.map((o) => (o.id === id ? { ...o, notes: [...(o.notes || []), note] } : o));
     await persistOrders(next);
+  };
+
+  const updateNote = async (orderId, noteId, text) => {
+    if (!text.trim()) return;
+    const next = orders.map((o) =>
+      o.id === orderId
+        ? { ...o, notes: (o.notes || []).map((n) => (n.id === noteId ? { ...n, text: text.trim(), edited: true } : n)) }
+        : o
+    );
+    await persistOrders(next);
+    setEditingNoteId(null);
   };
 
   const addPhotos = async (id, dataUrls) => {
@@ -2347,6 +2379,14 @@ function App() {
             {getChecklists(order).length > 0 && (
               <div className="space-y-4 mb-4">
                 {getChecklists(order).map((c) => (
+                  editingOrderChecklistId === c.id ? (
+                    <OrderChecklistEditForm
+                      key={c.id}
+                      checklist={c}
+                      onCancel={() => setEditingOrderChecklistId(null)}
+                      onSave={(name, itemsText) => updateOrderChecklist(order.id, c.id, name, itemsText)}
+                    />
+                  ) : (
                   <div key={c.id} className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
                     <div className="flex items-center justify-between mb-4 pb-4" style={{ borderBottomColor: COLORS.line, borderBottomWidth: '1px' }}>
                       <p className="font-display font-semibold" style={{ color: COLORS.accent }}>
@@ -2356,6 +2396,13 @@ function App() {
                         <span className="font-mono text-sm font-bold" style={{ color: COLORS.accent }}>
                           {c.items.filter((i) => i.checked).length}/{c.items.length}
                         </span>
+                        <button
+                          onClick={() => setEditingOrderChecklistId(c.id)}
+                          className="text-xs font-display uppercase tracking-wider hover:opacity-70"
+                          style={{ color: COLORS.accent }}
+                        >
+                          Edit
+                        </button>
                         <button
                           onClick={() => detachChecklist(order.id, c.id)}
                           className="text-xs font-display uppercase tracking-wider hover:opacity-70"
@@ -2389,6 +2436,7 @@ function App() {
                       ))}
                     </div>
                   </div>
+                  )
                 ))}
               </div>
             )}
@@ -2447,13 +2495,15 @@ function App() {
                 <p className="text-sm text-center py-4" style={{ color: COLORS.line }}>No notes yet. Add one to keep the team in the loop.</p>
               )}
               {(order.notes || []).slice().reverse().map((n) => (
-                <div key={n.id} className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-display font-semibold text-sm" style={{ color: COLORS.accent }}>💬 {n.author}</span>
-                    <span className="font-mono text-xs" style={{ color: COLORS.line }}>{new Date(n.ts).toLocaleString()}</span>
-                  </div>
-                  <p className="text-base">{n.text}</p>
-                </div>
+                <NoteCard
+                  key={n.id}
+                  note={n}
+                  isEditing={editingNoteId === n.id}
+                  canEdit={n.author === currentMechanic || isAdmin}
+                  onEdit={() => setEditingNoteId(n.id)}
+                  onCancel={() => setEditingNoteId(null)}
+                  onSave={(text) => updateNote(order.id, n.id, text)}
+                />
               ))}
             </div>
             <NoteForm onSubmit={(text) => addNote(order.id, text)} />
@@ -2630,6 +2680,36 @@ function TimesheetEntryCard({ entry, isEditing, onEdit, onCancelEdit, onSave, on
   );
 }
 
+function OrderChecklistEditForm({ checklist, onSave, onCancel }) {
+  const [name, setName] = useState(checklist.templateName);
+  const [itemsText, setItemsText] = useState(checklist.items.map((i) => i.text).join('\n'));
+  const canSave = name.trim() && itemsText.trim();
+
+  return (
+    <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
+      <h3 className="font-display text-lg font-bold mb-4">Edit checklist</h3>
+      <TextField label="Checklist name" value={name} onChange={setName} />
+      <label className="block mb-4">
+        <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>Steps</span>
+        <span className="text-xs block mb-2" style={{ color: COLORS.inkDim }}>
+          One step per line. Checked-off items stay checked as long as the wording doesn't change.
+        </span>
+        <textarea
+          value={itemsText}
+          onChange={(e) => setItemsText(e.target.value)}
+          rows={8}
+          className="w-full rounded-lg px-4 py-3 text-base font-body focus:outline-none focus:ring-2 resize-none"
+          style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+        />
+      </label>
+      <div className="flex gap-2">
+        <Btn disabled={!canSave} onClick={() => onSave(name, itemsText)}>Save changes</Btn>
+        <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
 function AdHocChecklistForm({ onSubmit, onCancel }) {
   const [name, setName] = useState('');
   const [itemsText, setItemsText] = useState('');
@@ -2752,6 +2832,46 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit }) {
         <Btn onClick={() => canSubmit && onSubmit({ unit: finalUnit, description, assignedMechanic, hours, dueDate })} disabled={!canSubmit}>Create job</Btn>
         <Btn variant="ghost" onClick={onCancel}>Nevermind</Btn>
       </div>
+    </div>
+  );
+}
+
+function NoteCard({ note, isEditing, canEdit, onEdit, onCancel, onSave }) {
+  const [text, setText] = useState(note.text);
+
+  if (isEditing) {
+    return (
+      <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={3}
+          autoFocus
+          className="w-full rounded-lg px-4 py-3 text-base focus:outline-none focus:ring-2 resize-none mb-3"
+          style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+        />
+        <div className="flex gap-2">
+          <Btn onClick={() => text.trim() && onSave(text)} disabled={!text.trim()}>Save</Btn>
+          <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="font-display font-semibold text-sm" style={{ color: COLORS.accent }}>💬 {note.author}</span>
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-xs" style={{ color: COLORS.line }}>
+            {new Date(note.ts).toLocaleString()}{note.edited ? ' (edited)' : ''}
+          </span>
+          {canEdit && (
+            <button onClick={onEdit} className="text-xs underline" style={{ color: COLORS.inkDim }}>Edit</button>
+          )}
+        </div>
+      </div>
+      <p className="text-base">{note.text}</p>
     </div>
   );
 }
