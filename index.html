@@ -2135,6 +2135,7 @@ function App() {
                     await updateTimesheetEntry(entry.id, patch);
                     setEditingEntryId(null);
                   }}
+                  onDelete={() => deleteTimesheetEntry(entry.id)}
                   onAddJob={addTimesheetJob}
                   onRemoveJob={removeTimesheetJob}
                 />
@@ -3116,7 +3117,8 @@ function TimesheetJobsEditor({ entry, onAdd, onRemove }) {
   );
 }
 
-function TimesheetEntryCard({ entry, locked, isEditing, onEdit, onCancelEdit, onSave, onAddJob, onRemoveJob }) {
+function TimesheetEntryCard({ entry, locked, isEditing, onEdit, onCancelEdit, onSave, onDelete, onAddJob, onRemoveJob }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const toLocalInput = (iso) => {
     if (!iso) return '';
     const d = new Date(iso);
@@ -3151,21 +3153,34 @@ function TimesheetEntryCard({ entry, locked, isEditing, onEdit, onCancelEdit, on
           </label>
         </div>
         <TimesheetJobsEditor entry={entry} onAdd={onAddJob} onRemove={onRemoveJob} />
-        <div className="flex gap-2 mt-4">
-          <Btn
-            onClick={() =>
-              onSave({
-                clockIn: clockIn ? new Date(clockIn).toISOString() : null,
-                clockOut: clockOut ? new Date(clockOut).toISOString() : null,
-                lunchStart: lunchStart ? new Date(lunchStart).toISOString() : null,
-                lunchEnd: lunchEnd ? new Date(lunchEnd).toISOString() : null,
-              })
-            }
-          >
-            Save changes
-          </Btn>
-          <Btn variant="ghost" onClick={onCancelEdit}>Cancel</Btn>
-        </div>
+        {confirmDelete ? (
+          <div className="mt-4 rounded-lg p-3" style={{ background: COLORS.surfaceRaised }}>
+            <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>Delete this whole shift? This can't be undone.</p>
+            <div className="flex gap-2">
+              <Btn variant="danger" onClick={onDelete}>Yes, delete it</Btn>
+              <Btn variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Btn>
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-2 mt-4">
+            <Btn
+              onClick={() =>
+                onSave({
+                  clockIn: clockIn ? new Date(clockIn).toISOString() : null,
+                  clockOut: clockOut ? new Date(clockOut).toISOString() : null,
+                  lunchStart: lunchStart ? new Date(lunchStart).toISOString() : null,
+                  lunchEnd: lunchEnd ? new Date(lunchEnd).toISOString() : null,
+                })
+              }
+            >
+              Save changes
+            </Btn>
+            <Btn variant="ghost" onClick={onCancelEdit}>Cancel</Btn>
+            <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>
+              Delete shift
+            </button>
+          </div>
+        )}
       </div>
     );
   }
