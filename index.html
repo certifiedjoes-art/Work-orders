@@ -2355,28 +2355,28 @@ function App() {
           )}
 
           <h2 className="font-display text-lg font-semibold uppercase tracking-wide mb-4">All shifts</h2>
+          <p className="text-xs mb-4" style={{ color: COLORS.line }}>As an admin, you can edit or delete anyone's shift here — including in approved weeks.</p>
           {filtered.length === 0 ? (
             <p className="text-sm" style={{ color: COLORS.line }}>Nothing to show yet.</p>
           ) : (
             <div className="space-y-3">
               {filtered.map((entry) => (
-                <div key={entry.id} className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-display font-semibold">{entry.mechanic}</span>
-                    <span className="font-mono text-sm" style={{ color: COLORS.inkDim }}>{fmtDate(entry.date)}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-4 text-xs font-mono mb-2" style={{ color: COLORS.inkDim }}>
-                    <span>In {fmtTime(entry.clockIn)}</span>
-                    <span>Out {entry.clockOut ? fmtTime(entry.clockOut) : '—'}</span>
-                    {entry.lunchStart && entry.lunchEnd && <span>Break {fmtTime(entry.lunchStart)}–{fmtTime(entry.lunchEnd)}</span>}
-                    {entry.skippedLunch && <span>No break taken</span>}
-                    <span className="font-bold" style={{ color: COLORS.accent }}>{fmtHours(entryHours(entry))} hrs</span>
-                  </div>
-                  {(entry.jobs || []).length > 0 && (
-                    <p className="text-xs" style={{ color: COLORS.line }}>
-                      {entry.jobs.map((j) => `${j.unit} (${j.hours}h)`).join(' • ')}
-                    </p>
-                  )}
+                <div key={entry.id}>
+                  <p className="font-display text-xs uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>{entry.mechanic}</p>
+                  <TimesheetEntryCard
+                    entry={entry}
+                    locked={false}
+                    isEditing={editingEntryId === entry.id}
+                    onEdit={() => setEditingEntryId(entry.id)}
+                    onCancelEdit={() => setEditingEntryId(null)}
+                    onSave={async (patch) => {
+                      await updateTimesheetEntry(entry.id, patch);
+                      setEditingEntryId(null);
+                    }}
+                    onDelete={() => deleteTimesheetEntry(entry.id)}
+                    onAddJob={addTimesheetJob}
+                    onRemoveJob={removeTimesheetJob}
+                  />
                 </div>
               ))}
             </div>
