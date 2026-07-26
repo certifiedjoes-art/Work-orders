@@ -843,6 +843,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [admins, setAdmins] = useState([]);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(null);
+  const [showRemoveAllConfirm, setShowRemoveAllConfirm] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState(null);
   const [showAdHocChecklist, setShowAdHocChecklist] = useState(false);
   const [timesheets, setTimesheets] = useState(() => cacheGet('timesheets', []));
@@ -1301,6 +1302,15 @@ function App() {
       await saveAdmins(nextAdmins);
     }
     setShowRemoveConfirm(null);
+  };
+
+  const removeAllExceptSelf = async () => {
+    const keep = [currentMechanic];
+    await persistMeta(keep, units);
+    await persistPins({ [currentMechanic]: pins[currentMechanic] });
+    await saveAdmins(admins.filter((a) => a === currentMechanic));
+    setAdmins(admins.filter((a) => a === currentMechanic));
+    setShowRemoveAllConfirm(false);
   };
 
   const toggleAdmin = async (name) => {
@@ -2471,9 +2481,34 @@ function App() {
             ← Back to board
           </button>
           <h1 className="font-display text-3xl font-bold mb-2">Team</h1>
-          <p className="text-sm mb-8" style={{ color: COLORS.inkDim }}>
+          <p className="text-sm mb-4" style={{ color: COLORS.inkDim }}>
             Manage who can sign in, and who has admin access like you.
           </p>
+
+          {mechanics.length > 1 && (
+            <div className="mb-8">
+              {showRemoveAllConfirm ? (
+                <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `2px solid #E07A5F` }}>
+                  <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>
+                    Remove everyone except {currentMechanic}? Their past work orders and timesheets stay on
+                    record — this just removes their sign-in access.
+                  </p>
+                  <div className="flex gap-2">
+                    <Btn variant="danger" onClick={removeAllExceptSelf}>Yes, remove everyone else</Btn>
+                    <Btn variant="ghost" onClick={() => setShowRemoveAllConfirm(false)}>Cancel</Btn>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowRemoveAllConfirm(true)}
+                  className="text-xs font-display uppercase tracking-wider underline"
+                  style={{ color: '#E07A5F' }}
+                >
+                  Remove everyone except me
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="space-y-3">
             {mechanics.map((m) => {
