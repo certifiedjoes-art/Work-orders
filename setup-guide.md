@@ -186,3 +186,44 @@ Each mechanic's completed work orders are tracked automatically:
   (as admin) get a popup asking to add a personal note. Skip it and a
   solid default message still gets posted, so nobody's big milestone
   goes unrecognized even on a busy day
+
+## Real authentication — Phase 1 (this update)
+
+This update quietly creates a real, secure login for each mechanic the
+next time they enter their PIN — but **your database security rules
+have NOT changed yet**. Your app is exactly as protected (or open) as
+it was before this update. That's intentional — we're rolling this out
+in two safe steps.
+
+**What changed for everyone:**
+- **PINs are now 6 digits**, not 4 (Firebase's minimum). Everyone —
+  including existing mechanics — will be asked to set a new one the
+  next time they tap their name.
+- Setting that new PIN quietly creates their real, secure Firebase
+  account behind the scenes. Nothing to do differently — same tap name
+  → enter PIN flow as always.
+
+**What to do now:**
+1. Upload this update (`index.html` + `sw.js` together, as always)
+2. Have every mechanic tap their name and set their new 6-digit PIN at
+   least once — this is what creates their real account
+3. Once **everyone** has done this, come back and tell me — that's
+   when we'll do Phase 2: actually locking the security rules down
+
+**Do NOT change your Firebase security rules until everyone has
+migrated.** If you (or anyone) changes them early, before everyone has
+a real account, you risk locking people out.
+
+**What "Forgot PIN" now means:** since accounts are real, mechanics can
+no longer reset their own forgotten PIN by themselves. If someone
+forgets theirs:
+1. Go to **Firebase Console → Authentication → Users**
+2. Find their email (it'll look like `firstname@harder-contracting.app`
+   — this is a made-up address, not a real inbox, just how Firebase
+   tells people apart)
+3. Delete that user
+4. In the app, go to **Team → Reset login** next to their name
+5. They can now tap their name again and set a brand new PIN
+
+Biometric (Face ID / Touch ID) still works the same way as before —
+it's just now backed by a real login instead of a simple local check.

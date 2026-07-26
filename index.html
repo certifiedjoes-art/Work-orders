@@ -41,6 +41,7 @@
 <!-- Firebase (Realtime Database) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" onload="window.__loadStatus['firebase-app']='ok'" onerror="window.__loadStatus['firebase-app']='FAILED'"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js" onload="window.__loadStatus['firebase-db']='ok'" onerror="window.__loadStatus['firebase-db']='FAILED'"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" onload="window.__loadStatus['firebase-auth']='ok'" onerror="window.__loadStatus['firebase-auth']='FAILED'"></script>
 
 <style>
   html, body {
@@ -113,7 +114,7 @@
     if (root.dataset.errorShown) return;
     if (root.children.length > 0) return; // app rendered fine
     const status = window.__loadStatus || {};
-    const lines = ['tailwind', 'react', 'react-dom', 'babel', 'firebase-app', 'firebase-db'].map(function (k) {
+    const lines = ['tailwind', 'react', 'react-dom', 'babel', 'firebase-app', 'firebase-db', 'firebase-auth'].map(function (k) {
       return k + ': ' + (status[k] || 'never finished loading');
     });
     showFatalError('The app never finished starting up. Here is what loaded:\n\n' + lines.join('\n'));
@@ -201,10 +202,10 @@ function PinModalOverlay({ pinModal, pinInput, setPinInput, pinError, onSubmit, 
     ? `Enter PIN`
     : isConfirm
       ? 'Confirm your PIN'
-      : 'Create a 4-digit PIN';
+      : 'Create a 6-digit PIN';
 
   const handleDigit = (d) => {
-    if (pinInput.length >= 4) return;
+    if (pinInput.length >= 6) return;
     setPinInput(pinInput + d);
   };
   const handleBackspace = () => setPinInput(pinInput.slice(0, -1));
@@ -216,7 +217,7 @@ function PinModalOverlay({ pinModal, pinInput, setPinInput, pinError, onSubmit, 
         <p className="text-sm text-center mb-5" style={{ color: COLORS.inkDim }}>{pinModal.mechanic}</p>
 
         <div className="flex justify-center gap-3 mb-5">
-          {[0, 1, 2, 3].map((i) => (
+          {[0, 1, 2, 3, 4, 5].map((i) => (
             <div
               key={i}
               className="w-4 h-4 rounded-full"
@@ -545,6 +546,18 @@ async function saveMilestonesCelebrated(data) {
   try { await firebase.database().ref('milestonesCelebrated').set(data); } catch (e) { console.error('save milestones failed', e); }
 }
 
+// Firebase Authentication requires an email address, so each mechanic gets a
+// made-up one behind the scenes — nobody needs to know or use this email,
+// it's just how Firebase identifies their real, secure login.
+function emailForMechanic(name) {
+  const slug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return `${slug}@harder-contracting.app`;
+}
+
+async function saveAuthMigrated(data) {
+  try { await firebase.database().ref('authMigrated').set(data); } catch (e) { console.error('save authMigrated failed', e); }
+}
+
 // Small milestones celebrate themselves automatically. Big ones prompt the
 // admin for a personal note so they feel like a bigger deal.
 const AUTO_MILESTONES = [5, 10];
@@ -821,6 +834,7 @@ function App() {
   const [attachTemplateId, setAttachTemplateId] = useState('');
   const [isOnline, setIsOnline] = useState(true);
   const [pins, setPins] = useState({});
+  const [authMigrated, setAuthMigrated] = useState({});
   const [pinModal, setPinModal] = useState(null); // { mode: 'verify'|'setup', mechanic, stage, firstEntry }
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
@@ -901,6 +915,14 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const amRef = firebase.database().ref('authMigrated');
+    const onAm = amRef.on('value', (snap) => {
+      setAuthMigrated(snap.val() || {});
+    });
+    return () => amRef.off('value', onAm);
+  }, []);
+
+  useEffect(() => {
     const adminsRef = firebase.database().ref('admins');
     const onAdmins = adminsRef.on('value', (snap) => {
       const val = snap.val();
@@ -916,7 +938,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (pinModal && pinInput.length === 4) {
+    if (pinModal && pinInput.length === 6) {
       submitPin();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -991,15 +1013,18 @@ function App() {
     const hasCred = !!localStorage.getItem('webauthn_cred_' + name);
     if (hasCred) {
       const ok = await verifyBiometric(name);
-      if (ok) {
+      // Biometric only unlocks a session that's already real and signed-in on
+      // this device — it never bypasses actually having a valid Firebase login.
+      const sessionUser = firebase.auth().currentUser;
+      if (ok && sessionUser && sessionUser.email === emailForMechanic(name)) {
         setCurrentMechanic(name);
         setScreen('dashboard');
         return;
       }
-      // if biometric fails or is cancelled, fall through to PIN entry
+      // if biometric fails, is cancelled, or the session isn't valid, fall through to PIN entry
     }
     setPinInput('');
-    if (pins[name]) {
+    if (authMigrated[name]) {
       setPinModal({ mode: 'verify', mechanic: name });
     } else {
       setPinModal({ mode: 'setup', mechanic: name, stage: 'first', firstEntry: '' });
@@ -1007,10 +1032,10 @@ function App() {
   };
 
   const submitPin = async () => {
-    if (!pinModal || pinInput.length !== 4) return;
+    if (!pinModal || pinInput.length !== 6) return;
     if (pinModal.mode === 'verify') {
-      const hash = await sha256Hex(pinInput);
-      if (hash === pins[pinModal.mechanic]) {
+      try {
+        await firebase.auth().signInWithEmailAndPassword(emailForMechanic(pinModal.mechanic), pinInput);
         const mechanic = pinModal.mechanic;
         setPinModal(null);
         setPinInput('');
@@ -1018,7 +1043,7 @@ function App() {
         setCurrentMechanic(mechanic);
         setScreen('dashboard');
         maybeOfferBiometric(mechanic);
-      } else {
+      } catch (e) {
         setPinError('Wrong PIN — try again');
         setPinInput('');
       }
@@ -1028,10 +1053,40 @@ function App() {
         setPinInput('');
       } else {
         if (pinInput === pinModal.firstEntry) {
-          const hash = await sha256Hex(pinInput);
-          const nextPins = { ...pins, [pinModal.mechanic]: hash };
-          await persistPins(nextPins);
           const mechanic = pinModal.mechanic;
+          const email = emailForMechanic(mechanic);
+          const alreadyMigrated = authMigrated[mechanic];
+          try {
+            if (alreadyMigrated) {
+              // Changing an existing PIN — must be signed in as this person already.
+              if (firebase.auth().currentUser && firebase.auth().currentUser.email === email) {
+                await firebase.auth().currentUser.updatePassword(pinInput);
+              } else {
+                // Not currently signed in as them (e.g. resuming after a while) — sign in with old
+                // session isn't available, so re-authenticate isn't possible without their old PIN.
+                // Safest fallback: treat this like a fresh account so they can still get in.
+                await firebase.auth().signOut().catch(() => {});
+                throw { code: 'needs-reauth' };
+              }
+            } else {
+              const cred = await firebase.auth().createUserWithEmailAndPassword(email, pinInput);
+              await firebase.database().ref('users/' + cred.user.uid).set({ name: mechanic, isAdmin: admins.includes(mechanic) });
+              const nextMigrated = { ...authMigrated, [mechanic]: true };
+              setAuthMigrated(nextMigrated);
+              await saveAuthMigrated(nextMigrated);
+            }
+          } catch (e) {
+            setPinError(
+              e.code === 'auth/email-already-in-use'
+                ? 'A login already exists for this name — try entering your PIN instead, or ask an admin for help.'
+                : e.code === 'needs-reauth'
+                ? "Please sign out and enter your current PIN first, then use Change PIN from there."
+                : 'Could not save your PIN. Check your connection and try again.'
+            );
+            setPinModal({ ...pinModal, stage: 'first', firstEntry: '' });
+            setPinInput('');
+            return;
+          }
           const isNewMechanic = !mechanics.includes(mechanic);
           setPinModal(null);
           setPinInput('');
@@ -1057,16 +1112,18 @@ function App() {
     setPinError('');
   };
 
-  const forgotPin = async () => {
-    if (!pinModal) return;
-    const name = pinModal.mechanic;
-    const nextPins = { ...pins };
-    delete nextPins[name];
-    await persistPins(nextPins);
+  const forgotPin = () => {
+    // Real accounts can't be self-service reset from here anymore — that needs
+    // an admin to clear it from the Firebase console and the Team screen.
+    setPinError('Forgotten your PIN? Ask an admin to reset your login for you — they can do this from the Team screen.');
+  };
+
+  const clearAuthMigration = async (name) => {
+    const next = { ...authMigrated };
+    delete next[name];
+    setAuthMigrated(next);
+    await saveAuthMigrated(next);
     localStorage.removeItem('webauthn_cred_' + name);
-    setPinModal({ mode: 'setup', mechanic: name, stage: 'first', firstEntry: '' });
-    setPinInput('');
-    setPinError('');
   };
 
   const startChangePin = () => {
@@ -1769,7 +1826,13 @@ function App() {
                 📋 Checklists
               </button>
               <button
-                onClick={() => { setCurrentMechanic(null); setScreen('login'); setShowClockInPrompt(false); }}
+                onClick={async () => {
+                  const keepSession = !!localStorage.getItem('webauthn_cred_' + currentMechanic);
+                  if (!keepSession) { await firebase.auth().signOut().catch(() => {}); }
+                  setCurrentMechanic(null);
+                  setScreen('login');
+                  setShowClockInPrompt(false);
+                }}
                 className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
                 style={{ color: COLORS.inkDim, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
               >
@@ -2457,6 +2520,16 @@ function App() {
                           style={{ color: '#E07A5F', background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}
                         >
                           Remove from team
+                        </button>
+                      )}
+                      {authMigrated[m] && (
+                        <button
+                          onClick={() => clearAuthMigration(m)}
+                          className="text-xs font-display uppercase tracking-wider font-semibold px-3 py-2 rounded-lg"
+                          style={{ color: COLORS.accent, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}
+                          title="Only works after you've also deleted their account in Firebase Console → Authentication"
+                        >
+                          Reset login
                         </button>
                       )}
                       {isSelf && (
