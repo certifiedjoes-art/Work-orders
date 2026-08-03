@@ -227,3 +227,44 @@ forgets theirs:
 
 Biometric (Face ID / Touch ID) still works the same way as before —
 it's just now backed by a real login instead of a simple local check.
+
+## Multiple recipients + monthly summary
+
+The Timesheets screen now has three separate report settings, each with
+its own recipient list:
+
+- **Weekly timesheet** — the CSV of every shift, sent every Monday. Add
+  as many emails as you want, separated by commas.
+- **Weekly backup** — the full app backup file, sent every Monday,
+  separately from the timesheet email. Usually just your own email.
+- **Monthly hours summary** — a simple total-hours-per-person report,
+  sent the 1st of every month. One email (e.g. your bookkeeper).
+
+The "Weekly emails turned on" toggle only affects the weekly timesheet
+and backup — the monthly summary always sends if an email is set there.
+
+### One more Cloud Scheduler job needed
+
+The monthly summary needs its own scheduled trigger, separate from the
+weekly one:
+
+1. Go to **Cloud Scheduler** in Google Cloud Console
+2. Click **"Create Job"**
+3. Name: `monthly-timesheet-summary`
+4. Frequency: `0 6 1 * *` (6:00 AM on the 1st of every month)
+5. Timezone: same as your weekly job
+6. Target type: HTTP
+7. URL: your same function URL, but add `&mode=monthly` to the end —
+   e.g. `https://weekly-backup-and-email-....run.app?key=YOUR_SECRET&mode=monthly`
+8. HTTP method: GET
+9. Create
+
+Your existing weekly job doesn't need any changes — it already defaults
+to weekly behavior when no `mode` is specified.
+
+## Time clock
+
+Clock in/out now works freely, any time, no restrictions. The break
+(lunch) buttons work the same as before, just without the "must log a
+break before clocking out" requirement — that can be brought back later
+once the break buttons have been in real use for a while.

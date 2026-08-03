@@ -1415,11 +1415,8 @@ function App() {
 
   const attemptClockOut = () => {
     if (!openEntry) return;
-    const hasLunch = openEntry.lunchStart && openEntry.lunchEnd;
-    if (!hasLunch && !openEntry.skippedLunch) {
-      setLunchPrompt(true);
-      return;
-    }
+    // Clocking out is unrestricted for now — no lunch requirement.
+    // (Easy to bring back later once the break buttons have been used a bit.)
     clockOut(openEntry.skippedLunch);
   };
 
@@ -2246,7 +2243,6 @@ function App() {
       totalsByMechanic[e.mechanic] = (totalsByMechanic[e.mechanic] || 0) + entryHours(e);
     });
 
-    const emailValue = tsEmailDraft !== null ? tsEmailDraft : (timesheetSettings.email || '');
 
     const clockedInNow = timesheets.filter((t) => !t.clockOut && t.date === todayStr());
 
@@ -2346,35 +2342,40 @@ function App() {
 
           {/* Email settings */}
           <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
-            <h2 className="font-display text-sm font-bold uppercase tracking-wide mb-3">Report email</h2>
-            <div className="flex gap-2 mb-4">
-              <input
-                value={emailValue}
-                onChange={(e) => setTsEmailDraft(e.target.value)}
-                placeholder="payroll@yourcompany.com"
-                type="email"
-                className="flex-1 rounded-lg px-4 py-2.5 text-base focus:outline-none focus:ring-2"
-                style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
-              />
-              <Btn
-                onClick={async () => {
-                  await saveTimesheetSettings({ ...timesheetSettings, email: emailValue });
-                  setTsEmailDraft(null);
-                }}
-              >
-                Save
-              </Btn>
-            </div>
-            <label className="flex items-center justify-between gap-3 cursor-pointer">
+            <h2 className="font-display text-sm font-bold uppercase tracking-wide mb-4">Automatic reports</h2>
+
+            <EmailListEditor
+              label="Weekly timesheet — sends every Monday"
+              helper="Anyone who should get the weekly timesheet CSV (comma-separated for more than one)"
+              value={(timesheetSettings.weeklyEmails || []).join(', ')}
+              onSave={(list) => saveTimesheetSettings({ ...timesheetSettings, weeklyEmails: list })}
+            />
+
+            <EmailListEditor
+              label="Weekly backup — sends every Monday"
+              helper="Anyone who should get the full app backup file (usually just you)"
+              value={(timesheetSettings.backupEmails || []).join(', ')}
+              onSave={(list) => saveTimesheetSettings({ ...timesheetSettings, backupEmails: list })}
+            />
+
+            <EmailListEditor
+              label="Monthly hours summary — sends the 1st of each month"
+              helper="One email for whoever handles payroll/books — a simple total-hours-per-person report for last month"
+              value={(timesheetSettings.monthlyEmail || '')}
+              single
+              onSave={(list) => saveTimesheetSettings({ ...timesheetSettings, monthlyEmail: list[0] || '' })}
+            />
+
+            <label className="flex items-center justify-between gap-3 cursor-pointer mt-2">
               <div>
-                <span className="text-sm font-semibold block" style={{ color: COLORS.ink }}>Send automatically every week</span>
-                <span className="text-xs" style={{ color: COLORS.line }}>Needs one more setup step — ask Claude when you're ready</span>
+                <span className="text-sm font-semibold block" style={{ color: COLORS.ink }}>Weekly emails turned on</span>
+                <span className="text-xs" style={{ color: COLORS.line }}>Turn off to pause the weekly timesheet and backup emails without deleting the addresses above. The monthly summary isn't affected by this.</span>
               </div>
               <input
                 type="checkbox"
                 checked={!!timesheetSettings.autoEmail}
                 onChange={(e) => saveTimesheetSettings({ ...timesheetSettings, autoEmail: e.target.checked })}
-                className="w-5 h-5"
+                className="w-5 h-5 flex-shrink-0"
                 style={{ accentColor: COLORS.accent }}
               />
             </label>
@@ -3344,6 +3345,39 @@ function OrderChecklistEditForm({ checklist, onSave, onCancel }) {
       <div className="flex gap-2">
         <Btn disabled={!canSave} onClick={() => onSave(name, itemsText)}>Save changes</Btn>
         <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
+function EmailListEditor({ label, helper, value, onSave, single }) {
+  const [draft, setDraft] = useState(value);
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = () => {
+    const list = draft
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    onSave(single ? list.slice(0, 1) : list);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  return (
+    <div className="mb-5 pb-5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+      <span className="text-sm font-semibold block mb-1" style={{ color: COLORS.ink }}>{label}</span>
+      <span className="text-xs block mb-2" style={{ color: COLORS.inkDim }}>{helper}</span>
+      <div className="flex gap-2">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={single ? 'bookkeeper@yourcompany.com' : 'payroll@yourcompany.com, joe@yourcompany.com'}
+          type="text"
+          className="flex-1 rounded-lg px-4 py-2.5 text-base focus:outline-none focus:ring-2"
+          style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+        />
+        <Btn onClick={handleSave}>{saved ? 'Saved ✓' : 'Save'}</Btn>
       </div>
     </div>
   );
