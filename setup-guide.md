@@ -134,13 +134,17 @@ Every mechanic gets a "⏱️ Time Clock" button on the dashboard to:
 - Start/end a lunch break
 - Log which units or jobs they worked on with hours (free text — works for
   unit numbers, "Labour," "Shop cleanup," anything)
-- Edit their own past shifts if they made a mistake
 
-**Mechanics can only see their own timesheet** — there's no way for them
-to view anyone else's hours.
+**Mechanics can only see their own timesheet, and can't edit it
+themselves** — there's no way for them to view anyone else's hours, and
+if they forget to clock in/out or make a mistake, they just need to ask
+an admin to fix it. Their own history shows "Ask admin to fix a mistake"
+instead of an Edit button.
 
 **Admins** (just Joe right now) get a separate "📊 Timesheets" screen to:
 - View everyone's shifts, filterable by person and date range
+- Edit or delete anyone's shift — this is the only way clock in/out
+  mistakes get fixed, at the mechanic's request
 - See total hours per person
 - Tap "Export & Share" to generate a CSV and open the share sheet
   (choose Mail, and it'll come through as an attachment ready to send)
@@ -163,10 +167,11 @@ through it — a popup handles this automatically.
   the Timesheets screen.
 - **Weekly view with overtime flag** — admins can page week by week
   (Sunday-Saturday) and see a ⚠️ next to anyone over 40 hours that week.
-- **Weekly approval** — tap "Approve this week" to lock it. Once
-  approved, mechanics can no longer edit their own shifts from that week
-  (they'll see a 🔒 instead of an Edit button). Un-approve anytime if you
-  need to reopen it.
+- **Weekly approval** — tap "Approve this week" to lock it, mainly so
+  you have a record of what's been reviewed. Since only admins can edit
+  shifts at all now, this doesn't change who can touch what — it's just
+  a marker of "this week is finalized." Un-approve anytime if you need
+  to reopen it.
 - **"How much have I worked?"** — mechanics can pick any two dates on
   their own Time Clock screen and see total hours in that range.
 

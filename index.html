@@ -2152,9 +2152,11 @@ function App() {
           )}
 
           {/* Past entries */}
-          {/* Pick a date range to see total hours worked */}
           <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-            <h2 className="font-display text-sm font-bold uppercase tracking-wide mb-3">How much have I worked?</h2>
+            <h2 className="font-display text-sm font-bold uppercase tracking-wide mb-1">🧮 Check my hours</h2>
+            <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>
+              Pick a date range — like this pay period — to see your total hours worked, without digging through every shift below.
+            </p>
             <div className="grid grid-cols-2 gap-3 mb-3">
               <label className="block">
                 <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>From</span>
@@ -2177,7 +2179,7 @@ function App() {
                 />
               </label>
             </div>
-            {mySummaryStart && mySummaryEnd && (
+            {mySummaryStart && mySummaryEnd ? (
               <p className="font-display text-xl font-bold" style={{ color: COLORS.accent }}>
                 {fmtHours(
                   myEntries
@@ -2185,6 +2187,8 @@ function App() {
                     .reduce((sum, e) => sum + entryHours(e), 0)
                 )} hrs worked
               </p>
+            ) : (
+              <p className="text-sm" style={{ color: COLORS.line }}>Pick both dates above to see your total.</p>
             )}
           </div>
 
@@ -2198,6 +2202,7 @@ function App() {
                   key={entry.id}
                   entry={entry}
                   locked={isWeekApproved(weekStartOf(entry.date))}
+                  canEdit={isAdmin}
                   isEditing={editingEntryId === entry.id}
                   onEdit={() => setEditingEntryId(entry.id)}
                   onCancelEdit={() => setEditingEntryId(null)}
@@ -2440,6 +2445,7 @@ function App() {
                   <TimesheetEntryCard
                     entry={entry}
                     locked={false}
+                    canEdit={true}
                     isEditing={editingEntryId === entry.id}
                     onEdit={() => setEditingEntryId(entry.id)}
                     onCancelEdit={() => setEditingEntryId(null)}
@@ -3226,7 +3232,7 @@ function TimesheetJobsEditor({ entry, onAdd, onRemove }) {
   );
 }
 
-function TimesheetEntryCard({ entry, locked, isEditing, onEdit, onCancelEdit, onSave, onDelete, onAddJob, onRemoveJob }) {
+function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCancelEdit, onSave, onDelete, onAddJob, onRemoveJob }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const toLocalInput = (iso) => {
     if (!iso) return '';
@@ -3298,7 +3304,9 @@ function TimesheetEntryCard({ entry, locked, isEditing, onEdit, onCancelEdit, on
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <div className="flex items-center justify-between mb-2">
         <span className="font-display font-semibold">{fmtDate(entry.date)}</span>
-        {locked ? (
+        {!canEdit ? (
+          <span className="text-xs" style={{ color: COLORS.line }}>Ask admin to fix a mistake</span>
+        ) : locked ? (
           <span className="text-xs font-semibold" style={{ color: COLORS.done }}>🔒 Approved</span>
         ) : (
           <button onClick={onEdit} className="text-xs underline" style={{ color: COLORS.accent }}>Edit</button>
