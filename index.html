@@ -1863,6 +1863,24 @@ function App() {
               >
                 👤 {currentMechanic}
               </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const regs = await navigator.serviceWorker.getRegistrations();
+                    await Promise.all(regs.map((r) => r.unregister()));
+                    const keys = await caches.keys();
+                    await Promise.all(keys.map((k) => caches.delete(k)));
+                  } catch (e) {
+                    // ignore — reload will still fetch fresh from network
+                  }
+                  window.location.reload(true);
+                }}
+                className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
+                style={{ color: COLORS.inkDim, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+                title="Force the app to grab the latest version"
+              >
+                🔄 Check for Updates
+              </button>
             </div>
           </div>
 
