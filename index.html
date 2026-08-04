@@ -843,6 +843,14 @@ function App() {
   const [isOnline, setIsOnline] = useState(true);
   const [pins, setPins] = useState({});
   const [authMigrated, setAuthMigrated] = useState({});
+  const [firebaseUser, setFirebaseUser] = useState(undefined); // undefined = still checking, null = signed out
+
+  useEffect(() => {
+    const unsubscribe = firebase.auth().onAuthStateChanged((u) => {
+      setFirebaseUser(u);
+    });
+    return () => unsubscribe();
+  }, []);
   const [pinModal, setPinModal] = useState(null); // { mode: 'verify'|'setup', mechanic, stage, firstEntry }
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
@@ -1024,7 +1032,17 @@ function App() {
       const ok = await verifyBiometric(name);
       // Biometric only unlocks a session that's already real and signed-in on
       // this device — it never bypasses actually having a valid Firebase login.
-      const sessionUser = firebase.auth().currentUser;
+      // Firebase can take a moment to restore that session on a fresh app
+      // load, so wait briefly for it rather than checking too early.
+      let sessionUser = firebaseUser;
+      if (sessionUser === undefined) {
+        sessionUser = await new Promise((resolve) => {
+          const unsub = firebase.auth().onAuthStateChanged((u) => {
+            unsub();
+            resolve(u);
+          });
+        });
+      }
       if (ok && sessionUser && sessionUser.email === emailForMechanic(name)) {
         setCurrentMechanic(name);
         setScreen('dashboard');
