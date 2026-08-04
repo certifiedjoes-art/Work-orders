@@ -211,7 +211,7 @@ function PinModalOverlay({ pinModal, pinInput, setPinInput, pinError, onSubmit, 
   const handleBackspace = () => setPinInput(pinInput.slice(0, -1));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.75)' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.75)' }}>
       <div className="w-full max-w-xs rounded-2xl p-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
         <p className="font-display text-lg font-bold text-center mb-1">{title}</p>
         <p className="text-sm text-center mb-5" style={{ color: COLORS.inkDim }}>{pinModal.mechanic}</p>
@@ -280,7 +280,7 @@ function PinModalOverlay({ pinModal, pinInput, setPinInput, pinError, onSubmit, 
 function BiometricOfferOverlay({ mechanic, onEnable, onSkip }) {
   if (!mechanic) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.75)' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.75)' }}>
       <div className="w-full max-w-xs rounded-2xl p-6 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
         <p className="text-4xl mb-3">🔓</p>
         <p className="font-display text-lg font-bold mb-2">Use Face ID or Touch ID?</p>
@@ -365,7 +365,7 @@ function MilestonePromptOverlay({ prompt, onSubmit, onSkip }) {
   const [text, setText] = useState('');
   if (!prompt) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.8)' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.8)' }}>
       <div className="w-full max-w-sm rounded-2xl p-6 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
         <p className="text-4xl mb-3">🏆</p>
         <p className="font-display text-xl font-bold mb-2">{prompt.mechanic} just hit {prompt.count}!</p>
@@ -392,7 +392,7 @@ function MilestonePromptOverlay({ prompt, onSubmit, onSkip }) {
 function ClockInPromptOverlay({ show, mechanic, onClockIn, onSkip }) {
   if (!show) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.75)' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.75)' }}>
       <div className="w-full max-w-xs rounded-2xl p-6 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
         <p className="text-4xl mb-3">⏱️</p>
         <p className="font-display text-lg font-bold mb-2">Clock in, {mechanic}?</p>
@@ -2129,7 +2129,7 @@ function App() {
           </div>
 
           {lunchPrompt && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.75)' }}>
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.75)' }}>
               <div className="w-full max-w-xs rounded-2xl p-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
                 <p className="font-display text-lg font-bold mb-3 text-center">No break logged today</p>
                 <p className="text-sm mb-5 text-center" style={{ color: COLORS.inkDim }}>
