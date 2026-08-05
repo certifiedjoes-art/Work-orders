@@ -1,6 +1,6 @@
 // Bump this version string every time index.html changes, so phones
 // reliably pick up the new version instead of getting stuck on an old one.
-const CACHE_NAME = 'harder-work-orders-v28';
+const CACHE_NAME = 'harder-work-orders-v30';
 
 const APP_SHELL = [
   './',
