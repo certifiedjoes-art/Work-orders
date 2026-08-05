@@ -593,7 +593,9 @@ function fmtDate(d) {
 
 function fmtTime(iso) {
   if (!iso) return '';
-  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  // hour12 forced explicitly so this always shows AM/PM regardless of the
+  // phone's system time format setting (some Android phones default to 24-hour).
+  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
 // Total paid hours for a shift: clock-in to clock-out, minus any unpaid break.
@@ -1008,6 +1010,8 @@ function App() {
   const [timesheets, setTimesheets] = useState(() => cacheGet('timesheets', []));
   const [timesheetSettings, setTimesheetSettings] = useState({ email: '', autoEmail: false });
   const [lunchPrompt, setLunchPrompt] = useState(false);
+  const [showAddMissedDay, setShowAddMissedDay] = useState(false);
+  const [showAddMissedDayAdmin, setShowAddMissedDayAdmin] = useState(false);
   const [editingEntryId, setEditingEntryId] = useState(null);
   const [tsFilterMechanic, setTsFilterMechanic] = useState('');
   const [tsFilterStart, setTsFilterStart] = useState('');
@@ -1616,6 +1620,25 @@ function App() {
 
   const deleteTimesheetEntry = async (entryId) => {
     await persistTimesheets(timesheets.filter((t) => t.id !== entryId));
+  };
+
+  // Adds a whole missed day — for when clock in/out was forgotten entirely,
+  // so there's no existing entry to edit. mechanicName lets an admin add a
+  // day on behalf of anyone; a mechanic adding their own just passes their
+  // own name.
+  const addManualEntry = async (mechanicName, date, clockInLocal, clockOutLocal, lunchStartLocal, lunchEndLocal) => {
+    const entry = {
+      id: uid(),
+      mechanic: mechanicName,
+      date,
+      clockIn: clockInLocal ? new Date(clockInLocal).toISOString() : null,
+      clockOut: clockOutLocal ? new Date(clockOutLocal).toISOString() : null,
+      lunchStart: lunchStartLocal ? new Date(lunchStartLocal).toISOString() : null,
+      lunchEnd: lunchEndLocal ? new Date(lunchEndLocal).toISOString() : null,
+      skippedLunch: !lunchStartLocal && !lunchEndLocal,
+      jobs: [],
+    };
+    await persistTimesheets([...timesheets, entry]);
   };
 
   const isWeekApproved = (weekStart) => !!timesheetApprovals[weekStart];
@@ -2354,6 +2377,31 @@ function App() {
             </div>
           )}
 
+          {/* Add a missed day */}
+          {showAddMissedDay ? (
+            <AddMissedDayForm
+              t={t}
+              defaultMechanic={currentMechanic}
+              onSubmit={async (mechanicName, date, ci, co, ls, le, setError) => {
+                if (isWeekApproved(weekStartOf(date))) {
+                  setError("That week's already been approved — ask admin to add this one for you.");
+                  return;
+                }
+                await addManualEntry(mechanicName, date, ci, co, ls, le);
+                setShowAddMissedDay(false);
+              }}
+              onCancel={() => setShowAddMissedDay(false)}
+            />
+          ) : (
+            <button
+              onClick={() => setShowAddMissedDay(true)}
+              className="w-full text-center text-sm font-display uppercase tracking-wide mb-8 py-3 rounded-lg"
+              style={{ color: COLORS.accent, background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}
+            >
+              + Add a missed day
+            </button>
+          )}
+
           {/* Past entries */}
           <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
             <h2 className="font-display text-sm font-bold uppercase tracking-wide mb-1">{t('checkMyHours')}</h2>
@@ -2405,7 +2453,7 @@ function App() {
                   key={entry.id}
                   entry={entry}
                   locked={isWeekApproved(weekStartOf(entry.date))}
-                  canEdit={isAdmin}
+                  canEdit={isAdmin || !isWeekApproved(weekStartOf(entry.date))}
                   isEditing={editingEntryId === entry.id}
                   onEdit={() => setEditingEntryId(entry.id)}
                   onCancelEdit={() => setEditingEntryId(null)}
@@ -2597,6 +2645,27 @@ function App() {
               />
             </label>
           </div>
+
+          {/* Add a missed day (any employee) */}
+          {showAddMissedDayAdmin ? (
+            <AddMissedDayForm
+              t={t}
+              mechanics={mechanics}
+              onSubmit={async (mechanicName, date, ci, co, ls, le, setError) => {
+                await addManualEntry(mechanicName, date, ci, co, ls, le);
+                setShowAddMissedDayAdmin(false);
+              }}
+              onCancel={() => setShowAddMissedDayAdmin(false)}
+            />
+          ) : (
+            <button
+              onClick={() => setShowAddMissedDayAdmin(true)}
+              className="w-full text-center text-sm font-display uppercase tracking-wide mb-6 py-3 rounded-lg"
+              style={{ color: COLORS.accent, background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}
+            >
+              + Add a missed day for someone
+            </button>
+          )}
 
           {/* Filters */}
           <div className="rounded-lg p-5 mb-6" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
@@ -3579,6 +3648,79 @@ function OrderChecklistEditForm({ checklist, onSave, onCancel }) {
       <div className="flex gap-2">
         <Btn disabled={!canSave} onClick={() => onSave(name, itemsText)}>Save changes</Btn>
         <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
+function AddMissedDayForm({ onSubmit, onCancel, mechanics, defaultMechanic, t }) {
+  const tr = t || ((k) => translations.en[k] || k);
+  const [mechanic, setMechanic] = useState(defaultMechanic || (mechanics && mechanics[0]) || '');
+  const [date, setDate] = useState(todayStr());
+  const [clockInTime, setClockInTime] = useState('');
+  const [clockOutTime, setClockOutTime] = useState('');
+  const [lunchStartTime, setLunchStartTime] = useState('');
+  const [lunchEndTime, setLunchEndTime] = useState('');
+  const [error, setError] = useState('');
+
+  const combine = (d, time) => (time ? `${d}T${time}` : null);
+
+  const handleSave = () => {
+    if (!date || !clockInTime) {
+      setError('Pick a date and at least a clock-in time.');
+      return;
+    }
+    onSubmit(
+      mechanic,
+      date,
+      combine(date, clockInTime),
+      combine(date, clockOutTime),
+      combine(date, lunchStartTime),
+      combine(date, lunchEndTime),
+      setError
+    );
+  };
+
+  const fieldStyle = { background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
+  const fieldClass = 'w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2';
+
+  return (
+    <div className="rounded-lg p-5 mb-6" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>
+      <h3 className="font-display text-sm font-bold uppercase tracking-wide mb-3">+ Add a missed day</h3>
+      {mechanics && (
+        <label className="block mb-3">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Mechanic</span>
+          <select value={mechanic} onChange={(e) => setMechanic(e.target.value)} className={fieldClass} style={fieldStyle}>
+            {mechanics.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </label>
+      )}
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <label className="block col-span-2">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Date</span>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={fieldClass} style={fieldStyle} />
+        </label>
+        <label className="block">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>{tr('clockIn')}</span>
+          <input type="time" value={clockInTime} onChange={(e) => setClockInTime(e.target.value)} className={fieldClass} style={fieldStyle} />
+        </label>
+        <label className="block">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>{tr('clockOut')}</span>
+          <input type="time" value={clockOutTime} onChange={(e) => setClockOutTime(e.target.value)} className={fieldClass} style={fieldStyle} />
+        </label>
+        <label className="block">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Break start (optional)</span>
+          <input type="time" value={lunchStartTime} onChange={(e) => setLunchStartTime(e.target.value)} className={fieldClass} style={fieldStyle} />
+        </label>
+        <label className="block">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Break end (optional)</span>
+          <input type="time" value={lunchEndTime} onChange={(e) => setLunchEndTime(e.target.value)} className={fieldClass} style={fieldStyle} />
+        </label>
+      </div>
+      {error && <p className="text-xs mb-3" style={{ color: '#E07A5F' }}>{error}</p>}
+      <div className="flex gap-2">
+        <Btn onClick={handleSave}>Save day</Btn>
+        <Btn variant="ghost" onClick={onCancel}>{tr('cancel')}</Btn>
       </div>
     </div>
   );
