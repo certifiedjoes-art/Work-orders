@@ -161,7 +161,151 @@
 </script>
 
 <script type="text/babel" data-presets="react">
-const { useState, useEffect } = React;
+const { useState, useEffect, useContext, createContext } = React;
+
+// --- Language / translation system -----------------------------------
+// Each mechanic can pick English or Spanish for their own device — it's
+// stored locally, doesn't affect anyone else, and never changes what's
+// saved to the database.
+const translations = {
+  en: {
+    // Login screen
+    whoAreYou: "Who's working today?",
+    pickYourName: 'Pick your name to get started',
+    tapToSignIn: 'Tap to sign in',
+    firstTimeHere: 'First time here?',
+    addYourName: 'Add your name',
+    yourName: 'Your name',
+    cancel: 'Cancel',
+    addMe: 'Add me',
+    enterNameToSignIn: 'Enter your name to sign in:',
+    signIn: 'Sign in',
+    // PIN modal
+    enterPin: 'Enter your PIN',
+    createPin: 'Create a 6-digit PIN',
+    confirmPin: 'Confirm your PIN',
+    forgotPin: 'Forgot PIN? Reset it',
+    wrongPin: 'Wrong PIN — try again',
+    pinMismatch: "Those didn't match — start over",
+    // Dashboard
+    openWorkOrders: 'Open Work Orders',
+    searchPlaceholder: "🔍 Search work orders — a name, a unit, a word like 'brake'…",
+    newWorkOrder: '+ New Work Order',
+    machines: 'Machines',
+    viewByMachine: 'View by machine',
+    checklists: 'Checklists',
+    team: 'Team',
+    timesheets: 'Timesheets',
+    timeClock: 'Time Clock',
+    shoutouts: 'Shoutouts',
+    logout: 'Log out',
+    checkForUpdates: '🔄 Check for Updates',
+    noOpenOrders: 'No open work orders right now.',
+    // Time clock
+    clockIn: 'Clock In',
+    clockOut: 'Clock Out',
+    startBreak: 'Start Break',
+    endBreak: 'End Break',
+    onBreak: 'On break',
+    notClockedIn: "You're not clocked in",
+    clockedInSince: 'Clocked in since',
+    clockedIn: 'Clocked In',
+    tapToClockIn: 'Tap to clock in for the day',
+    sinceTapToLog: 'tap to clock out or log hours',
+    board: 'Board',
+    checkMyHours: '🧮 Check my hours',
+    checkMyHoursHelp: "Pick a date range — like this pay period — to see your total hours worked, without digging through every shift below.",
+    from: 'From',
+    to: 'To',
+    pickBothDates: 'Pick both dates above to see your total.',
+    hrsWorked: 'hrs worked',
+    myShifts: 'My Shifts',
+    jobsToday: 'Jobs worked on today',
+    addJob: '+ Add job',
+    unit: 'Unit',
+    hours: 'Hours',
+    add: 'Add',
+    askAdminToFix: 'Ask admin to fix a mistake',
+    noBreakLoggedToday: 'No break logged today',
+    goBackBreakReminder: 'Go back and tap "Start Break" / "End Break" if you took one, or confirm you worked straight through.',
+    goBack: 'Go back',
+    workedStraightThrough: 'I worked straight through — clock out',
+    backToBoard: '← Back to board',
+    clockedInAt: 'Clocked in at',
+    onBreakSince: '☕ On break since',
+    breakLabel: 'Break',
+    whatDidYouWorkOn: 'What did you work on?',
+  },
+  es: {
+    whoAreYou: '¿Quién trabaja hoy?',
+    pickYourName: 'Elige tu nombre para comenzar',
+    tapToSignIn: 'Toca para iniciar sesión',
+    firstTimeHere: '¿Primera vez aquí?',
+    addYourName: 'Agrega tu nombre',
+    yourName: 'Tu nombre',
+    cancel: 'Cancelar',
+    addMe: 'Agregarme',
+    enterNameToSignIn: 'Ingresa tu nombre para iniciar sesión:',
+    signIn: 'Iniciar sesión',
+    enterPin: 'Ingresa tu PIN',
+    createPin: 'Crea un PIN de 6 dígitos',
+    confirmPin: 'Confirma tu PIN',
+    forgotPin: '¿Olvidaste tu PIN? Restablécelo',
+    wrongPin: 'PIN incorrecto — intenta de nuevo',
+    pinMismatch: 'No coinciden — vuelve a empezar',
+    openWorkOrders: 'Órdenes de Trabajo Abiertas',
+    searchPlaceholder: "🔍 Buscar órdenes — un nombre, una unidad, una palabra como 'freno'…",
+    newWorkOrder: '+ Nueva Orden de Trabajo',
+    machines: 'Máquinas',
+    viewByMachine: 'Ver por máquina',
+    checklists: 'Listas de Verificación',
+    team: 'Equipo',
+    timesheets: 'Horarios',
+    timeClock: 'Reloj de Tiempo',
+    shoutouts: 'Reconocimientos',
+    logout: 'Cerrar sesión',
+    checkForUpdates: '🔄 Buscar Actualizaciones',
+    noOpenOrders: 'No hay órdenes de trabajo abiertas por ahora.',
+    clockIn: 'Marcar Entrada',
+    clockOut: 'Marcar Salida',
+    startBreak: 'Iniciar Descanso',
+    endBreak: 'Terminar Descanso',
+    onBreak: 'En descanso',
+    notClockedIn: 'No has marcado entrada',
+    clockedInSince: 'Entrada marcada desde',
+    clockedIn: 'Turno Activo',
+    tapToClockIn: 'Toca para marcar entrada',
+    sinceTapToLog: 'toca para marcar salida o registrar horas',
+    board: 'Tablero',
+    checkMyHours: '🧮 Ver mis horas',
+    checkMyHoursHelp: 'Elige un rango de fechas — como este período de pago — para ver tus horas totales trabajadas, sin buscar en cada turno.',
+    from: 'Desde',
+    to: 'Hasta',
+    pickBothDates: 'Elige ambas fechas arriba para ver tu total.',
+    hrsWorked: 'hrs trabajadas',
+    myShifts: 'Mis Turnos',
+    jobsToday: 'Trabajos de hoy',
+    addJob: '+ Agregar trabajo',
+    unit: 'Unidad',
+    hours: 'Horas',
+    add: 'Agregar',
+    askAdminToFix: 'Pide al admin que corrija un error',
+    noBreakLoggedToday: 'No se registró descanso hoy',
+    goBackBreakReminder: 'Regresa y toca "Iniciar Descanso" / "Terminar Descanso" si tomaste uno, o confirma que trabajaste sin parar.',
+    goBack: 'Regresar',
+    workedStraightThrough: 'Trabajé sin parar — marcar salida',
+    backToBoard: '← Volver al tablero',
+    clockedInAt: 'Entrada marcada a las',
+    onBreakSince: '☕ En descanso desde',
+    breakLabel: 'Descanso',
+    whatDidYouWorkOn: '¿En qué trabajaste?',
+  },
+};
+
+const LanguageContext = createContext({ lang: 'en', t: (k) => translations.en[k] || k });
+function useLang() {
+  return useContext(LanguageContext);
+}
 
 const COLORS = {
   bg: '#1B1F19',
@@ -194,15 +338,16 @@ function OfflineBanner({ isOnline }) {
   );
 }
 
-function PinModalOverlay({ pinModal, pinInput, setPinInput, pinError, onSubmit, onCancel, onForgot }) {
+function PinModalOverlay({ pinModal, pinInput, setPinInput, pinError, onSubmit, onCancel, onForgot, t }) {
+  const tr = t || ((k) => translations.en[k] || k);
   if (!pinModal) return null;
   const isVerify = pinModal.mode === 'verify';
   const isConfirm = pinModal.mode === 'setup' && pinModal.stage === 'confirm';
   const title = isVerify
-    ? `Enter PIN`
+    ? tr('enterPin')
     : isConfirm
-      ? 'Confirm your PIN'
-      : 'Create a 6-digit PIN';
+      ? tr('confirmPin')
+      : tr('createPin');
 
   const handleDigit = (d) => {
     if (pinInput.length >= 6) return;
@@ -269,7 +414,7 @@ function PinModalOverlay({ pinModal, pinInput, setPinInput, pinError, onSubmit, 
 
         {isVerify && (
           <button onClick={onForgot} className="block w-full text-center text-sm underline" style={{ color: COLORS.inkDim }}>
-            Forgot PIN? Reset it
+            {tr('forgotPin')}
           </button>
         )}
       </div>
@@ -821,6 +966,12 @@ function App() {
   const [orders, setOrders] = useState(() => cacheGet('orders', []));
   const [currentMechanic, setCurrentMechanic] = useState(null);
   const [screen, setScreen] = useState('login');
+  const [lang, setLang] = useState(() => localStorage.getItem('appLang') || 'en');
+  const setLangPersist = (l) => {
+    localStorage.setItem('appLang', l);
+    setLang(l);
+  };
+  const t = (key) => (translations[lang] && translations[lang][key]) || translations.en[key] || key;
   const [activeUnit, setActiveUnit] = useState(null);
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [newMechanicName, setNewMechanicName] = useState('');
@@ -1063,7 +1214,7 @@ function App() {
         setScreen('dashboard');
         maybeOfferBiometric(mechanic);
       } catch (e) {
-        setPinError('Wrong PIN — try again');
+        setPinError(t('wrongPin'));
         setPinInput('');
       }
     } else if (pinModal.mode === 'setup') {
@@ -1117,7 +1268,7 @@ function App() {
           setScreen('dashboard');
           maybeOfferBiometric(mechanic);
         } else {
-          setPinError("Those didn't match — start over");
+          setPinError(t('pinMismatch'));
           setPinModal({ ...pinModal, stage: 'first', firstEntry: '' });
           setPinInput('');
         }
@@ -1433,8 +1584,11 @@ function App() {
 
   const attemptClockOut = () => {
     if (!openEntry) return;
-    // Clocking out is unrestricted for now — no lunch requirement.
-    // (Easy to bring back later once the break buttons have been used a bit.)
+    const hasLunch = openEntry.lunchStart && openEntry.lunchEnd;
+    if (!hasLunch && !openEntry.skippedLunch) {
+      setLunchPrompt(true);
+      return;
+    }
     clockOut(openEntry.skippedLunch);
   };
 
@@ -1610,6 +1764,7 @@ function App() {
           onSubmit={submitPin}
           onCancel={cancelPinModal}
           onForgot={forgotPin}
+          t={t}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -1653,6 +1808,7 @@ function App() {
           onSubmit={submitPin}
           onCancel={cancelPinModal}
           onForgot={forgotPin}
+          t={t}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -1671,12 +1827,12 @@ function App() {
           <div className="text-center mb-10">
             <p className="font-display text-sm uppercase tracking-[0.3em] mb-2" style={{ color: COLORS.accent }}>Harder Contracting</p>
             <h1 className="font-display text-4xl font-bold mb-2">Work Order Board</h1>
-            <p className="text-base" style={{ color: COLORS.inkDim }}>Pick your name to get started</p>
+            <p className="text-base" style={{ color: COLORS.inkDim }}>{t('pickYourName')}</p>
           </div>
 
           {mechanics.length > 0 && (
             <div className="mb-8">
-              <p className="font-display text-xs uppercase tracking-wider mb-3 block" style={{ color: COLORS.inkDim }}>Tap to sign in</p>
+              <p className="font-display text-xs uppercase tracking-wider mb-3 block" style={{ color: COLORS.inkDim }}>{t('tapToSignIn')}</p>
               <div className="grid grid-cols-2 gap-3">
                 {mechanics.map((m) => (
                   <button
@@ -1697,19 +1853,19 @@ function App() {
           )}
 
           <div className="rounded-lg p-5 shop-card" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>
-            <p className="font-display text-sm uppercase tracking-wide mb-3 block" style={{ color: COLORS.accent }}>First time here?</p>
-            <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>Enter your name to sign in:</p>
+            <p className="font-display text-sm uppercase tracking-wide mb-3 block" style={{ color: COLORS.accent }}>{t('firstTimeHere')}</p>
+            <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>{t('enterNameToSignIn')}</p>
             <div className="flex gap-2">
               <input
                 value={newMechanicName}
                 onChange={(e) => setNewMechanicName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addMechanic()}
-                placeholder="Your name"
+                placeholder={t('yourName')}
                 className="flex-1 rounded-lg px-4 py-2 text-base focus:outline-none focus:ring-2"
                 style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
                 autoFocus
               />
-              <Btn onClick={addMechanic}>Sign in</Btn>
+              <Btn onClick={addMechanic}>{t('signIn')}</Btn>
             </div>
           </div>
         </div>
@@ -1783,6 +1939,7 @@ function App() {
           onSubmit={submitPin}
           onCancel={cancelPinModal}
           onForgot={forgotPin}
+          t={t}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -1815,7 +1972,7 @@ function App() {
           <div className="flex items-start justify-between mb-10">
             <div>
               <p className="font-display text-xs uppercase tracking-[0.3em] mb-2" style={{ color: COLORS.accent }}>Harder Contracting</p>
-              <h1 className="font-display text-3xl sm:text-4xl font-bold">Board</h1>
+              <h1 className="font-display text-3xl sm:text-4xl font-bold">{t('board')}</h1>
             </div>
             <div className="flex items-center gap-3 flex-wrap justify-end">
               {isAdmin && (
@@ -1824,7 +1981,7 @@ function App() {
                   className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
                   style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
                 >
-                  📊 Timesheets
+                  📊 {t('timesheets')}
                 </button>
               )}
               {isAdmin && (
@@ -1833,7 +1990,7 @@ function App() {
                   className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
                   style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
                 >
-                  ⚙️ Team
+                  ⚙️ {t('team')}
                 </button>
               )}
               <button
@@ -1841,14 +1998,14 @@ function App() {
                 className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
                 style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
               >
-                🎉 Shoutouts
+                🎉 {t('shoutouts')}
               </button>
               <button
                 onClick={() => setScreen('checklists')}
                 className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
                 style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
               >
-                📋 Checklists
+                📋 {t('checklists')}
               </button>
               <button
                 onClick={async () => {
@@ -1911,13 +2068,13 @@ function App() {
                   className="font-display text-xl font-bold"
                   style={{ color: openEntry ? '#1B1F19' : COLORS.ink }}
                 >
-                  {openEntry ? 'Clocked In' : 'Time Clock'}
+                  {openEntry ? t('clockedIn') : t('timeClock')}
                 </p>
                 <p
                   className="text-sm"
                   style={{ color: openEntry ? '#1B1F19' : COLORS.inkDim, opacity: openEntry ? 0.75 : 1 }}
                 >
-                  {openEntry ? `Since ${fmtTime(openEntry.clockIn)} — tap to clock out or log hours` : 'Tap to clock in for the day'}
+                  {openEntry ? `${t('clockedInSince')} ${fmtTime(openEntry.clockIn)} — ${t('sinceTapToLog')}` : t('tapToClockIn')}
                 </p>
               </div>
             </div>
@@ -1928,7 +2085,7 @@ function App() {
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="🔍 Search work orders — a name, a unit, a word like 'brake'…"
+              placeholder={t('searchPlaceholder')}
               className="w-full rounded-xl px-5 py-4 text-base focus:outline-none focus:ring-2"
               style={{ background: COLORS.surface, color: COLORS.ink, border: `2px solid ${COLORS.line}` }}
             />
@@ -1959,16 +2116,16 @@ function App() {
           ) : (
             <React.Fragment>
               <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-                <h2 className="font-display text-lg font-semibold uppercase tracking-wide">Open Work Orders</h2>
+                <h2 className="font-display text-lg font-semibold uppercase tracking-wide">{t('openWorkOrders')}</h2>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setScreen('machines')}
                     className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
                     style={{ color: COLORS.inkDim, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
                   >
-                    View by machine
+                    {t('viewByMachine')}
                   </button>
-                  <Btn onClick={() => setShowAddOrder((s) => !s)}>+ New Work Order</Btn>
+                  <Btn onClick={() => setShowAddOrder((s) => !s)}>{t('newWorkOrder')}</Btn>
                 </div>
               </div>
 
@@ -1984,7 +2141,7 @@ function App() {
               {openOrders.length === 0 ? (
                 <div className="rounded-lg p-10 text-center" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
                   <p className="font-body text-base mb-2" style={{ color: COLORS.inkDim }}>All caught up!</p>
-                  <p className="font-body text-sm" style={{ color: COLORS.line }}>No open work orders right now.</p>
+                  <p className="font-body text-sm" style={{ color: COLORS.line }}>{t('noOpenOrders')}</p>
                 </div>
               ) : (
                 <div className="space-y-3">{openOrders.map(renderOrderCard)}</div>
@@ -2021,6 +2178,7 @@ function App() {
           onSubmit={submitPin}
           onCancel={cancelPinModal}
           onForgot={forgotPin}
+          t={t}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -2123,40 +2281,40 @@ function App() {
         <OfflineBanner isOnline={isOnline} />
         <div className="max-w-2xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            ← Back to board
+            {t('backToBoard')}
           </button>
-          <h1 className="font-display text-3xl font-bold mb-2">Time Clock</h1>
+          <h1 className="font-display text-3xl font-bold mb-2">{t('timeClock')}</h1>
           <p className="text-sm mb-8" style={{ color: COLORS.inkDim }}>{currentMechanic}</p>
 
           {/* Current status card */}
           <div className="rounded-lg p-6 mb-8 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
             {!openEntry ? (
               <React.Fragment>
-                <p className="text-base mb-5" style={{ color: COLORS.inkDim }}>Not clocked in</p>
-                <Btn onClick={clockIn}>Clock In</Btn>
+                <p className="text-base mb-5" style={{ color: COLORS.inkDim }}>{t('notClockedIn')}</p>
+                <Btn onClick={clockIn}>{t('clockIn')}</Btn>
               </React.Fragment>
             ) : (
               <React.Fragment>
-                <p className="font-mono text-sm mb-1" style={{ color: COLORS.inkDim }}>Clocked in at</p>
+                <p className="font-mono text-sm mb-1" style={{ color: COLORS.inkDim }}>{t('clockedInAt')}</p>
                 <p className="font-display text-2xl font-bold mb-5">{fmtTime(openEntry.clockIn)}</p>
 
                 {onLunch ? (
                   <React.Fragment>
-                    <p className="text-sm mb-4" style={{ color: COLORS.progress }}>☕ On break since {fmtTime(openEntry.lunchStart)}</p>
-                    <Btn onClick={endLunch}>End Break</Btn>
+                    <p className="text-sm mb-4" style={{ color: COLORS.progress }}>{t('onBreakSince')} {fmtTime(openEntry.lunchStart)}</p>
+                    <Btn onClick={endLunch}>{t('endBreak')}</Btn>
                   </React.Fragment>
                 ) : (
                   <div className="flex flex-col gap-3 items-center">
                     {openEntry.lunchStart && openEntry.lunchEnd && (
                       <p className="text-xs font-mono" style={{ color: COLORS.inkDim }}>
-                        Break: {fmtTime(openEntry.lunchStart)} – {fmtTime(openEntry.lunchEnd)}
+                        {t('breakLabel')}: {fmtTime(openEntry.lunchStart)} – {fmtTime(openEntry.lunchEnd)}
                       </p>
                     )}
                     <div className="flex gap-3">
                       {!openEntry.lunchStart && (
-                        <Btn variant="ghost" onClick={startLunch}>Start Break</Btn>
+                        <Btn variant="ghost" onClick={startLunch}>{t('startBreak')}</Btn>
                       )}
-                      <Btn onClick={attemptClockOut}>Clock Out</Btn>
+                      <Btn onClick={attemptClockOut}>{t('clockOut')}</Btn>
                     </div>
                   </div>
                 )}
@@ -2167,13 +2325,13 @@ function App() {
           {lunchPrompt && (
             <div className="absolute inset-0 z-50 p-6" style={{ background: 'rgba(0,0,0,0.75)', minHeight: '100vh' }}>
               <div className="w-full max-w-xs mx-auto my-8 rounded-2xl p-6 overflow-y-auto" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}`, maxHeight: '85vh' }}>
-                <p className="font-display text-lg font-bold mb-3 text-center">No break logged today</p>
+                <p className="font-display text-lg font-bold mb-3 text-center">{t('noBreakLoggedToday')}</p>
                 <p className="text-sm mb-5 text-center" style={{ color: COLORS.inkDim }}>
-                  Go back and tap "Start Break" / "End Break" if you took one, or confirm you worked straight through.
+                  {t('goBackBreakReminder')}
                 </p>
                 <div className="flex flex-col gap-2">
-                  <Btn variant="ghost" onClick={() => setLunchPrompt(false)}>Go back</Btn>
-                  <Btn variant="danger" onClick={() => clockOut(true)}>I worked straight through — clock out</Btn>
+                  <Btn variant="ghost" onClick={() => setLunchPrompt(false)}>{t('goBack')}</Btn>
+                  <Btn variant="danger" onClick={() => clockOut(true)}>{t('workedStraightThrough')}</Btn>
                 </div>
               </div>
             </div>
@@ -2182,20 +2340,20 @@ function App() {
           {/* Jobs worked on today */}
           {openEntry && (
             <div className="mb-8">
-              <h2 className="font-display text-lg font-semibold uppercase tracking-wide mb-4">What did you work on?</h2>
+              <h2 className="font-display text-lg font-semibold uppercase tracking-wide mb-4">{t('whatDidYouWorkOn')}</h2>
               <TimesheetJobsEditor entry={openEntry} onAdd={addTimesheetJob} onRemove={removeTimesheetJob} />
             </div>
           )}
 
           {/* Past entries */}
           <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-            <h2 className="font-display text-sm font-bold uppercase tracking-wide mb-1">🧮 Check my hours</h2>
+            <h2 className="font-display text-sm font-bold uppercase tracking-wide mb-1">{t('checkMyHours')}</h2>
             <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>
-              Pick a date range — like this pay period — to see your total hours worked, without digging through every shift below.
+              {t('checkMyHoursHelp')}
             </p>
             <div className="grid grid-cols-2 gap-3 mb-3">
               <label className="block">
-                <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>From</span>
+                <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>{t('from')}</span>
                 <input
                   type="date"
                   value={mySummaryStart}
@@ -2205,7 +2363,7 @@ function App() {
                 />
               </label>
               <label className="block">
-                <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>To</span>
+                <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>{t('to')}</span>
                 <input
                   type="date"
                   value={mySummaryEnd}
@@ -2221,10 +2379,10 @@ function App() {
                   myEntries
                     .filter((e) => e.date >= mySummaryStart && e.date <= mySummaryEnd)
                     .reduce((sum, e) => sum + entryHours(e), 0)
-                )} hrs worked
+                )} {t('hrsWorked')}
               </p>
             ) : (
-              <p className="text-sm" style={{ color: COLORS.line }}>Pick both dates above to see your total.</p>
+              <p className="text-sm" style={{ color: COLORS.line }}>{t('pickBothDates')}</p>
             )}
           </div>
 
@@ -2277,13 +2435,22 @@ function App() {
       if (tsFilterStart && t.date < tsFilterStart) return false;
       if (tsFilterEnd && t.date > tsFilterEnd) return false;
       return true;
-    }).slice().sort((a, b) => b.date.localeCompare(a.date));
+    });
 
     const totalsByMechanic = {};
     filtered.forEach((e) => {
       totalsByMechanic[e.mechanic] = (totalsByMechanic[e.mechanic] || 0) + entryHours(e);
     });
 
+    // Group shifts by mechanic (each person's shifts together, newest first)
+    // instead of interleaving everyone by date.
+    const groupedByMechanic = {};
+    filtered.forEach((e) => {
+      if (!groupedByMechanic[e.mechanic]) groupedByMechanic[e.mechanic] = [];
+      groupedByMechanic[e.mechanic].push(e);
+    });
+    Object.values(groupedByMechanic).forEach((list) => list.sort((a, b) => b.date.localeCompare(a.date)));
+    const mechanicGroups = Object.keys(groupedByMechanic).sort((a, b) => a.localeCompare(b));
 
     const clockedInNow = timesheets.filter((t) => !t.clockOut && t.date === todayStr());
 
@@ -2474,25 +2641,36 @@ function App() {
           {filtered.length === 0 ? (
             <p className="text-sm" style={{ color: COLORS.line }}>Nothing to show yet.</p>
           ) : (
-            <div className="space-y-3">
-              {filtered.map((entry) => (
-                <div key={entry.id}>
-                  <p className="font-display text-xs uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>{entry.mechanic}</p>
-                  <TimesheetEntryCard
-                    entry={entry}
-                    locked={false}
-                    canEdit={true}
-                    isEditing={editingEntryId === entry.id}
-                    onEdit={() => setEditingEntryId(entry.id)}
-                    onCancelEdit={() => setEditingEntryId(null)}
-                    onSave={async (patch) => {
-                      await updateTimesheetEntry(entry.id, patch);
-                      setEditingEntryId(null);
-                    }}
-                    onDelete={() => deleteTimesheetEntry(entry.id)}
-                    onAddJob={addTimesheetJob}
-                    onRemoveJob={removeTimesheetJob}
-                  />
+            <div className="space-y-6">
+              {mechanicGroups.map((name) => (
+                <div key={name}>
+                  <p
+                    className="font-display text-xs uppercase tracking-wide mb-2 pb-2 flex items-center justify-between"
+                    style={{ color: COLORS.accent, borderBottom: `1px solid ${COLORS.line}` }}
+                  >
+                    <span>{name}</span>
+                    <span>{fmtHours(totalsByMechanic[name] || 0)} hrs total</span>
+                  </p>
+                  <div className="space-y-3">
+                    {groupedByMechanic[name].map((entry) => (
+                      <TimesheetEntryCard
+                        key={entry.id}
+                        entry={entry}
+                        locked={false}
+                        canEdit={true}
+                        isEditing={editingEntryId === entry.id}
+                        onEdit={() => setEditingEntryId(entry.id)}
+                        onCancelEdit={() => setEditingEntryId(null)}
+                        onSave={async (patch) => {
+                          await updateTimesheetEntry(entry.id, patch);
+                          setEditingEntryId(null);
+                        }}
+                        onDelete={() => deleteTimesheetEntry(entry.id)}
+                        onAddJob={addTimesheetJob}
+                        onRemoveJob={removeTimesheetJob}
+                      />
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
@@ -2702,6 +2880,7 @@ function App() {
           onSubmit={submitPin}
           onCancel={cancelPinModal}
           onForgot={forgotPin}
+          t={t}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -2812,6 +2991,7 @@ function App() {
           onSubmit={submitPin}
           onCancel={cancelPinModal}
           onForgot={forgotPin}
+          t={t}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -2908,6 +3088,7 @@ function App() {
           onSubmit={submitPin}
           onCancel={cancelPinModal}
           onForgot={forgotPin}
+          t={t}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
