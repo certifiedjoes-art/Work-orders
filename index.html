@@ -696,6 +696,27 @@ async function saveMilestonesCelebrated(data) {
 // Firebase Authentication requires an email address, so each mechanic gets a
 // made-up one behind the scenes — nobody needs to know or use this email,
 // it's just how Firebase identifies their real, secure login.
+// Live translation — used when a mechanic writes a note in Spanish, so it
+// shows up in English on the admin side. Calls the same Cloud Run function
+// used for weekly backups, just with a different (separate) secret key.
+const CLOUD_FUNCTION_URL = 'https://weekly-backup-and-email-337605513419.northamerica-northeast1.run.app';
+const APP_SECRET = '7606b2344e4100126f3eb1ac';
+
+async function translateText(text) {
+  try {
+    const res = await fetch(CLOUD_FUNCTION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, key: APP_SECRET }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.translated || null;
+  } catch (e) {
+    return null; // offline or the call failed — fall back to showing the original text untranslated
+  }
+}
+
 function emailForMechanic(name) {
   const slug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return `${slug}@harder-contracting.app`;
@@ -1734,7 +1755,16 @@ function App() {
 
   const addNote = async (id, text, type) => {
     if (!text.trim()) return;
-    const note = { id: uid(), author: currentMechanic, text: text.trim(), ts: new Date().toISOString(), type: type || 'note' };
+    const trimmed = text.trim();
+    const note = { id: uid(), author: currentMechanic, text: trimmed, ts: new Date().toISOString(), type: type || 'note' };
+    if (lang === 'es') {
+      const translated = await translateText(trimmed);
+      if (translated) {
+        note.originalText = trimmed;
+        note.originalLang = 'es';
+        note.text = translated;
+      }
+    }
     const next = orders.map((o) => (o.id === id ? { ...o, notes: [...(o.notes || []), note] } : o));
     await persistOrders(next);
   };
@@ -3438,6 +3468,7 @@ function App() {
                   onEdit={() => setEditingNoteId(n.id)}
                   onCancel={() => setEditingNoteId(null)}
                   onSave={(text) => updateNote(order.id, n.id, text)}
+                  lang={lang}
                 />
               ))}
             </div>
@@ -3909,7 +3940,7 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit }) {
   );
 }
 
-function NoteCard({ note, isEditing, canEdit, onEdit, onCancel, onSave }) {
+function NoteCard({ note, isEditing, canEdit, onEdit, onCancel, onSave, lang }) {
   const [text, setText] = useState(note.text);
 
   if (isEditing) {
@@ -3954,7 +3985,10 @@ function NoteCard({ note, isEditing, canEdit, onEdit, onCancel, onSave }) {
           )}
         </div>
       </div>
-      <p className="text-base">{note.text}</p>
+      <p className="text-base">{lang === 'es' && note.originalLang === 'es' ? note.originalText : note.text}</p>
+      {note.originalLang === 'es' && lang !== 'es' && (
+        <p className="text-xs mt-1" style={{ color: COLORS.line }}>Translated from Spanish</p>
+      )}
     </div>
   );
 }
