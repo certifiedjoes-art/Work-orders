@@ -3656,7 +3656,7 @@ function OrderChecklistEditForm({ checklist, onSave, onCancel }) {
 function AddMissedDayForm({ onSubmit, onCancel, mechanics, defaultMechanic, t }) {
   const tr = t || ((k) => translations.en[k] || k);
   const [mechanic, setMechanic] = useState(defaultMechanic || (mechanics && mechanics[0]) || '');
-  const [date, setDate] = useState(todayStr());
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [clockInTime, setClockInTime] = useState('');
   const [clockOutTime, setClockOutTime] = useState('');
   const [lunchStartTime, setLunchStartTime] = useState('');
