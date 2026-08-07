@@ -135,11 +135,11 @@ Every mechanic gets a "⏱️ Time Clock" button on the dashboard to:
 - Log which units or jobs they worked on with hours (free text — works for
   unit numbers, "Labour," "Shop cleanup," anything)
 
-**Mechanics can only see their own timesheet, and can't edit it
-themselves** — there's no way for them to view anyone else's hours, and
-if they forget to clock in/out or make a mistake, they just need to ask
-an admin to fix it. Their own history shows "Ask admin to fix a mistake"
-instead of an Edit button.
+**Mechanics can only see their own timesheet** — there's no way for them
+to view anyone else's hours. They **can add a missed day or edit/delete
+their own entries for any week you haven't approved yet** — once you
+approve a week, it locks for them and only an admin can touch it from
+then on.
 
 **Admins** (just Joe right now) get a separate "📊 Timesheets" screen to:
 - View everyone's shifts, filterable by person and date range

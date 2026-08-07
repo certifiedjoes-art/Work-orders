@@ -161,7 +161,410 @@
 </script>
 
 <script type="text/babel" data-presets="react">
-const { useState, useEffect } = React;
+const { useState, useEffect, useContext, createContext } = React;
+
+// --- Language / translation system -----------------------------------
+// Each mechanic can pick English or Spanish for their own device — it's
+// stored locally, doesn't affect anyone else, and never changes what's
+// saved to the database.
+const translations = {
+  en: {
+    // Login screen
+    whoAreYou: "Who's working today?",
+    pickYourName: 'Pick your name to get started',
+    tapToSignIn: 'Tap to sign in',
+    firstTimeHere: 'First time here?',
+    addYourName: 'Add your name',
+    yourName: 'Your name',
+    cancel: 'Cancel',
+    addMe: 'Add me',
+    enterNameToSignIn: 'Enter your name to sign in:',
+    signIn: 'Sign in',
+    // PIN modal
+    enterPin: 'Enter your PIN',
+    createPin: 'Create a 6-digit PIN',
+    confirmPin: 'Confirm your PIN',
+    forgotPin: 'Forgot PIN? Reset it',
+    wrongPin: 'Wrong PIN — try again',
+    pinMismatch: "Those didn't match — start over",
+    // Dashboard
+    openWorkOrders: 'Open Work Orders',
+    searchPlaceholder: "🔍 Search work orders — a name, a unit, a word like 'brake'…",
+    newWorkOrder: '+ New Work Order',
+    machines: 'Machines',
+    viewByMachine: 'View by machine',
+    checklists: 'Checklists',
+    team: 'Team',
+    timesheets: 'Timesheets',
+    timeClock: 'Time Clock',
+    shoutouts: 'Shoutouts',
+    logout: 'Log out',
+    checkForUpdates: '🔄 Check for Updates',
+    noOpenOrders: 'No open work orders right now.',
+    // Time clock
+    clockIn: 'Clock In',
+    clockOut: 'Clock Out',
+    startBreak: 'Start Break',
+    endBreak: 'End Break',
+    onBreak: 'On break',
+    notClockedIn: "You're not clocked in",
+    clockedInSince: 'Clocked in since',
+    clockedIn: 'Clocked In',
+    tapToClockIn: 'Tap to clock in for the day',
+    sinceTapToLog: 'tap to clock out or log hours',
+    board: 'Board',
+    checkMyHours: '🧮 Check my hours',
+    checkMyHoursHelp: "Pick a date range — like this pay period — to see your total hours worked, without digging through every shift below.",
+    from: 'From',
+    to: 'To',
+    pickBothDates: 'Pick both dates above to see your total.',
+    hrsWorked: 'hrs worked',
+    myShifts: 'My Shifts',
+    jobsToday: 'Jobs worked on today',
+    addJob: '+ Add job',
+    unit: 'Unit',
+    hours: 'Hours',
+    add: 'Add',
+    askAdminToFix: 'Ask admin to fix a mistake',
+    noBreakLoggedToday: 'No break logged today',
+    goBackBreakReminder: 'Go back and tap "Start Break" / "End Break" if you took one, or confirm you worked straight through.',
+    goBack: 'Go back',
+    workedStraightThrough: 'I worked straight through — clock out',
+    backToBoard: '← Back to board',
+    clockedInAt: 'Clocked in at',
+    onBreakSince: '☕ On break since',
+    breakLabel: 'Break',
+    whatDidYouWorkOn: 'What did you work on?',
+    createWorkOrder: 'Create a work order',
+    whichMachine: 'Which machine?',
+    selectMachine: 'Select a machine…',
+    addNewMachine: '+ Add a new machine…',
+    newMachineUnitNumber: 'New machine unit number',
+    whatNeedsFixed: 'What needs to be fixed?',
+    whatNeedsFixedPlaceholder: 'e.g. Replace hydraulic pump, Fix leaking hose',
+    whatNeedsFixedHelper: 'Be specific so the mechanic knows what to do',
+    whosDoingThis: "Who's doing this?",
+    noMechanicsYet: 'No mechanics yet',
+    machineHours: 'Machine hours',
+    hourMeterReading: 'Current hour meter reading',
+    whenNeedDone: 'When do you need it done?',
+    createJob: 'Create job',
+    nevermind: 'Nevermind',
+    backTo: '← Back to',
+    print: '🖨️ Print',
+    issueDescription: 'Issue description',
+    assignedMechanics: 'Assigned mechanics',
+    noMechanicsOnTeam: 'No mechanics on the team yet.',
+    dueDate: 'Due date',
+    status: 'Status',
+    edit: 'Edit',
+    remove: 'Remove',
+    addAnotherChecklist: 'Add another checklist to this job:',
+    pickChecklist: 'Pick a checklist to use for this job:',
+    selectChecklistDots: 'Select a checklist…',
+    createChecklistForJob: '+ Create a checklist just for this job',
+    notesUpdates: 'Notes & Updates',
+    noNotesYet: 'No notes yet. Add one to keep the team in the loop.',
+    deleteWorkOrder: 'Delete work order',
+    deleteForGood: 'Delete this work order for good?',
+    yesDelete: 'Yes, delete',
+    addPhotosProblem: '📷 Add photos of the problem',
+    uploadingDots: 'Uploading…',
+    makeShoutout: '🎉 Make this a shoutout',
+    statusPlaceholder: "What's the status? Any issues? Tips for next shift?",
+    shoutoutPlaceholder: 'Give someone credit for a job well done…',
+    post: 'Post',
+    postShoutout: 'Post shoutout',
+    photos: 'Photos',
+    noOrdersMatchSearch: 'No work orders match that search.',
+    allCaughtUp: 'All caught up!',
+    noOrdersYetTapCreate: 'No work orders yet. Tap "+ Work Order" to create one.',
+    clockInQuestion: 'Clock in,',
+    haventClockedInYet: "Looks like you haven't clocked in yet today.",
+    clockInNow: 'Clock In Now',
+    notRightNow: 'Not right now',
+    newChecklist: '+ New checklist',
+    steps: 'steps',
+    delete: 'Delete',
+    closeX: '✕ Close',
+    areYouSureUndo: "Are you sure? You can't undo this.",
+    yesDeleteChecklist: 'Yes, delete this checklist',
+    noCustomChecklistsYet: 'No custom checklists yet',
+    tapNewChecklistHelper: 'Tap "+ New checklist" above, or use the built-in templates when creating a work order.',
+    editChecklist: 'Edit checklist',
+    createNewChecklist: 'Create a new checklist',
+    whatsThisFor: "What's this checklist for?",
+    checklistNamePlaceholder: 'e.g. Engine rebuild, Pre-shift inspection',
+    giveClearName: 'Give it a clear, descriptive name',
+    stepsToComplete: 'Steps to complete',
+    typeOnePerLine: 'Type one step per line. Example:',
+    saveChanges: 'Save changes',
+    saveChecklist: 'Save checklist',
+  },
+  es: {
+    whoAreYou: '¿Quién trabaja hoy?',
+    pickYourName: 'Elige tu nombre para comenzar',
+    tapToSignIn: 'Toca para iniciar sesión',
+    firstTimeHere: '¿Primera vez aquí?',
+    addYourName: 'Agrega tu nombre',
+    yourName: 'Tu nombre',
+    cancel: 'Cancelar',
+    addMe: 'Agregarme',
+    enterNameToSignIn: 'Ingresa tu nombre para iniciar sesión:',
+    signIn: 'Iniciar sesión',
+    enterPin: 'Ingresa tu PIN',
+    createPin: 'Crea un PIN de 6 dígitos',
+    confirmPin: 'Confirma tu PIN',
+    forgotPin: '¿Olvidaste tu PIN? Restablécelo',
+    wrongPin: 'PIN incorrecto — intenta de nuevo',
+    pinMismatch: 'No coinciden — vuelve a empezar',
+    openWorkOrders: 'Órdenes de Trabajo Abiertas',
+    searchPlaceholder: "🔍 Buscar órdenes — un nombre, una unidad, una palabra como 'freno'…",
+    newWorkOrder: '+ Nueva Orden de Trabajo',
+    machines: 'Máquinas',
+    viewByMachine: 'Ver por máquina',
+    checklists: 'Listas de Verificación',
+    team: 'Equipo',
+    timesheets: 'Horarios',
+    timeClock: 'Reloj de Tiempo',
+    shoutouts: 'Reconocimientos',
+    logout: 'Cerrar sesión',
+    checkForUpdates: '🔄 Buscar Actualizaciones',
+    noOpenOrders: 'No hay órdenes de trabajo abiertas por ahora.',
+    clockIn: 'Marcar Entrada',
+    clockOut: 'Marcar Salida',
+    startBreak: 'Iniciar Descanso',
+    endBreak: 'Terminar Descanso',
+    onBreak: 'En descanso',
+    notClockedIn: 'No has marcado entrada',
+    clockedInSince: 'Entrada marcada desde',
+    clockedIn: 'Turno Activo',
+    tapToClockIn: 'Toca para marcar entrada',
+    sinceTapToLog: 'toca para marcar salida o registrar horas',
+    board: 'Tablero',
+    checkMyHours: '🧮 Ver mis horas',
+    checkMyHoursHelp: 'Elige un rango de fechas — como este período de pago — para ver tus horas totales trabajadas, sin buscar en cada turno.',
+    from: 'Desde',
+    to: 'Hasta',
+    pickBothDates: 'Elige ambas fechas arriba para ver tu total.',
+    hrsWorked: 'hrs trabajadas',
+    myShifts: 'Mis Turnos',
+    jobsToday: 'Trabajos de hoy',
+    addJob: '+ Agregar trabajo',
+    unit: 'Unidad',
+    hours: 'Horas',
+    add: 'Agregar',
+    askAdminToFix: 'Pide al admin que corrija un error',
+    noBreakLoggedToday: 'No se registró descanso hoy',
+    goBackBreakReminder: 'Regresa y toca "Iniciar Descanso" / "Terminar Descanso" si tomaste uno, o confirma que trabajaste sin parar.',
+    goBack: 'Regresar',
+    workedStraightThrough: 'Trabajé sin parar — marcar salida',
+    backToBoard: '← Volver al tablero',
+    clockedInAt: 'Entrada marcada a las',
+    onBreakSince: '☕ En descanso desde',
+    breakLabel: 'Descanso',
+    whatDidYouWorkOn: '¿En qué trabajaste?',
+    createWorkOrder: 'Crear una orden de trabajo',
+    whichMachine: '¿Qué máquina?',
+    selectMachine: 'Selecciona una máquina…',
+    addNewMachine: '+ Agregar una máquina nueva…',
+    newMachineUnitNumber: 'Número de unidad de la nueva máquina',
+    whatNeedsFixed: '¿Qué necesita arreglo?',
+    whatNeedsFixedPlaceholder: 'ej. Reemplazar bomba hidráulica, Reparar manguera con fuga',
+    whatNeedsFixedHelper: 'Sé específico para que el mecánico sepa qué hacer',
+    whosDoingThis: '¿Quién va a hacer esto?',
+    noMechanicsYet: 'Todavía no hay mecánicos',
+    machineHours: 'Horas de la máquina',
+    hourMeterReading: 'Lectura actual del horómetro',
+    whenNeedDone: '¿Cuándo lo necesitas listo?',
+    createJob: 'Crear trabajo',
+    nevermind: 'Cancelar',
+    backTo: '← Volver a',
+    print: '🖨️ Imprimir',
+    issueDescription: 'Descripción del problema',
+    assignedMechanics: 'Mecánicos asignados',
+    noMechanicsOnTeam: 'Todavía no hay mecánicos en el equipo.',
+    dueDate: 'Fecha límite',
+    status: 'Estado',
+    edit: 'Editar',
+    remove: 'Quitar',
+    addAnotherChecklist: 'Agregar otra lista a este trabajo:',
+    pickChecklist: 'Elige una lista para este trabajo:',
+    selectChecklistDots: 'Selecciona una lista…',
+    createChecklistForJob: '+ Crear una lista solo para este trabajo',
+    notesUpdates: 'Notas y Actualizaciones',
+    noNotesYet: 'Todavía no hay notas. Agrega una para mantener al equipo informado.',
+    deleteWorkOrder: 'Eliminar orden de trabajo',
+    deleteForGood: '¿Eliminar esta orden de trabajo permanentemente?',
+    yesDelete: 'Sí, eliminar',
+    addPhotosProblem: '📷 Agregar fotos del problema',
+    uploadingDots: 'Subiendo…',
+    makeShoutout: '🎉 Convertir en reconocimiento',
+    statusPlaceholder: '¿Cuál es el estado? ¿Algún problema? ¿Consejos para el próximo turno?',
+    shoutoutPlaceholder: 'Da crédito a alguien por un buen trabajo…',
+    post: 'Publicar',
+    postShoutout: 'Publicar reconocimiento',
+    photos: 'Fotos',
+    noOrdersMatchSearch: 'Ninguna orden de trabajo coincide con esa búsqueda.',
+    allCaughtUp: '¡Todo al día!',
+    noOrdersYetTapCreate: 'Todavía no hay órdenes de trabajo. Toca "+ Nueva Orden de Trabajo" para crear una.',
+    clockInQuestion: 'Marcar entrada,',
+    haventClockedInYet: 'Parece que todavía no has marcado entrada hoy.',
+    clockInNow: 'Marcar Entrada Ahora',
+    notRightNow: 'Ahora no',
+    newChecklist: '+ Nueva lista',
+    steps: 'pasos',
+    delete: 'Eliminar',
+    closeX: '✕ Cerrar',
+    areYouSureUndo: '¿Estás seguro? No se puede deshacer.',
+    yesDeleteChecklist: 'Sí, eliminar esta lista',
+    noCustomChecklistsYet: 'Todavía no hay listas personalizadas',
+    tapNewChecklistHelper: 'Toca "+ Nueva lista" arriba, o usa las plantillas incluidas al crear una orden de trabajo.',
+    editChecklist: 'Editar lista',
+    createNewChecklist: 'Crear una nueva lista',
+    whatsThisFor: '¿Para qué es esta lista?',
+    checklistNamePlaceholder: 'ej. Reconstrucción de motor, Inspección antes del turno',
+    giveClearName: 'Dale un nombre claro y descriptivo',
+    stepsToComplete: 'Pasos a completar',
+    typeOnePerLine: 'Escribe un paso por línea. Ejemplo:',
+    saveChanges: 'Guardar cambios',
+    saveChecklist: 'Guardar lista',
+  },
+  pdt: {
+    whoAreYou: 'Wäa aпобытит vändoag?',
+    pickYourName: 'Wähl dien Nome om aunfangen',
+    tapToSignIn: 'Tekj om aunmelde',
+    firstTimeHere: 'Ieeschtemol hia?',
+    addYourName: 'Doo dien Nome tou',
+    yourName: 'Dien Nome',
+    cancel: 'Opphoole',
+    addMe: 'Mie touféjen',
+    enterNameToSignIn: 'Skriew dien Nome om aunmelde:',
+    signIn: 'Aunmelde',
+    enterPin: 'Skriew dien PIN',
+    createPin: 'Moak en 6-Zahle PIN',
+    confirmPin: 'Bestätj dien PIN',
+    forgotPin: 'PIN vejäte? Nieh moake',
+    wrongPin: 'Väakjeade PIN — proboa nomol',
+    pinMismatch: 'Dee wea nich glikj — fang nomol aun',
+    openWorkOrders: 'Opne Oppdrachte',
+    searchPlaceholder: "🔍 Söak Oppdrachte — en Nome, en Unit, en Wuat…",
+    newWorkOrder: '+ Nieha Oppdrach',
+    machines: 'Moschine',
+    viewByMachine: 'No Moschine kjike',
+    checklists: 'Tjaklieste',
+    team: 'Team',
+    timesheets: 'Tiedbalaunse',
+    timeClock: 'Tiedklock',
+    shoutouts: 'Lov',
+    logout: 'Uttrede',
+    checkForUpdates: '🔄 No Nieheit kjike',
+    noOpenOrders: 'Kjeen opne Oppdrachte opp dise Tiet.',
+    clockIn: 'Aunkjlocke',
+    clockOut: 'Utklocke',
+    startBreak: 'Rast aunfange',
+    endBreak: 'Rast eende',
+    onBreak: 'Om rasten',
+    notClockedIn: 'Du best nich aunjeklockt',
+    clockedInSince: 'Aunjeklockt sied',
+    clockedIn: 'Aunjeklockt',
+    tapToClockIn: 'Tekj om aunzeklocken fa dän Dach',
+    sinceTapToLog: 'tekj om utteklocken oda Tied opptonämen',
+    board: 'Oabaats Braat',
+    checkMyHours: '🧮 Mien Tied nokjieke',
+    checkMyHoursHelp: 'Wähl en Tiedruum — soo aus disse Loonperiod — om diene Tied to sehne, sonda daut du emma äwarpröwe deist.',
+    from: 'Von',
+    to: 'Bat',
+    pickBothDates: 'Wähl beid Doag baowe om dien Tootal to sehne.',
+    hrsWorked: 'Stund jewoakt',
+    myShifts: 'Miene Shifte',
+    jobsToday: 'Aarbeit vändoag',
+    addJob: '+ Aarbeit touféjen',
+    unit: 'Unit',
+    hours: 'Stund',
+    add: 'Touféjen',
+    askAdminToFix: 'Froag dän Admin om daut to reparieren',
+    noBreakLoggedToday: 'Kjeen Rast vändoag opptonämen',
+    goBackBreakReminder: 'Go trigj un tekj "Rast aunfange" / "Rast eende" wan du eene jehaut hast, oda bestätj daut du direkj derch jewoakt hast.',
+    goBack: 'Trigj gone',
+    workedStraightThrough: 'Ekj hab direkj derchjewoakt — utklocke',
+    backToBoard: '← Trigj no dän Boat',
+    clockedInAt: 'Aunjeklockt om',
+    onBreakSince: '☕ Om rasten sied',
+    breakLabel: 'Rast',
+    whatDidYouWorkOn: 'Waut best du aum arbeide?',
+    createWorkOrder: 'Moak en Oppdrach',
+    whichMachine: 'Waut fa Moschine?',
+    selectMachine: 'Wähl en Moschine…',
+    addNewMachine: '+ Nieha Moschine touféjen…',
+    newMachineUnitNumber: 'Nieha Moschine Unit Nommer',
+    whatNeedsFixed: 'Waut mott reparieat woare?',
+    whatNeedsFixedPlaceholder: 'toom Bispel: Hydraulikpomp utwessle, Läkjend Slang reparieren',
+    whatNeedsFixedHelper: 'Sie derch klor, daut dee Mechaniker weet waut to doone',
+    whosDoingThis: 'Wäa woat daut doone?',
+    noMechanicsYet: 'Noch kjeen Mechanikja',
+    machineHours: 'Moschine Stund',
+    hourMeterReading: 'Jäajenwoatje Stundeteala Uplesung',
+    whenNeedDone: 'Wan brukjst du daut fadich?',
+    createJob: 'Aarbeit moake',
+    nevermind: 'Opphoole',
+    backTo: '← Trigj no',
+    print: '🖨️ Drucke',
+    issueDescription: 'Beschriewunk fum Problem',
+    assignedMechanics: 'Toojeteelde Mechanikja',
+    noMechanicsOnTeam: 'Noch kjeen Mechanikja em Team.',
+    dueDate: 'Fälje Doag',
+    status: 'Status',
+    edit: 'Ändre',
+    remove: 'Wajnämen',
+    addAnotherChecklist: 'Nieha Tjakliest touféjen fa dise Aarbeit:',
+    pickChecklist: 'Wähl en Tjakliest fa dise Aarbeit:',
+    selectChecklistDots: 'Wähl en Tjakliest…',
+    createChecklistForJob: '+ Moak en Tjakliest bloos fa dise Aarbeit',
+    notesUpdates: 'Notitse un Nieheite',
+    noNotesYet: 'Noch kjeene Notitse. Doo eene tou om daut Team to informieren.',
+    deleteWorkOrder: 'Oppdrach läscht',
+    deleteForGood: 'Dise Oppdrach fa emma läscht?',
+    yesDelete: 'Jo, läscht',
+    addPhotosProblem: '📷 Fotoas fum Problem touféjen',
+    uploadingDots: 'Ompladen…',
+    makeShoutout: '🎉 En Lov doarute moake',
+    statusPlaceholder: 'Waut es dee Status? Enj Probleme? Tipps fa dän näakjste Shift?',
+    shoutoutPlaceholder: 'Jäft eenem Kjrädit fa goode Aarbeit…',
+    post: 'Aufschekje',
+    postShoutout: 'Lov aufschekje',
+    photos: 'Fotoas',
+    noOrdersMatchSearch: 'Kjeen Oppdrach passt to dee Söak.',
+    allCaughtUp: 'Aules opp Doag!',
+    noOrdersYetTapCreate: 'Noch kjeen Oppdrachte. Tekj "+ Nieha Oppdrach" om eene to moaken.',
+    clockInQuestion: 'Aunkjlocke,',
+    haventClockedInYet: 'Et süt ute aus wan du vändoag noch nich aunjeklockt hast.',
+    clockInNow: 'Nu Aunkjlocke',
+    notRightNow: 'Nu nich',
+    newChecklist: '+ Nieha Tjakliest',
+    steps: 'Schretj',
+    delete: 'Läscht',
+    closeX: '✕ Toumoake',
+    areYouSureUndo: 'Best du sikja? Du kaust daut nich trigjnämen.',
+    yesDeleteChecklist: 'Jo, läscht dise Tjakliest',
+    noCustomChecklistsYet: 'Noch kjeene ejne Tjakliestes',
+    tapNewChecklistHelper: 'Tekj "+ Nieha Tjakliest" baowe, oda bruck dee fatje Muster wan du en Oppdrach moakst.',
+    editChecklist: 'Tjakliest ändre',
+    createNewChecklist: 'Moak en nieha Tjakliest',
+    whatsThisFor: 'Wuafäa es dise Tjakliest?',
+    checklistNamePlaceholder: 'toom Bispel: Motor opbue, Kjik väa dän Shift',
+    giveClearName: 'Jeff daut en kloaren Nome',
+    stepsToComplete: 'Schretj om fadich to moaken',
+    typeOnePerLine: 'Skriew een Schretj per Reaj. Bispel:',
+    saveChanges: 'Ändarunge sponere',
+    saveChecklist: 'Tjakliest sponere',
+  },
+};
+
+const LanguageContext = createContext({ lang: 'en', t: (k) => translations.en[k] || k });
+function useLang() {
+  return useContext(LanguageContext);
+}
 
 const COLORS = {
   bg: '#1B1F19',
@@ -194,15 +597,16 @@ function OfflineBanner({ isOnline }) {
   );
 }
 
-function PinModalOverlay({ pinModal, pinInput, setPinInput, pinError, onSubmit, onCancel, onForgot }) {
+function PinModalOverlay({ pinModal, pinInput, setPinInput, pinError, onSubmit, onCancel, onForgot, t }) {
+  const tr = t || ((k) => translations.en[k] || k);
   if (!pinModal) return null;
   const isVerify = pinModal.mode === 'verify';
   const isConfirm = pinModal.mode === 'setup' && pinModal.stage === 'confirm';
   const title = isVerify
-    ? `Enter PIN`
+    ? tr('enterPin')
     : isConfirm
-      ? 'Confirm your PIN'
-      : 'Create a 6-digit PIN';
+      ? tr('confirmPin')
+      : tr('createPin');
 
   const handleDigit = (d) => {
     if (pinInput.length >= 6) return;
@@ -269,7 +673,7 @@ function PinModalOverlay({ pinModal, pinInput, setPinInput, pinError, onSubmit, 
 
         {isVerify && (
           <button onClick={onForgot} className="block w-full text-center text-sm underline" style={{ color: COLORS.inkDim }}>
-            Forgot PIN? Reset it
+            {tr('forgotPin')}
           </button>
         )}
       </div>
@@ -346,7 +750,7 @@ function FireworksOverlay({ show }) {
   );
 }
 
-function JokeBanner() {
+function JokeBanner({ lang }) {
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
   return (
@@ -355,7 +759,7 @@ function JokeBanner() {
       style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
     >
       <span style={{ fontSize: '1.4rem' }}>😄</span>
-      <p className="flex-1 text-sm italic" style={{ color: COLORS.inkDim }}>{jokeOfTheDay()}</p>
+      <p className="flex-1 text-sm italic" style={{ color: COLORS.inkDim }}>{jokeOfTheDay(lang)}</p>
       <button onClick={() => setDismissed(true)} className="text-sm" style={{ color: COLORS.line }}>✕</button>
     </div>
   );
@@ -389,19 +793,20 @@ function MilestonePromptOverlay({ prompt, onSubmit, onSkip }) {
   );
 }
 
-function ClockInPromptOverlay({ show, mechanic, onClockIn, onSkip }) {
+function ClockInPromptOverlay({ show, mechanic, onClockIn, onSkip, t }) {
+  const tr = t || ((k) => translations.en[k] || k);
   if (!show) return null;
   return (
     <div className="absolute inset-0 z-50 p-6" style={{ background: 'rgba(0,0,0,0.75)', minHeight: '100vh' }}>
       <div className="w-full max-w-xs mx-auto my-8 rounded-2xl p-6 text-center overflow-y-auto" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}`, maxHeight: '85vh' }}>
         <p className="text-4xl mb-3">⏱️</p>
-        <p className="font-display text-lg font-bold mb-2">Clock in, {mechanic}?</p>
+        <p className="font-display text-lg font-bold mb-2">{tr('clockInQuestion')} {mechanic}?</p>
         <p className="text-sm mb-5" style={{ color: COLORS.inkDim }}>
-          Looks like you haven't clocked in yet today.
+          {tr('haventClockedInYet')}
         </p>
         <div className="flex flex-col gap-2">
-          <Btn onClick={onClockIn}>Clock In Now</Btn>
-          <Btn variant="ghost" onClick={onSkip}>Not right now</Btn>
+          <Btn onClick={onClockIn}>{tr('clockInNow')}</Btn>
+          <Btn variant="ghost" onClick={onSkip}>{tr('notRightNow')}</Btn>
         </div>
       </div>
     </div>
@@ -448,7 +853,9 @@ function fmtDate(d) {
 
 function fmtTime(iso) {
   if (!iso) return '';
-  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  // hour12 forced explicitly so this always shows AM/PM regardless of the
+  // phone's system time format setting (some Android phones default to 24-hour).
+  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
 // Total paid hours for a shift: clock-in to clock-out, minus any unpaid break.
@@ -549,6 +956,27 @@ async function saveMilestonesCelebrated(data) {
 // Firebase Authentication requires an email address, so each mechanic gets a
 // made-up one behind the scenes — nobody needs to know or use this email,
 // it's just how Firebase identifies their real, secure login.
+// Live translation — used when a mechanic writes a note in Spanish, so it
+// shows up in English on the admin side. Calls the same Cloud Run function
+// used for weekly backups, just with a different (separate) secret key.
+const CLOUD_FUNCTION_URL = 'https://weekly-backup-and-email-337605513419.northamerica-northeast1.run.app';
+const APP_SECRET = '7606b2344e4100126f3eb1ac';
+
+async function translateText(text) {
+  try {
+    const res = await fetch(CLOUD_FUNCTION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, key: APP_SECRET }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.translated || null;
+  } catch (e) {
+    return null; // offline or the call failed — fall back to showing the original text untranslated
+  }
+}
+
 function emailForMechanic(name) {
   const slug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return `${slug}@harder-contracting.app`;
@@ -668,11 +1096,38 @@ const JOKES = [
   "What do you call a lazy kangaroo? Pouch potato.",
 ];
 
-function jokeOfTheDay() {
+const JOKES_ES = [
+  "¿Por qué los pájaros no usan Facebook? Porque ya tienen Twitter.",
+  "¿Qué le dice un pez a otro pez? Nada.",
+  "¿Cómo se llama un boomerang que no vuelve? Un palo.",
+  "¿Qué hace una abeja en el gimnasio? Zum-ba.",
+  "¿Por qué el libro de matemáticas está triste? Porque tiene muchos problemas.",
+  "¿Cómo se dice pañuelo en náhuatl? Muéveloparaacáparaallá.",
+  "¿Qué le dijo un techo a otro techo? Estoy techo polvo.",
+  "¿Cuál es el café más peligroso del mundo? El ex-preso.",
+  "¿Por qué el gallo no usa reloj? Porque tiene despertador.",
+  "¿Qué hace un pez payaso? Se ríe con la boca cerrada porque está bajo el agua.",
+  "¿Cómo se llama el campeón de buceo japonés? Tokofondo.",
+  "¿Qué le dijo una impresora a otra? ¿Esa hoja es tuya o es una impresión mía?",
+];
+
+const JOKES_PDT = [
+  "Waut es dee schwoatste Kolua? Dee es nich do.",
+  "Waut sajcht dee Kuh toom Mundach? Ekj go nu melkje.",
+  "Wanäa es en Dia nich en Dia? Wan et en Doa es.",
+  "Waut es rund un rejcht en dee Küak? En Broodrol.",
+  "Waut es daut Läajkste en dee Welt? En Foaza sitte enne Ruh.",
+  "Wua läajt en Fesch soo goot? En Bad.",
+  "Waut sajcht een Boom toom aundren? Blada mie nich aun.",
+  "Waut es en Boa aun dän Torn? Doa woont dee Klock.",
+];
+
+function jokeOfTheDay(lang) {
+  const list = lang === 'es' ? JOKES_ES : lang === 'pdt' ? JOKES_PDT : JOKES;
   const start = new Date(new Date().getFullYear(), 0, 0);
   const diff = new Date() - start;
   const dayOfYear = Math.floor(diff / (1000 * 60 * 60 * 24));
-  return JOKES[dayOfYear % JOKES.length];
+  return list[dayOfYear % list.length];
 }
 
 const DEFAULT_TEMPLATES = [
@@ -821,6 +1276,12 @@ function App() {
   const [orders, setOrders] = useState(() => cacheGet('orders', []));
   const [currentMechanic, setCurrentMechanic] = useState(null);
   const [screen, setScreen] = useState('login');
+  const [lang, setLang] = useState(() => localStorage.getItem('appLang') || 'en');
+  const setLangPersist = (l) => {
+    localStorage.setItem('appLang', l);
+    setLang(l);
+  };
+  const t = (key) => (translations[lang] && translations[lang][key]) || translations.en[key] || key;
   const [activeUnit, setActiveUnit] = useState(null);
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [newMechanicName, setNewMechanicName] = useState('');
@@ -857,6 +1318,8 @@ function App() {
   const [timesheets, setTimesheets] = useState(() => cacheGet('timesheets', []));
   const [timesheetSettings, setTimesheetSettings] = useState({ email: '', autoEmail: false });
   const [lunchPrompt, setLunchPrompt] = useState(false);
+  const [showAddMissedDay, setShowAddMissedDay] = useState(false);
+  const [showAddMissedDayAdmin, setShowAddMissedDayAdmin] = useState(false);
   const [editingEntryId, setEditingEntryId] = useState(null);
   const [tsFilterMechanic, setTsFilterMechanic] = useState('');
   const [tsFilterStart, setTsFilterStart] = useState('');
@@ -1063,7 +1526,7 @@ function App() {
         setScreen('dashboard');
         maybeOfferBiometric(mechanic);
       } catch (e) {
-        setPinError('Wrong PIN — try again');
+        setPinError(t('wrongPin'));
         setPinInput('');
       }
     } else if (pinModal.mode === 'setup') {
@@ -1117,7 +1580,7 @@ function App() {
           setScreen('dashboard');
           maybeOfferBiometric(mechanic);
         } else {
-          setPinError("Those didn't match — start over");
+          setPinError(t('pinMismatch'));
           setPinModal({ ...pinModal, stage: 'first', firstEntry: '' });
           setPinInput('');
         }
@@ -1467,6 +1930,25 @@ function App() {
     await persistTimesheets(timesheets.filter((t) => t.id !== entryId));
   };
 
+  // Adds a whole missed day — for when clock in/out was forgotten entirely,
+  // so there's no existing entry to edit. mechanicName lets an admin add a
+  // day on behalf of anyone; a mechanic adding their own just passes their
+  // own name.
+  const addManualEntry = async (mechanicName, date, clockInLocal, clockOutLocal, lunchStartLocal, lunchEndLocal) => {
+    const entry = {
+      id: uid(),
+      mechanic: mechanicName,
+      date,
+      clockIn: clockInLocal ? new Date(clockInLocal).toISOString() : null,
+      clockOut: clockOutLocal ? new Date(clockOutLocal).toISOString() : null,
+      lunchStart: lunchStartLocal ? new Date(lunchStartLocal).toISOString() : null,
+      lunchEnd: lunchEndLocal ? new Date(lunchEndLocal).toISOString() : null,
+      skippedLunch: !lunchStartLocal && !lunchEndLocal,
+      jobs: [],
+    };
+    await persistTimesheets([...timesheets, entry]);
+  };
+
   const isWeekApproved = (weekStart) => !!timesheetApprovals[weekStart];
 
   const approveWeek = async (weekStart) => {
@@ -1560,7 +2042,16 @@ function App() {
 
   const addNote = async (id, text, type) => {
     if (!text.trim()) return;
-    const note = { id: uid(), author: currentMechanic, text: text.trim(), ts: new Date().toISOString(), type: type || 'note' };
+    const trimmed = text.trim();
+    const note = { id: uid(), author: currentMechanic, text: trimmed, ts: new Date().toISOString(), type: type || 'note' };
+    if (lang === 'es') {
+      const translated = await translateText(trimmed);
+      if (translated) {
+        note.originalText = trimmed;
+        note.originalLang = 'es';
+        note.text = translated;
+      }
+    }
     const next = orders.map((o) => (o.id === id ? { ...o, notes: [...(o.notes || []), note] } : o));
     await persistOrders(next);
   };
@@ -1574,6 +2065,13 @@ function App() {
     );
     await persistOrders(next);
     setEditingNoteId(null);
+  };
+
+  const deleteNote = async (orderId, noteId) => {
+    const next = orders.map((o) =>
+      o.id === orderId ? { ...o, notes: (o.notes || []).filter((n) => n.id !== noteId) } : o
+    );
+    await persistOrders(next);
   };
 
   const addPhotos = async (id, dataUrls) => {
@@ -1613,6 +2111,7 @@ function App() {
           onSubmit={submitPin}
           onCancel={cancelPinModal}
           onForgot={forgotPin}
+          t={t}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -1656,6 +2155,7 @@ function App() {
           onSubmit={submitPin}
           onCancel={cancelPinModal}
           onForgot={forgotPin}
+          t={t}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -1671,15 +2171,35 @@ function App() {
           onSkip={() => setOfferBiometric(null)}
         />
         <div className="max-w-md w-full" style={{ position: 'relative', zIndex: 1 }}>
+          <div className="flex items-center justify-center gap-2 mb-4">
+            {[
+              { code: 'en', label: 'English' },
+              { code: 'es', label: 'Español' },
+              { code: 'pdt', label: 'Plautdietsch' },
+            ].map((l) => (
+              <button
+                key={l.code}
+                onClick={() => setLangPersist(l.code)}
+                className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg"
+                style={{
+                  color: lang === l.code ? '#1B1F19' : COLORS.ink,
+                  background: lang === l.code ? COLORS.accent : COLORS.surface,
+                  border: `2px solid ${COLORS.accent}`,
+                }}
+              >
+                {l.label}
+              </button>
+            ))}
+          </div>
           <div className="text-center mb-10">
             <p className="font-display text-sm uppercase tracking-[0.3em] mb-2" style={{ color: COLORS.accent }}>Harder Contracting</p>
             <h1 className="font-display text-4xl font-bold mb-2">Work Order Board</h1>
-            <p className="text-base" style={{ color: COLORS.inkDim }}>Pick your name to get started</p>
+            <p className="text-base" style={{ color: COLORS.inkDim }}>{t('pickYourName')}</p>
           </div>
 
           {mechanics.length > 0 && (
             <div className="mb-8">
-              <p className="font-display text-xs uppercase tracking-wider mb-3 block" style={{ color: COLORS.inkDim }}>Tap to sign in</p>
+              <p className="font-display text-xs uppercase tracking-wider mb-3 block" style={{ color: COLORS.inkDim }}>{t('tapToSignIn')}</p>
               <div className="grid grid-cols-2 gap-3">
                 {mechanics.map((m) => (
                   <button
@@ -1700,19 +2220,19 @@ function App() {
           )}
 
           <div className="rounded-lg p-5 shop-card" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>
-            <p className="font-display text-sm uppercase tracking-wide mb-3 block" style={{ color: COLORS.accent }}>First time here?</p>
-            <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>Enter your name to sign in:</p>
+            <p className="font-display text-sm uppercase tracking-wide mb-3 block" style={{ color: COLORS.accent }}>{t('firstTimeHere')}</p>
+            <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>{t('enterNameToSignIn')}</p>
             <div className="flex gap-2">
               <input
                 value={newMechanicName}
                 onChange={(e) => setNewMechanicName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addMechanic()}
-                placeholder="Your name"
+                placeholder={t('yourName')}
                 className="flex-1 rounded-lg px-4 py-2 text-base focus:outline-none focus:ring-2"
                 style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
                 autoFocus
               />
-              <Btn onClick={addMechanic}>Sign in</Btn>
+              <Btn onClick={addMechanic}>{t('signIn')}</Btn>
             </div>
           </div>
         </div>
@@ -1786,6 +2306,7 @@ function App() {
           onSubmit={submitPin}
           onCancel={cancelPinModal}
           onForgot={forgotPin}
+          t={t}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -1808,6 +2329,7 @@ function App() {
             await clockIn();
           }}
           onSkip={() => setShowClockInPrompt(false)}
+          t={t}
         />
         <MilestonePromptOverlay
           prompt={milestonePrompt}
@@ -1818,7 +2340,7 @@ function App() {
           <div className="flex items-start justify-between mb-10">
             <div>
               <p className="font-display text-xs uppercase tracking-[0.3em] mb-2" style={{ color: COLORS.accent }}>Harder Contracting</p>
-              <h1 className="font-display text-3xl sm:text-4xl font-bold">Board</h1>
+              <h1 className="font-display text-3xl sm:text-4xl font-bold">{t('board')}</h1>
             </div>
             <div className="flex items-center gap-3 flex-wrap justify-end">
               {isAdmin && (
@@ -1827,7 +2349,7 @@ function App() {
                   className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
                   style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
                 >
-                  📊 Timesheets
+                  📊 {t('timesheets')}
                 </button>
               )}
               {isAdmin && (
@@ -1836,7 +2358,7 @@ function App() {
                   className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
                   style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
                 >
-                  ⚙️ Team
+                  ⚙️ {t('team')}
                 </button>
               )}
               <button
@@ -1844,14 +2366,14 @@ function App() {
                 className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
                 style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
               >
-                🎉 Shoutouts
+                🎉 {t('shoutouts')}
               </button>
               <button
                 onClick={() => setScreen('checklists')}
                 className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
                 style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
               >
-                📋 Checklists
+                📋 {t('checklists')}
               </button>
               <button
                 onClick={async () => {
@@ -1882,12 +2404,12 @@ function App() {
                 style={{ color: COLORS.inkDim, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
                 title="Force the app to grab the latest version"
               >
-                🔄 Check for Updates
+                {t('checkForUpdates')}
               </button>
             </div>
           </div>
 
-          <JokeBanner />
+          <JokeBanner lang={lang} />
 
           <div className="flex items-center justify-end gap-4 -mt-2 mb-8">
             <button onClick={startChangePin} className="text-xs underline" style={{ color: COLORS.inkDim }}>
@@ -1914,13 +2436,13 @@ function App() {
                   className="font-display text-xl font-bold"
                   style={{ color: openEntry ? '#1B1F19' : COLORS.ink }}
                 >
-                  {openEntry ? 'Clocked In' : 'Time Clock'}
+                  {openEntry ? t('clockedIn') : t('timeClock')}
                 </p>
                 <p
                   className="text-sm"
                   style={{ color: openEntry ? '#1B1F19' : COLORS.inkDim, opacity: openEntry ? 0.75 : 1 }}
                 >
-                  {openEntry ? `Since ${fmtTime(openEntry.clockIn)} — tap to clock out or log hours` : 'Tap to clock in for the day'}
+                  {openEntry ? `${t('clockedInSince')} ${fmtTime(openEntry.clockIn)} — ${t('sinceTapToLog')}` : t('tapToClockIn')}
                 </p>
               </div>
             </div>
@@ -1931,7 +2453,7 @@ function App() {
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="🔍 Search work orders — a name, a unit, a word like 'brake'…"
+              placeholder={t('searchPlaceholder')}
               className="w-full rounded-xl px-5 py-4 text-base focus:outline-none focus:ring-2"
               style={{ background: COLORS.surface, color: COLORS.ink, border: `2px solid ${COLORS.line}` }}
             />
@@ -1953,7 +2475,7 @@ function App() {
               </h2>
               {searchResults.length === 0 ? (
                 <div className="rounded-lg p-10 text-center" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
-                  <p className="text-base" style={{ color: COLORS.inkDim }}>No work orders match that search.</p>
+                  <p className="text-base" style={{ color: COLORS.inkDim }}>{t('noOrdersMatchSearch')}</p>
                 </div>
               ) : (
                 <div className="space-y-3">{searchResults.map(renderOrderCard)}</div>
@@ -1962,16 +2484,16 @@ function App() {
           ) : (
             <React.Fragment>
               <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-                <h2 className="font-display text-lg font-semibold uppercase tracking-wide">Open Work Orders</h2>
+                <h2 className="font-display text-lg font-semibold uppercase tracking-wide">{t('openWorkOrders')}</h2>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setScreen('machines')}
                     className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
                     style={{ color: COLORS.inkDim, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
                   >
-                    View by machine
+                    {t('viewByMachine')}
                   </button>
-                  <Btn onClick={() => setShowAddOrder((s) => !s)}>+ New Work Order</Btn>
+                  <Btn onClick={() => setShowAddOrder((s) => !s)}>{t('newWorkOrder')}</Btn>
                 </div>
               </div>
 
@@ -1981,13 +2503,14 @@ function App() {
                   units={units}
                   onCancel={() => setShowAddOrder(false)}
                   onSubmit={createOrder}
+                  t={t}
                 />
               )}
 
               {openOrders.length === 0 ? (
                 <div className="rounded-lg p-10 text-center" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
                   <p className="font-body text-base mb-2" style={{ color: COLORS.inkDim }}>All caught up!</p>
-                  <p className="font-body text-sm" style={{ color: COLORS.line }}>No open work orders right now.</p>
+                  <p className="font-body text-sm" style={{ color: COLORS.line }}>{t('noOpenOrders')}</p>
                 </div>
               ) : (
                 <div className="space-y-3">{openOrders.map(renderOrderCard)}</div>
@@ -2024,6 +2547,7 @@ function App() {
           onSubmit={submitPin}
           onCancel={cancelPinModal}
           onForgot={forgotPin}
+          t={t}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -2040,7 +2564,7 @@ function App() {
         />
         <div className="max-w-5xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            ← Back to board
+            {t('backToBoard')}
           </button>
 
           <div className="flex items-center justify-between mb-5">
@@ -2126,40 +2650,40 @@ function App() {
         <OfflineBanner isOnline={isOnline} />
         <div className="max-w-2xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            ← Back to board
+            {t('backToBoard')}
           </button>
-          <h1 className="font-display text-3xl font-bold mb-2">Time Clock</h1>
+          <h1 className="font-display text-3xl font-bold mb-2">{t('timeClock')}</h1>
           <p className="text-sm mb-8" style={{ color: COLORS.inkDim }}>{currentMechanic}</p>
 
           {/* Current status card */}
           <div className="rounded-lg p-6 mb-8 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
             {!openEntry ? (
               <React.Fragment>
-                <p className="text-base mb-5" style={{ color: COLORS.inkDim }}>Not clocked in</p>
-                <Btn onClick={clockIn}>Clock In</Btn>
+                <p className="text-base mb-5" style={{ color: COLORS.inkDim }}>{t('notClockedIn')}</p>
+                <Btn onClick={clockIn}>{t('clockIn')}</Btn>
               </React.Fragment>
             ) : (
               <React.Fragment>
-                <p className="font-mono text-sm mb-1" style={{ color: COLORS.inkDim }}>Clocked in at</p>
+                <p className="font-mono text-sm mb-1" style={{ color: COLORS.inkDim }}>{t('clockedInAt')}</p>
                 <p className="font-display text-2xl font-bold mb-5">{fmtTime(openEntry.clockIn)}</p>
 
                 {onLunch ? (
                   <React.Fragment>
-                    <p className="text-sm mb-4" style={{ color: COLORS.progress }}>☕ On break since {fmtTime(openEntry.lunchStart)}</p>
-                    <Btn onClick={endLunch}>End Break</Btn>
+                    <p className="text-sm mb-4" style={{ color: COLORS.progress }}>{t('onBreakSince')} {fmtTime(openEntry.lunchStart)}</p>
+                    <Btn onClick={endLunch}>{t('endBreak')}</Btn>
                   </React.Fragment>
                 ) : (
                   <div className="flex flex-col gap-3 items-center">
                     {openEntry.lunchStart && openEntry.lunchEnd && (
                       <p className="text-xs font-mono" style={{ color: COLORS.inkDim }}>
-                        Break: {fmtTime(openEntry.lunchStart)} – {fmtTime(openEntry.lunchEnd)}
+                        {t('breakLabel')}: {fmtTime(openEntry.lunchStart)} – {fmtTime(openEntry.lunchEnd)}
                       </p>
                     )}
                     <div className="flex gap-3">
                       {!openEntry.lunchStart && (
-                        <Btn variant="ghost" onClick={startLunch}>Start Break</Btn>
+                        <Btn variant="ghost" onClick={startLunch}>{t('startBreak')}</Btn>
                       )}
-                      <Btn onClick={attemptClockOut}>Clock Out</Btn>
+                      <Btn onClick={attemptClockOut}>{t('clockOut')}</Btn>
                     </div>
                   </div>
                 )}
@@ -2170,13 +2694,13 @@ function App() {
           {lunchPrompt && (
             <div className="absolute inset-0 z-50 p-6" style={{ background: 'rgba(0,0,0,0.75)', minHeight: '100vh' }}>
               <div className="w-full max-w-xs mx-auto my-8 rounded-2xl p-6 overflow-y-auto" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}`, maxHeight: '85vh' }}>
-                <p className="font-display text-lg font-bold mb-3 text-center">No break logged today</p>
+                <p className="font-display text-lg font-bold mb-3 text-center">{t('noBreakLoggedToday')}</p>
                 <p className="text-sm mb-5 text-center" style={{ color: COLORS.inkDim }}>
-                  Go back and tap "Start Break" / "End Break" if you took one, or confirm you worked straight through.
+                  {t('goBackBreakReminder')}
                 </p>
                 <div className="flex flex-col gap-2">
-                  <Btn variant="ghost" onClick={() => setLunchPrompt(false)}>Go back</Btn>
-                  <Btn variant="danger" onClick={() => clockOut(true)}>I worked straight through — clock out</Btn>
+                  <Btn variant="ghost" onClick={() => setLunchPrompt(false)}>{t('goBack')}</Btn>
+                  <Btn variant="danger" onClick={() => clockOut(true)}>{t('workedStraightThrough')}</Btn>
                 </div>
               </div>
             </div>
@@ -2185,20 +2709,45 @@ function App() {
           {/* Jobs worked on today */}
           {openEntry && (
             <div className="mb-8">
-              <h2 className="font-display text-lg font-semibold uppercase tracking-wide mb-4">What did you work on?</h2>
+              <h2 className="font-display text-lg font-semibold uppercase tracking-wide mb-4">{t('whatDidYouWorkOn')}</h2>
               <TimesheetJobsEditor entry={openEntry} onAdd={addTimesheetJob} onRemove={removeTimesheetJob} />
             </div>
           )}
 
+          {/* Add a missed day */}
+          {showAddMissedDay ? (
+            <AddMissedDayForm
+              t={t}
+              defaultMechanic={currentMechanic}
+              onSubmit={async (mechanicName, date, ci, co, ls, le, setError) => {
+                if (isWeekApproved(weekStartOf(date))) {
+                  setError("That week's already been approved — ask admin to add this one for you.");
+                  return;
+                }
+                await addManualEntry(mechanicName, date, ci, co, ls, le);
+                setShowAddMissedDay(false);
+              }}
+              onCancel={() => setShowAddMissedDay(false)}
+            />
+          ) : (
+            <button
+              onClick={() => setShowAddMissedDay(true)}
+              className="w-full text-center text-sm font-display uppercase tracking-wide mb-8 py-3 rounded-lg"
+              style={{ color: COLORS.accent, background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}
+            >
+              + Add a missed day
+            </button>
+          )}
+
           {/* Past entries */}
           <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-            <h2 className="font-display text-sm font-bold uppercase tracking-wide mb-1">🧮 Check my hours</h2>
+            <h2 className="font-display text-sm font-bold uppercase tracking-wide mb-1">{t('checkMyHours')}</h2>
             <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>
-              Pick a date range — like this pay period — to see your total hours worked, without digging through every shift below.
+              {t('checkMyHoursHelp')}
             </p>
             <div className="grid grid-cols-2 gap-3 mb-3">
               <label className="block">
-                <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>From</span>
+                <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>{t('from')}</span>
                 <input
                   type="date"
                   value={mySummaryStart}
@@ -2208,7 +2757,7 @@ function App() {
                 />
               </label>
               <label className="block">
-                <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>To</span>
+                <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>{t('to')}</span>
                 <input
                   type="date"
                   value={mySummaryEnd}
@@ -2224,10 +2773,10 @@ function App() {
                   myEntries
                     .filter((e) => e.date >= mySummaryStart && e.date <= mySummaryEnd)
                     .reduce((sum, e) => sum + entryHours(e), 0)
-                )} hrs worked
+                )} {t('hrsWorked')}
               </p>
             ) : (
-              <p className="text-sm" style={{ color: COLORS.line }}>Pick both dates above to see your total.</p>
+              <p className="text-sm" style={{ color: COLORS.line }}>{t('pickBothDates')}</p>
             )}
           </div>
 
@@ -2241,7 +2790,7 @@ function App() {
                   key={entry.id}
                   entry={entry}
                   locked={isWeekApproved(weekStartOf(entry.date))}
-                  canEdit={isAdmin}
+                  canEdit={isAdmin || !isWeekApproved(weekStartOf(entry.date))}
                   isEditing={editingEntryId === entry.id}
                   onEdit={() => setEditingEntryId(entry.id)}
                   onCancelEdit={() => setEditingEntryId(null)}
@@ -2320,7 +2869,7 @@ function App() {
         <OfflineBanner isOnline={isOnline} />
         <div className="max-w-3xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            ← Back to board
+            {t('backToBoard')}
           </button>
           <h1 className="font-display text-3xl font-bold mb-8">Timesheets</h1>
 
@@ -2434,33 +2983,62 @@ function App() {
             </label>
           </div>
 
+          {/* Add a missed day (any employee) */}
+          {showAddMissedDayAdmin ? (
+            <AddMissedDayForm
+              t={t}
+              mechanics={mechanics}
+              onSubmit={async (mechanicName, date, ci, co, ls, le, setError) => {
+                await addManualEntry(mechanicName, date, ci, co, ls, le);
+                setShowAddMissedDayAdmin(false);
+              }}
+              onCancel={() => setShowAddMissedDayAdmin(false)}
+            />
+          ) : (
+            <button
+              onClick={() => setShowAddMissedDayAdmin(true)}
+              className="w-full text-center text-sm font-display uppercase tracking-wide mb-6 py-3 rounded-lg"
+              style={{ color: COLORS.accent, background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}
+            >
+              + Add a missed day for someone
+            </button>
+          )}
+
           {/* Filters */}
           <div className="rounded-lg p-5 mb-6" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <select
-                value={tsFilterMechanic}
-                onChange={(e) => setTsFilterMechanic(e.target.value)}
-                className="rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
-                style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
-              >
-                <option value="">Everyone</option>
-                {mechanics.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <input
-                type="date"
-                value={tsFilterStart}
-                onChange={(e) => setTsFilterStart(e.target.value)}
-                className="rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
-                style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
-              />
-              <input
-                type="date"
-                value={tsFilterEnd}
-                onChange={(e) => setTsFilterEnd(e.target.value)}
-                className="rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
-                style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
-              />
-            </div>
+            <select
+              value={tsFilterMechanic}
+              onChange={(e) => setTsFilterMechanic(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
+              style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+            >
+              <option value="">Everyone</option>
+              {mechanics.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+            {tsFilterMechanic && (
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <label className="block">
+                  <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>From</span>
+                  <input
+                    type="date"
+                    value={tsFilterStart}
+                    onChange={(e) => setTsFilterStart(e.target.value)}
+                    className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
+                    style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>To</span>
+                  <input
+                    type="date"
+                    value={tsFilterEnd}
+                    onChange={(e) => setTsFilterEnd(e.target.value)}
+                    className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
+                    style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                  />
+                </label>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center justify-between mb-4">
@@ -2481,6 +3059,8 @@ function App() {
             </div>
           )}
 
+          {tsFilterMechanic && (
+          <React.Fragment>
           <h2 className="font-display text-lg font-semibold uppercase tracking-wide mb-4">All shifts</h2>
           <p className="text-xs mb-4" style={{ color: COLORS.line }}>As an admin, you can edit or delete anyone's shift here — including in approved weeks.</p>
           {filtered.length === 0 ? (
@@ -2520,6 +3100,8 @@ function App() {
               ))}
             </div>
           )}
+          </React.Fragment>
+          )}
         </div>
       </div>
     );
@@ -2544,9 +3126,9 @@ function App() {
         <OfflineBanner isOnline={isOnline} />
         <div className="max-w-2xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            ← Back to board
+            {t('backToBoard')}
           </button>
-          <h1 className="font-display text-3xl font-bold mb-2">Team</h1>
+          <h1 className="font-display text-3xl font-bold mb-2">{t('team')}</h1>
           <p className="text-sm mb-4" style={{ color: COLORS.inkDim }}>
             Manage who can sign in, and who has admin access like you.
           </p>
@@ -2665,7 +3247,7 @@ function App() {
         <OfflineBanner isOnline={isOnline} />
         <div className="max-w-2xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            ← Back to board
+            {t('backToBoard')}
           </button>
           <h1 className="font-display text-3xl font-bold mb-2">🎉 Team Shoutouts</h1>
           <p className="text-sm mb-8" style={{ color: COLORS.inkDim }}>
@@ -2725,6 +3307,7 @@ function App() {
           onSubmit={submitPin}
           onCancel={cancelPinModal}
           onForgot={forgotPin}
+          t={t}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -2741,72 +3324,73 @@ function App() {
         />
         <div className="max-w-3xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            ← Back to board
+            {t('backToBoard')}
           </button>
           <div className="flex items-center justify-between mb-8">
-            <h1 className="font-display text-3xl font-bold">Checklists</h1>
-            <Btn onClick={() => setShowNewTemplate((s) => !s)}>+ New checklist</Btn>
+            <h1 className="font-display text-3xl font-bold">{t('checklists')}</h1>
+            <Btn onClick={() => setShowNewTemplate((s) => !s)}>{t('newChecklist')}</Btn>
           </div>
 
           {showNewTemplate && (
-            <NewTemplateForm onCancel={() => setShowNewTemplate(false)} onSubmit={addTemplate} />
+            <NewTemplateForm onCancel={() => setShowNewTemplate(false)} onSubmit={addTemplate} t={t} />
           )}
 
           {templates.length === 0 ? (
             <div className="rounded-lg p-10 text-center" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
-              <p className="text-base mb-2" style={{ color: COLORS.inkDim }}>No custom checklists yet</p>
-              <p className="text-sm" style={{ color: COLORS.line }}>Tap "+ New checklist" above, or use the built-in templates when creating a work order.</p>
+              <p className="text-base mb-2" style={{ color: COLORS.inkDim }}>{t('noCustomChecklistsYet')}</p>
+              <p className="text-sm" style={{ color: COLORS.line }}>{t('tapNewChecklistHelper')}</p>
             </div>
           ) : (
             <div className="space-y-4">
-              {templates.map((t) => {
-                const isDefault = ['buncher-b4', 'excavator-ex1', 'crawler', 'processor', 'skidder'].includes(t.id);
-                if (editingTemplateId === t.id) {
+              {templates.map((tpl) => {
+                const isDefault = ['buncher-b4', 'excavator-ex1', 'crawler', 'processor', 'skidder'].includes(tpl.id);
+                if (editingTemplateId === tpl.id) {
                   return (
                     <NewTemplateForm
-                      key={t.id}
+                      key={tpl.id}
                       isEdit
-                      initialName={t.name}
-                      initialItemsText={t.items.join('\n')}
+                      initialName={tpl.name}
+                      initialItemsText={tpl.items.join('\n')}
                       onCancel={() => setEditingTemplateId(null)}
-                      onSubmit={(name, itemsText) => updateTemplate(t.id, name, itemsText)}
+                      onSubmit={(name, itemsText) => updateTemplate(tpl.id, name, itemsText)}
+                      t={t}
                     />
                   );
                 }
                 return (
-                  <div key={t.id} className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+                  <div key={tpl.id} className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
                     <div className="flex items-start justify-between gap-3 mb-3">
                       <div className="flex-1">
-                        <p className="font-display font-bold text-lg">{t.name}</p>
-                        <p className="text-sm" style={{ color: COLORS.line }}>{t.items.length} steps</p>
+                        <p className="font-display font-bold text-lg">{tpl.name}</p>
+                        <p className="text-sm" style={{ color: COLORS.line }}>{tpl.items.length} {t('steps')}</p>
                       </div>
                       <div className="flex gap-3">
                         <button
-                          onClick={() => setEditingTemplateId(t.id)}
+                          onClick={() => setEditingTemplateId(tpl.id)}
                           className="text-xs font-display uppercase tracking-wider hover:opacity-70"
                           style={{ color: COLORS.accent }}
                         >
-                          Edit
+                          {t('edit')}
                         </button>
                         {!isDefault && (
                           <button 
-                            onClick={() => setConfirmDeleteTemplate(confirmDeleteTemplate === t.id ? null : t.id)} 
+                            onClick={() => setConfirmDeleteTemplate(confirmDeleteTemplate === tpl.id ? null : tpl.id)} 
                             className="text-xs font-display uppercase tracking-wider hover:opacity-70"
                             style={{ color: '#D6604A' }}
                           >
-                            {confirmDeleteTemplate === t.id ? '✕ Close' : 'Delete'}
+                            {confirmDeleteTemplate === tpl.id ? t('closeX') : t('delete')}
                           </button>
                         )}
                       </div>
                     </div>
                     <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>
-                      {t.items.slice(0, 3).join(' • ')}
-                      {t.items.length > 3 ? ' • …' : ''}
+                      {tpl.items.slice(0, 3).join(' • ')}
+                      {tpl.items.length > 3 ? ' • …' : ''}
                     </p>
-                    {confirmDeleteTemplate === t.id && !isDefault && (
+                    {confirmDeleteTemplate === tpl.id && !isDefault && (
                       <div className="mt-3 pt-3 border-t" style={{ borderColor: COLORS.line }}>
-                        <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>Are you sure? You can't undo this.</p>
-                        <Btn variant="danger" onClick={() => deleteTemplate(t.id)}>Yes, delete this checklist</Btn>
+                        <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>{t('areYouSureUndo')}</p>
+                        <Btn variant="danger" onClick={() => deleteTemplate(tpl.id)}>{t('yesDeleteChecklist')}</Btn>
                       </div>
                     )}
                   </div>
@@ -2835,6 +3419,7 @@ function App() {
           onSubmit={submitPin}
           onCancel={cancelPinModal}
           onForgot={forgotPin}
+          t={t}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -2851,11 +3436,11 @@ function App() {
         />
         <div className="max-w-3xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            ← Back to board
+            {t('backToBoard')}
           </button>
           <div className="flex items-center justify-between mb-8">
             <h1 className="font-mono text-3xl font-bold">{activeUnit}</h1>
-            <Btn onClick={() => setShowAddOrder((s) => !s)}>+ New job</Btn>
+            <Btn onClick={() => setShowAddOrder((s) => !s)}>{t('newWorkOrder')}</Btn>
           </div>
 
           {showAddOrder && (
@@ -2865,13 +3450,14 @@ function App() {
               lockUnit={activeUnit}
               onCancel={() => setShowAddOrder(false)}
               onSubmit={createOrder}
+              t={t}
             />
           )}
 
           {unitOrders.length === 0 ? (
             <div className="rounded-lg p-10 text-center mt-6" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
-              <p className="text-base mb-2" style={{ color: COLORS.inkDim }}>All caught up!</p>
-              <p className="text-sm" style={{ color: COLORS.line }}>No work orders yet. Tap "+ Work Order" to create one.</p>
+              <p className="text-base mb-2" style={{ color: COLORS.inkDim }}>{t('allCaughtUp')}</p>
+              <p className="text-sm" style={{ color: COLORS.line }}>{t('noOrdersYetTapCreate')}</p>
             </div>
           ) : (
             <div className="mt-6 space-y-3">
@@ -2931,6 +3517,7 @@ function App() {
           onSubmit={submitPin}
           onCancel={cancelPinModal}
           onForgot={forgotPin}
+          t={t}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -2948,14 +3535,14 @@ function App() {
         <div className="max-w-2xl mx-auto">
           <div className="flex items-center justify-between mb-6 no-print">
             <button onClick={() => setScreen('unit')} className="font-display text-xs uppercase tracking-wider focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-              ← Back to {activeUnit}
+              {t('backTo')} {activeUnit}
             </button>
             <button
               onClick={() => window.print()}
               className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
               style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
             >
-              🖨️ Print
+              {t('print')}
             </button>
           </div>
 
@@ -2969,7 +3556,7 @@ function App() {
             </div>
 
             <label className="block mb-4">
-              <span className="font-display text-xs uppercase tracking-wider block mb-1" style={{ color: '#6B6250' }}>Issue description</span>
+              <span className="font-display text-xs uppercase tracking-wider block mb-1" style={{ color: '#6B6250' }}>{t('issueDescription')}</span>
               <textarea
                 value={order.description}
                 onChange={(e) => updateOrder(order.id, { description: e.target.value })}
@@ -2980,7 +3567,7 @@ function App() {
             </label>
 
             <div className="mb-4">
-              <span className="font-display text-xs uppercase tracking-wider block mb-2" style={{ color: '#6B6250' }}>Assigned mechanics</span>
+              <span className="font-display text-xs uppercase tracking-wider block mb-2" style={{ color: '#6B6250' }}>{t('assignedMechanics')}</span>
               <div className="flex flex-wrap gap-2">
                 {mechanics.map((m) => {
                   const current = getAssignedMechanics(order);
@@ -3005,13 +3592,13 @@ function App() {
                 })}
               </div>
               {mechanics.length === 0 && (
-                <p className="text-sm" style={{ color: '#6B6250' }}>No mechanics on the team yet.</p>
+                <p className="text-sm" style={{ color: '#6B6250' }}>{t('noMechanicsOnTeam')}</p>
               )}
             </div>
 
             <div className="grid grid-cols-1 gap-3 mb-4">
               <label className="block">
-                <span className="font-display text-xs uppercase tracking-wider block mb-1" style={{ color: '#6B6250' }}>Machine hours</span>
+                <span className="font-display text-xs uppercase tracking-wider block mb-1" style={{ color: '#6B6250' }}>{t('machineHours')}</span>
                 <input
                   type="number"
                   value={order.hours || ''}
@@ -3023,7 +3610,7 @@ function App() {
             </div>
 
             <label className="block mb-5">
-              <span className="font-display text-xs uppercase tracking-wider block mb-1" style={{ color: '#6B6250' }}>Due date</span>
+              <span className="font-display text-xs uppercase tracking-wider block mb-1" style={{ color: '#6B6250' }}>{t('dueDate')}</span>
               <input
                 type="date"
                 value={order.dueDate || ''}
@@ -3034,28 +3621,37 @@ function App() {
             </label>
 
             <div className="mb-2">
-              <span className="font-display text-xs uppercase tracking-wider block mb-2" style={{ color: '#6B6250' }}>Status</span>
-              <div className="flex gap-2">
-                {STATUSES.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => {
-                      updateOrder(order.id, { status: s });
-                      if (s === 'Done' && order.status !== 'Done') {
-                        setShowFireworks(true);
-                        setTimeout(() => setShowFireworks(false), 2600);
-                      }
-                    }}
-                    className="font-display text-xs uppercase font-semibold tracking-wide px-3 py-1.5 rounded-sm focus:outline-none focus:ring-2"
-                    style={{
-                      border: `2px solid ${statusColor(s)}`,
-                      color: order.status === s ? COLORS.ink2 : statusColor(s),
-                      background: order.status === s ? statusColor(s) : 'transparent',
-                    }}
-                  >
-                    {s}
-                  </button>
-                ))}
+              <span className="font-display text-xs uppercase tracking-wider block mb-2" style={{ color: '#6B6250' }}>{t('status')}</span>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => updateOrder(order.id, { status: 'Open' })}
+                  className="font-display text-xs uppercase font-semibold tracking-wide px-3 py-1.5 rounded-sm focus:outline-none focus:ring-2"
+                  style={{
+                    border: `2px solid ${statusColor('Open')}`,
+                    color: order.status === 'Open' ? COLORS.ink2 : statusColor('Open'),
+                    background: order.status === 'Open' ? statusColor('Open') : 'transparent',
+                  }}
+                >
+                  Open
+                </button>
+                <button
+                  onClick={() => {
+                    updateOrder(order.id, { status: 'Done' });
+                    if (order.status !== 'Done') {
+                      setShowFireworks(true);
+                      setTimeout(() => setShowFireworks(false), 2600);
+                    }
+                  }}
+                  className="font-display text-base uppercase font-bold tracking-wide px-6 py-3 rounded-lg focus:outline-none focus:ring-2 transition-all hover:scale-105"
+                  style={{
+                    border: `3px solid ${statusColor('Done')}`,
+                    color: order.status === 'Done' ? '#1B1F19' : statusColor('Done'),
+                    background: order.status === 'Done' ? statusColor('Done') : 'transparent',
+                    boxShadow: order.status === 'Done' ? `0 2px 12px ${statusColor('Done')}66` : 'none',
+                  }}
+                >
+                  ✓ Done
+                </button>
               </div>
             </div>
           </div>
@@ -3088,14 +3684,14 @@ function App() {
                           className="text-xs font-display uppercase tracking-wider hover:opacity-70"
                           style={{ color: COLORS.accent }}
                         >
-                          Edit
+                          {t('edit')}
                         </button>
                         <button
                           onClick={() => detachChecklist(order.id, c.id)}
                           className="text-xs font-display uppercase tracking-wider hover:opacity-70"
                           style={{ color: '#D6604A' }}
                         >
-                          Remove
+                          {t('remove')}
                         </button>
                       </div>
                     </div>
@@ -3132,7 +3728,7 @@ function App() {
               {templates.length > 0 && !showAdHocChecklist && (
                 <div className="mb-4">
                   <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>
-                    {getChecklists(order).length > 0 ? 'Add another checklist to this job:' : 'Pick a checklist to use for this job:'}
+                    {getChecklists(order).length > 0 ? t('addAnotherChecklist') : t('pickChecklist')}
                   </p>
                   <div className="flex gap-2">
                     <select
@@ -3141,10 +3737,10 @@ function App() {
                       className="flex-1 rounded-lg px-4 py-2 text-base focus:outline-none focus:ring-2"
                       style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
                     >
-                      <option value="">Select a checklist…</option>
+                      <option value="">{t('selectChecklistDots')}</option>
                       {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                     </select>
-                    <Btn disabled={!attachTemplateId} onClick={() => attachChecklist(order.id, attachTemplateId)}>Add</Btn>
+                    <Btn disabled={!attachTemplateId} onClick={() => attachChecklist(order.id, attachTemplateId)}>{t('add')}</Btn>
                   </div>
                 </div>
               )}
@@ -3155,7 +3751,7 @@ function App() {
                   className="text-sm underline"
                   style={{ color: COLORS.accent }}
                 >
-                  + Create a checklist just for this job
+                  {t('createChecklistForJob')}
                 </button>
               ) : (
                 <AdHocChecklistForm
@@ -3173,13 +3769,14 @@ function App() {
             order={order}
             onAdd={(dataUrls) => addPhotos(order.id, dataUrls)}
             onRemove={(photoId) => removePhoto(order.id, photoId)}
+            t={t}
           />
 
           <div className="mt-8">
-            <h3 className="font-display text-lg font-bold mb-4">Notes & Updates</h3>
+            <h3 className="font-display text-lg font-bold mb-4">{t('notesUpdates')}</h3>
             <div className="space-y-3 mb-5">
               {(order.notes || []).length === 0 && (
-                <p className="text-sm text-center py-4" style={{ color: COLORS.line }}>No notes yet. Add one to keep the team in the loop.</p>
+                <p className="text-sm text-center py-4" style={{ color: COLORS.line }}>{t('noNotesYet')}</p>
               )}
               {(order.notes || []).slice().reverse().map((n) => (
                 <NoteCard
@@ -3190,19 +3787,21 @@ function App() {
                   onEdit={() => setEditingNoteId(n.id)}
                   onCancel={() => setEditingNoteId(null)}
                   onSave={(text) => updateNote(order.id, n.id, text)}
+                  onDelete={() => deleteNote(order.id, n.id)}
+                  lang={lang}
                 />
               ))}
             </div>
-            <NoteForm onSubmit={(text, type) => addNote(order.id, text, type)} />
+            <NoteForm onSubmit={(text, type) => addNote(order.id, text, type)} t={t} />
           </div>
 
           <div className="mt-8 flex justify-end">
             {!confirmDelete ? (
-              <Btn variant="danger" onClick={() => setConfirmDelete(true)}>Delete work order</Btn>
+              <Btn variant="danger" onClick={() => setConfirmDelete(true)}>{t('deleteWorkOrder')}</Btn>
             ) : (
               <div className="flex items-center gap-2">
-                <span className="text-sm" style={{ color: COLORS.inkDim }}>Delete this work order for good?</span>
-                <Btn variant="danger" onClick={() => deleteOrder(order.id)}>Yes, delete</Btn>
+                <span className="text-sm" style={{ color: COLORS.inkDim }}>{t('deleteForGood')}</span>
+                <Btn variant="danger" onClick={() => deleteOrder(order.id)}>{t('yesDelete')}</Btn>
                 <Btn variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Btn>
               </div>
             )}
@@ -3215,16 +3814,17 @@ function App() {
   return null;
 }
 
-function NewTemplateForm({ onSubmit, onCancel, initialName, initialItemsText, isEdit }) {
+function NewTemplateForm({ onSubmit, onCancel, initialName, initialItemsText, isEdit, t }) {
+  const tr = t || ((k) => translations.en[k] || k);
   const [name, setName] = useState(initialName || '');
   const [itemsText, setItemsText] = useState(initialItemsText || '');
   return (
     <div className="rounded-lg p-6 mb-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
-      <h3 className="font-display text-lg font-bold mb-4">{isEdit ? 'Edit checklist' : 'Create a new checklist'}</h3>
-      <TextField label="What's this checklist for?" value={name} onChange={setName} placeholder="e.g. Engine rebuild, Pre-shift inspection" helper="Give it a clear, descriptive name" />
+      <h3 className="font-display text-lg font-bold mb-4">{isEdit ? tr('editChecklist') : tr('createNewChecklist')}</h3>
+      <TextField label={tr('whatsThisFor')} value={name} onChange={setName} placeholder={tr('checklistNamePlaceholder')} helper={tr('giveClearName')} />
       <label className="block mb-4">
-        <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>Steps to complete</span>
-        <span className="text-xs block mb-2" style={{ color: COLORS.inkDim }}>Type one step per line. Example:</span>
+        <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>{tr('stepsToComplete')}</span>
+        <span className="text-xs block mb-2" style={{ color: COLORS.inkDim }}>{tr('typeOnePerLine')}</span>
         <textarea
           value={itemsText}
           onChange={(e) => setItemsText(e.target.value)}
@@ -3235,8 +3835,8 @@ function NewTemplateForm({ onSubmit, onCancel, initialName, initialItemsText, is
         />
       </label>
       <div className="flex gap-2">
-        <Btn onClick={() => name.trim() && itemsText.trim() && onSubmit(name, itemsText)}>{isEdit ? 'Save changes' : 'Save checklist'}</Btn>
-        <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
+        <Btn onClick={() => name.trim() && itemsText.trim() && onSubmit(name, itemsText)}>{isEdit ? tr('saveChanges') : tr('saveChecklist')}</Btn>
+        <Btn variant="ghost" onClick={onCancel}>{tr('cancel')}</Btn>
       </div>
     </div>
   );
@@ -3417,6 +4017,79 @@ function OrderChecklistEditForm({ checklist, onSave, onCancel }) {
   );
 }
 
+function AddMissedDayForm({ onSubmit, onCancel, mechanics, defaultMechanic, t }) {
+  const tr = t || ((k) => translations.en[k] || k);
+  const [mechanic, setMechanic] = useState(defaultMechanic || (mechanics && mechanics[0]) || '');
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [clockInTime, setClockInTime] = useState('');
+  const [clockOutTime, setClockOutTime] = useState('');
+  const [lunchStartTime, setLunchStartTime] = useState('');
+  const [lunchEndTime, setLunchEndTime] = useState('');
+  const [error, setError] = useState('');
+
+  const combine = (d, time) => (time ? `${d}T${time}` : null);
+
+  const handleSave = () => {
+    if (!date || !clockInTime) {
+      setError('Pick a date and at least a clock-in time.');
+      return;
+    }
+    onSubmit(
+      mechanic,
+      date,
+      combine(date, clockInTime),
+      combine(date, clockOutTime),
+      combine(date, lunchStartTime),
+      combine(date, lunchEndTime),
+      setError
+    );
+  };
+
+  const fieldStyle = { background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
+  const fieldClass = 'w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2';
+
+  return (
+    <div className="rounded-lg p-5 mb-6" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>
+      <h3 className="font-display text-sm font-bold uppercase tracking-wide mb-3">+ Add a missed day</h3>
+      {mechanics && (
+        <label className="block mb-3">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Mechanic</span>
+          <select value={mechanic} onChange={(e) => setMechanic(e.target.value)} className={fieldClass} style={fieldStyle}>
+            {mechanics.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </label>
+      )}
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <label className="block col-span-2">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Date</span>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={fieldClass} style={fieldStyle} />
+        </label>
+        <label className="block">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>{tr('clockIn')}</span>
+          <input type="time" value={clockInTime} onChange={(e) => setClockInTime(e.target.value)} className={fieldClass} style={fieldStyle} />
+        </label>
+        <label className="block">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>{tr('clockOut')}</span>
+          <input type="time" value={clockOutTime} onChange={(e) => setClockOutTime(e.target.value)} className={fieldClass} style={fieldStyle} />
+        </label>
+        <label className="block">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Break start (optional)</span>
+          <input type="time" value={lunchStartTime} onChange={(e) => setLunchStartTime(e.target.value)} className={fieldClass} style={fieldStyle} />
+        </label>
+        <label className="block">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Break end (optional)</span>
+          <input type="time" value={lunchEndTime} onChange={(e) => setLunchEndTime(e.target.value)} className={fieldClass} style={fieldStyle} />
+        </label>
+      </div>
+      {error && <p className="text-xs mb-3" style={{ color: '#E07A5F' }}>{error}</p>}
+      <div className="flex gap-2">
+        <Btn onClick={handleSave}>Save day</Btn>
+        <Btn variant="ghost" onClick={onCancel}>{tr('cancel')}</Btn>
+      </div>
+    </div>
+  );
+}
+
 function EmailListEditor({ label, helper, value, onSave, single }) {
   const [draft, setDraft] = useState(value);
   const [saved, setSaved] = useState(false);
@@ -3489,7 +4162,8 @@ function AdHocChecklistForm({ onSubmit, onCancel }) {
   );
 }
 
-function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit }) {
+function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit, t }) {
+  const tr = t || ((k) => translations.en[k] || k);
   const [description, setDescription] = useState('');
   const [assignedMechanics, setAssignedMechanics] = useState([]);
   const [hours, setHours] = useState('');
@@ -3513,11 +4187,11 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit }) {
 
   return (
     <div className="rounded-lg p-6 mb-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
-      <h3 className="font-display text-lg font-bold mb-4">Create a work order</h3>
+      <h3 className="font-display text-lg font-bold mb-4">{tr('createWorkOrder')}</h3>
 
       {!lockUnit && (
         <label className="block mb-4">
-          <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>Which machine?</span>
+          <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>{tr('whichMachine')}</span>
           {!addingNewUnit ? (
             <select
               value={unit}
@@ -3525,16 +4199,16 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit }) {
               className="w-full rounded-lg px-4 py-2.5 text-base focus:outline-none focus:ring-2"
               style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
             >
-              <option value="">Select a machine…</option>
+              <option value="">{tr('selectMachine')}</option>
               {units.map((u) => <option key={u} value={u}>{u}</option>)}
-              <option value="__new__">+ Add a new machine…</option>
+              <option value="__new__">{tr('addNewMachine')}</option>
             </select>
           ) : (
             <div className="flex gap-2">
               <input
                 value={newUnitName}
                 onChange={(e) => setNewUnitName(e.target.value)}
-                placeholder="New machine unit number"
+                placeholder={tr('newMachineUnitNumber')}
                 autoFocus
                 className="flex-1 rounded-lg px-4 py-2.5 text-base focus:outline-none focus:ring-2 font-mono"
                 style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
@@ -3544,16 +4218,16 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit }) {
                 className="px-3 rounded-lg text-sm"
                 style={{ color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
               >
-                Cancel
+                {tr('cancel')}
               </button>
             </div>
           )}
         </label>
       )}
 
-      <TextField label="What needs to be fixed?" value={description} onChange={setDescription} placeholder="e.g. Replace hydraulic pump, Fix leaking hose" helper="Be specific so the mechanic knows what to do" />
+      <TextField label={tr('whatNeedsFixed')} value={description} onChange={setDescription} placeholder={tr('whatNeedsFixedPlaceholder')} helper={tr('whatNeedsFixedHelper')} />
       <div className="mb-4">
-        <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>Who's doing this?</span>
+        <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>{tr('whosDoingThis')}</span>
         <div className="flex flex-wrap gap-2">
           {mechanics.map((m) => {
             const isChecked = assignedMechanics.includes(m);
@@ -3573,23 +4247,24 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit }) {
               </button>
             );
           })}
-          {mechanics.length === 0 && <p className="text-sm" style={{ color: COLORS.inkDim }}>No mechanics yet</p>}
+          {mechanics.length === 0 && <p className="text-sm" style={{ color: COLORS.inkDim }}>{tr('noMechanicsYet')}</p>}
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4 mb-4">
-        <TextField label="Machine hours" value={hours} onChange={setHours} placeholder="Current hour meter reading" type="number" mono />
-        <TextField label="When do you need it done?" value={dueDate} onChange={setDueDate} type="date" mono />
+        <TextField label={tr('machineHours')} value={hours} onChange={setHours} placeholder={tr('hourMeterReading')} type="number" mono />
+        <TextField label={tr('whenNeedDone')} value={dueDate} onChange={setDueDate} type="date" mono />
       </div>
       <div className="flex gap-2 mt-6">
-        <Btn onClick={() => canSubmit && onSubmit({ unit: finalUnit, description, assignedMechanics, hours, dueDate })} disabled={!canSubmit}>Create job</Btn>
-        <Btn variant="ghost" onClick={onCancel}>Nevermind</Btn>
+        <Btn onClick={() => canSubmit && onSubmit({ unit: finalUnit, description, assignedMechanics, hours, dueDate })} disabled={!canSubmit}>{tr('createJob')}</Btn>
+        <Btn variant="ghost" onClick={onCancel}>{tr('nevermind')}</Btn>
       </div>
     </div>
   );
 }
 
-function NoteCard({ note, isEditing, canEdit, onEdit, onCancel, onSave }) {
+function NoteCard({ note, isEditing, canEdit, onEdit, onCancel, onSave, onDelete, lang }) {
   const [text, setText] = useState(note.text);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   if (isEditing) {
     return (
@@ -3628,17 +4303,30 @@ function NoteCard({ note, isEditing, canEdit, onEdit, onCancel, onSave }) {
           <span className="font-mono text-xs" style={{ color: COLORS.line }}>
             {new Date(note.ts).toLocaleString()}{note.edited ? ' (edited)' : ''}
           </span>
-          {canEdit && (
+          {canEdit && !confirmDelete && (
             <button onClick={onEdit} className="text-xs underline" style={{ color: COLORS.inkDim }}>Edit</button>
+          )}
+          {canEdit && !confirmDelete && (
+            <button onClick={() => setConfirmDelete(true)} className="text-xs underline" style={{ color: '#E07A5F' }}>Delete</button>
+          )}
+          {confirmDelete && (
+            <React.Fragment>
+              <button onClick={onDelete} className="text-xs font-semibold underline" style={{ color: '#E07A5F' }}>Confirm</button>
+              <button onClick={() => setConfirmDelete(false)} className="text-xs underline" style={{ color: COLORS.inkDim }}>Cancel</button>
+            </React.Fragment>
           )}
         </div>
       </div>
-      <p className="text-base">{note.text}</p>
+      <p className="text-base">{lang === 'es' && note.originalLang === 'es' ? note.originalText : note.text}</p>
+      {note.originalLang === 'es' && lang !== 'es' && (
+        <p className="text-xs mt-1" style={{ color: COLORS.line }}>Translated from Spanish</p>
+      )}
     </div>
   );
 }
 
-function NoteForm({ onSubmit }) {
+function NoteForm({ onSubmit, t }) {
+  const tr = t || ((k) => translations.en[k] || k);
   const [text, setText] = useState('');
   const [isShoutout, setIsShoutout] = useState(false);
   return (
@@ -3646,7 +4334,7 @@ function NoteForm({ onSubmit }) {
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={isShoutout ? "Give someone credit for a job well done…" : "What's the status? Any issues? Tips for next shift?"}
+        placeholder={isShoutout ? tr('shoutoutPlaceholder') : tr('statusPlaceholder')}
         rows={2}
         className="w-full rounded-lg px-4 py-3 text-base focus:outline-none focus:ring-2 resize-none mb-2"
         style={{
@@ -3664,20 +4352,21 @@ function NoteForm({ onSubmit }) {
             className="w-4 h-4"
             style={{ accentColor: COLORS.accent }}
           />
-          🎉 Make this a shoutout
+          {tr('makeShoutout')}
         </label>
         <Btn
           onClick={() => { onSubmit(text, isShoutout ? 'shoutout' : 'note'); setText(''); setIsShoutout(false); }}
           disabled={!text.trim()}
         >
-          {isShoutout ? 'Post shoutout' : 'Post'}
+          {isShoutout ? tr('postShoutout') : tr('post')}
         </Btn>
       </div>
     </div>
   );
 }
 
-function PhotosSection({ order, onAdd, onRemove }) {
+function PhotosSection({ order, onAdd, onRemove, t }) {
+  const tr = t || ((k) => translations.en[k] || k);
   const [uploading, setUploading] = useState(false);
   const [viewerPhoto, setViewerPhoto] = useState(null);
   const media = order.media || [];
@@ -3698,7 +4387,7 @@ function PhotosSection({ order, onAdd, onRemove }) {
 
   return (
     <div className="mt-8 no-print">
-      <h3 className="font-display text-lg font-bold mb-4">Photos</h3>
+      <h3 className="font-display text-lg font-bold mb-4">{tr('photos')}</h3>
 
       {media.length > 0 && (
         <div className="grid grid-cols-3 gap-2 mb-4">
@@ -3726,7 +4415,7 @@ function PhotosSection({ order, onAdd, onRemove }) {
         className="block text-center rounded-lg py-4 cursor-pointer font-display font-semibold uppercase tracking-wide text-sm"
         style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}`, color: COLORS.accent }}
       >
-        {uploading ? 'Uploading…' : '📷 Add photos of the problem'}
+        {uploading ? tr('uploadingDots') : tr('addPhotosProblem')}
         <input
           type="file"
           accept="image/*"
