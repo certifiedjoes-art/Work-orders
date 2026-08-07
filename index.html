@@ -276,6 +276,13 @@ const translations = {
     post: 'Post',
     postShoutout: 'Post shoutout',
     photos: 'Photos',
+    noOrdersMatchSearch: 'No work orders match that search.',
+    allCaughtUp: 'All caught up!',
+    noOrdersYetTapCreate: 'No work orders yet. Tap "+ Work Order" to create one.',
+    clockInQuestion: 'Clock in,',
+    haventClockedInYet: "Looks like you haven't clocked in yet today.",
+    clockInNow: 'Clock In Now',
+    notRightNow: 'Not right now',
   },
   es: {
     whoAreYou: '¿Quién trabaja hoy?',
@@ -381,6 +388,13 @@ const translations = {
     post: 'Publicar',
     postShoutout: 'Publicar reconocimiento',
     photos: 'Fotos',
+    noOrdersMatchSearch: 'Ninguna orden de trabajo coincide con esa búsqueda.',
+    allCaughtUp: '¡Todo al día!',
+    noOrdersYetTapCreate: 'Todavía no hay órdenes de trabajo. Toca "+ Nueva Orden de Trabajo" para crear una.',
+    clockInQuestion: 'Marcar entrada,',
+    haventClockedInYet: 'Parece que todavía no has marcado entrada hoy.',
+    clockInNow: 'Marcar Entrada Ahora',
+    notRightNow: 'Ahora no',
   },
   pdt: {
     whoAreYou: 'Wäa aпобытит vändoag?',
@@ -486,6 +500,13 @@ const translations = {
     post: 'Aufschekje',
     postShoutout: 'Lov aufschekje',
     photos: 'Fotoas',
+    noOrdersMatchSearch: 'Kjeen Oppdrach passt to dee Söak.',
+    allCaughtUp: 'Aules opp Doag!',
+    noOrdersYetTapCreate: 'Noch kjeen Oppdrachte. Tekj "+ Nieha Oppdrach" om eene to moaken.',
+    clockInQuestion: 'Aunkjlocke,',
+    haventClockedInYet: 'Et süt ute aus wan du vändoag noch nich aunjeklockt hast.',
+    clockInNow: 'Nu Aunkjlocke',
+    notRightNow: 'Nu nich',
   },
 };
 
@@ -678,7 +699,7 @@ function FireworksOverlay({ show }) {
   );
 }
 
-function JokeBanner() {
+function JokeBanner({ lang }) {
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
   return (
@@ -687,7 +708,7 @@ function JokeBanner() {
       style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
     >
       <span style={{ fontSize: '1.4rem' }}>😄</span>
-      <p className="flex-1 text-sm italic" style={{ color: COLORS.inkDim }}>{jokeOfTheDay()}</p>
+      <p className="flex-1 text-sm italic" style={{ color: COLORS.inkDim }}>{jokeOfTheDay(lang)}</p>
       <button onClick={() => setDismissed(true)} className="text-sm" style={{ color: COLORS.line }}>✕</button>
     </div>
   );
@@ -721,19 +742,20 @@ function MilestonePromptOverlay({ prompt, onSubmit, onSkip }) {
   );
 }
 
-function ClockInPromptOverlay({ show, mechanic, onClockIn, onSkip }) {
+function ClockInPromptOverlay({ show, mechanic, onClockIn, onSkip, t }) {
+  const tr = t || ((k) => translations.en[k] || k);
   if (!show) return null;
   return (
     <div className="absolute inset-0 z-50 p-6" style={{ background: 'rgba(0,0,0,0.75)', minHeight: '100vh' }}>
       <div className="w-full max-w-xs mx-auto my-8 rounded-2xl p-6 text-center overflow-y-auto" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}`, maxHeight: '85vh' }}>
         <p className="text-4xl mb-3">⏱️</p>
-        <p className="font-display text-lg font-bold mb-2">Clock in, {mechanic}?</p>
+        <p className="font-display text-lg font-bold mb-2">{tr('clockInQuestion')} {mechanic}?</p>
         <p className="text-sm mb-5" style={{ color: COLORS.inkDim }}>
-          Looks like you haven't clocked in yet today.
+          {tr('haventClockedInYet')}
         </p>
         <div className="flex flex-col gap-2">
-          <Btn onClick={onClockIn}>Clock In Now</Btn>
-          <Btn variant="ghost" onClick={onSkip}>Not right now</Btn>
+          <Btn onClick={onClockIn}>{tr('clockInNow')}</Btn>
+          <Btn variant="ghost" onClick={onSkip}>{tr('notRightNow')}</Btn>
         </div>
       </div>
     </div>
@@ -1023,11 +1045,38 @@ const JOKES = [
   "What do you call a lazy kangaroo? Pouch potato.",
 ];
 
-function jokeOfTheDay() {
+const JOKES_ES = [
+  "¿Por qué los pájaros no usan Facebook? Porque ya tienen Twitter.",
+  "¿Qué le dice un pez a otro pez? Nada.",
+  "¿Cómo se llama un boomerang que no vuelve? Un palo.",
+  "¿Qué hace una abeja en el gimnasio? Zum-ba.",
+  "¿Por qué el libro de matemáticas está triste? Porque tiene muchos problemas.",
+  "¿Cómo se dice pañuelo en náhuatl? Muéveloparaacáparaallá.",
+  "¿Qué le dijo un techo a otro techo? Estoy techo polvo.",
+  "¿Cuál es el café más peligroso del mundo? El ex-preso.",
+  "¿Por qué el gallo no usa reloj? Porque tiene despertador.",
+  "¿Qué hace un pez payaso? Se ríe con la boca cerrada porque está bajo el agua.",
+  "¿Cómo se llama el campeón de buceo japonés? Tokofondo.",
+  "¿Qué le dijo una impresora a otra? ¿Esa hoja es tuya o es una impresión mía?",
+];
+
+const JOKES_PDT = [
+  "Waut es dee schwoatste Kolua? Dee es nich do.",
+  "Waut sajcht dee Kuh toom Mundach? Ekj go nu melkje.",
+  "Wanäa es en Dia nich en Dia? Wan et en Doa es.",
+  "Waut es rund un rejcht en dee Küak? En Broodrol.",
+  "Waut es daut Läajkste en dee Welt? En Foaza sitte enne Ruh.",
+  "Wua läajt en Fesch soo goot? En Bad.",
+  "Waut sajcht een Boom toom aundren? Blada mie nich aun.",
+  "Waut es en Boa aun dän Torn? Doa woont dee Klock.",
+];
+
+function jokeOfTheDay(lang) {
+  const list = lang === 'es' ? JOKES_ES : lang === 'pdt' ? JOKES_PDT : JOKES;
   const start = new Date(new Date().getFullYear(), 0, 0);
   const diff = new Date() - start;
   const dayOfYear = Math.floor(diff / (1000 * 60 * 60 * 24));
-  return JOKES[dayOfYear % JOKES.length];
+  return list[dayOfYear % list.length];
 }
 
 const DEFAULT_TEMPLATES = [
@@ -2229,6 +2278,7 @@ function App() {
             await clockIn();
           }}
           onSkip={() => setShowClockInPrompt(false)}
+          t={t}
         />
         <MilestonePromptOverlay
           prompt={milestonePrompt}
@@ -2303,12 +2353,12 @@ function App() {
                 style={{ color: COLORS.inkDim, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
                 title="Force the app to grab the latest version"
               >
-                🔄 Check for Updates
+                {t('checkForUpdates')}
               </button>
             </div>
           </div>
 
-          <JokeBanner />
+          <JokeBanner lang={lang} />
 
           <div className="flex items-center justify-end gap-4 -mt-2 mb-8">
             <button onClick={startChangePin} className="text-xs underline" style={{ color: COLORS.inkDim }}>
@@ -2374,7 +2424,7 @@ function App() {
               </h2>
               {searchResults.length === 0 ? (
                 <div className="rounded-lg p-10 text-center" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
-                  <p className="text-base" style={{ color: COLORS.inkDim }}>No work orders match that search.</p>
+                  <p className="text-base" style={{ color: COLORS.inkDim }}>{t('noOrdersMatchSearch')}</p>
                 </div>
               ) : (
                 <div className="space-y-3">{searchResults.map(renderOrderCard)}</div>
@@ -2463,7 +2513,7 @@ function App() {
         />
         <div className="max-w-5xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            ← Back to board
+            {t('backToBoard')}
           </button>
 
           <div className="flex items-center justify-between mb-5">
@@ -2768,7 +2818,7 @@ function App() {
         <OfflineBanner isOnline={isOnline} />
         <div className="max-w-3xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            ← Back to board
+            {t('backToBoard')}
           </button>
           <h1 className="font-display text-3xl font-bold mb-8">Timesheets</h1>
 
@@ -3025,9 +3075,9 @@ function App() {
         <OfflineBanner isOnline={isOnline} />
         <div className="max-w-2xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            ← Back to board
+            {t('backToBoard')}
           </button>
-          <h1 className="font-display text-3xl font-bold mb-2">Team</h1>
+          <h1 className="font-display text-3xl font-bold mb-2">{t('team')}</h1>
           <p className="text-sm mb-4" style={{ color: COLORS.inkDim }}>
             Manage who can sign in, and who has admin access like you.
           </p>
@@ -3146,7 +3196,7 @@ function App() {
         <OfflineBanner isOnline={isOnline} />
         <div className="max-w-2xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            ← Back to board
+            {t('backToBoard')}
           </button>
           <h1 className="font-display text-3xl font-bold mb-2">🎉 Team Shoutouts</h1>
           <p className="text-sm mb-8" style={{ color: COLORS.inkDim }}>
@@ -3223,7 +3273,7 @@ function App() {
         />
         <div className="max-w-3xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            ← Back to board
+            {t('backToBoard')}
           </button>
           <div className="flex items-center justify-between mb-8">
             <h1 className="font-display text-3xl font-bold">Checklists</h1>
@@ -3334,11 +3384,11 @@ function App() {
         />
         <div className="max-w-3xl mx-auto">
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            ← Back to board
+            {t('backToBoard')}
           </button>
           <div className="flex items-center justify-between mb-8">
             <h1 className="font-mono text-3xl font-bold">{activeUnit}</h1>
-            <Btn onClick={() => setShowAddOrder((s) => !s)}>+ New job</Btn>
+            <Btn onClick={() => setShowAddOrder((s) => !s)}>{t('newWorkOrder')}</Btn>
           </div>
 
           {showAddOrder && (
@@ -3354,8 +3404,8 @@ function App() {
 
           {unitOrders.length === 0 ? (
             <div className="rounded-lg p-10 text-center mt-6" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
-              <p className="text-base mb-2" style={{ color: COLORS.inkDim }}>All caught up!</p>
-              <p className="text-sm" style={{ color: COLORS.line }}>No work orders yet. Tap "+ Work Order" to create one.</p>
+              <p className="text-base mb-2" style={{ color: COLORS.inkDim }}>{t('allCaughtUp')}</p>
+              <p className="text-sm" style={{ color: COLORS.line }}>{t('noOrdersYetTapCreate')}</p>
             </div>
           ) : (
             <div className="mt-6 space-y-3">
@@ -3520,27 +3570,36 @@ function App() {
 
             <div className="mb-2">
               <span className="font-display text-xs uppercase tracking-wider block mb-2" style={{ color: '#6B6250' }}>{t('status')}</span>
-              <div className="flex gap-2">
-                {STATUSES.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => {
-                      updateOrder(order.id, { status: s });
-                      if (s === 'Done' && order.status !== 'Done') {
-                        setShowFireworks(true);
-                        setTimeout(() => setShowFireworks(false), 2600);
-                      }
-                    }}
-                    className="font-display text-xs uppercase font-semibold tracking-wide px-3 py-1.5 rounded-sm focus:outline-none focus:ring-2"
-                    style={{
-                      border: `2px solid ${statusColor(s)}`,
-                      color: order.status === s ? COLORS.ink2 : statusColor(s),
-                      background: order.status === s ? statusColor(s) : 'transparent',
-                    }}
-                  >
-                    {s}
-                  </button>
-                ))}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => updateOrder(order.id, { status: 'Open' })}
+                  className="font-display text-xs uppercase font-semibold tracking-wide px-3 py-1.5 rounded-sm focus:outline-none focus:ring-2"
+                  style={{
+                    border: `2px solid ${statusColor('Open')}`,
+                    color: order.status === 'Open' ? COLORS.ink2 : statusColor('Open'),
+                    background: order.status === 'Open' ? statusColor('Open') : 'transparent',
+                  }}
+                >
+                  Open
+                </button>
+                <button
+                  onClick={() => {
+                    updateOrder(order.id, { status: 'Done' });
+                    if (order.status !== 'Done') {
+                      setShowFireworks(true);
+                      setTimeout(() => setShowFireworks(false), 2600);
+                    }
+                  }}
+                  className="font-display text-base uppercase font-bold tracking-wide px-6 py-3 rounded-lg focus:outline-none focus:ring-2 transition-all hover:scale-105"
+                  style={{
+                    border: `3px solid ${statusColor('Done')}`,
+                    color: order.status === 'Done' ? '#1B1F19' : statusColor('Done'),
+                    background: order.status === 'Done' ? statusColor('Done') : 'transparent',
+                    boxShadow: order.status === 'Done' ? `0 2px 12px ${statusColor('Done')}66` : 'none',
+                  }}
+                >
+                  ✓ Done
+                </button>
               </div>
             </div>
           </div>
