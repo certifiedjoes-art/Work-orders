@@ -102,21 +102,23 @@ function monthlySummaryCsv(timesheets) {
 //   - weekly job:  ...?key=SECRET            (defaults to mode=weekly)
 //   - monthly job: ...?key=SECRET&mode=monthly
 exports.weeklyBackupAndEmail = async (req, res) => {
+  // Browsers send a CORS "preflight" OPTIONS request before a cross-origin
+  // POST like this one — it must get a clean response with these headers,
+  // or the browser blocks the real POST from ever being sent at all.
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+
   // Live translation requests come from the app itself as a POST with a
   // JSON body — handled separately from the scheduled weekly/monthly runs,
   // which stay GET requests secured by TRIGGER_SECRET.
   if (req.method === 'POST') {
     const body = req.body || {};
     if (body.key !== APP_SECRET) {
-      // Temporary diagnostic logging — helps us see exactly what arrived
-      // versus what was expected, since a plain 403 doesn't say why.
-      console.error('Translate auth failed', {
-        receivedKeyType: typeof body.key,
-        receivedKeyLength: body.key ? body.key.length : 0,
-        receivedKey: body.key,
-        expectedLength: APP_SECRET ? APP_SECRET.length : 0,
-        bodyIsEmpty: Object.keys(body).length === 0,
-      });
       res.status(403).json({ error: 'Forbidden' });
       return;
     }
