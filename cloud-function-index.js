@@ -108,6 +108,15 @@ exports.weeklyBackupAndEmail = async (req, res) => {
   if (req.method === 'POST') {
     const body = req.body || {};
     if (body.key !== APP_SECRET) {
+      // Temporary diagnostic logging — helps us see exactly what arrived
+      // versus what was expected, since a plain 403 doesn't say why.
+      console.error('Translate auth failed', {
+        receivedKeyType: typeof body.key,
+        receivedKeyLength: body.key ? body.key.length : 0,
+        receivedKey: body.key,
+        expectedLength: APP_SECRET ? APP_SECRET.length : 0,
+        bodyIsEmpty: Object.keys(body).length === 0,
+      });
       res.status(403).json({ error: 'Forbidden' });
       return;
     }
