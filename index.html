@@ -1780,6 +1780,13 @@ function App() {
     setEditingNoteId(null);
   };
 
+  const deleteNote = async (orderId, noteId) => {
+    const next = orders.map((o) =>
+      o.id === orderId ? { ...o, notes: (o.notes || []).filter((n) => n.id !== noteId) } : o
+    );
+    await persistOrders(next);
+  };
+
   const addPhotos = async (id, dataUrls) => {
     const photos = dataUrls.map((dataUrl) => ({
       id: uid(),
@@ -3468,6 +3475,7 @@ function App() {
                   onEdit={() => setEditingNoteId(n.id)}
                   onCancel={() => setEditingNoteId(null)}
                   onSave={(text) => updateNote(order.id, n.id, text)}
+                  onDelete={() => deleteNote(order.id, n.id)}
                   lang={lang}
                 />
               ))}
@@ -3940,8 +3948,9 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit }) {
   );
 }
 
-function NoteCard({ note, isEditing, canEdit, onEdit, onCancel, onSave, lang }) {
+function NoteCard({ note, isEditing, canEdit, onEdit, onCancel, onSave, onDelete, lang }) {
   const [text, setText] = useState(note.text);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   if (isEditing) {
     return (
@@ -3980,8 +3989,17 @@ function NoteCard({ note, isEditing, canEdit, onEdit, onCancel, onSave, lang }) 
           <span className="font-mono text-xs" style={{ color: COLORS.line }}>
             {new Date(note.ts).toLocaleString()}{note.edited ? ' (edited)' : ''}
           </span>
-          {canEdit && (
+          {canEdit && !confirmDelete && (
             <button onClick={onEdit} className="text-xs underline" style={{ color: COLORS.inkDim }}>Edit</button>
+          )}
+          {canEdit && !confirmDelete && (
+            <button onClick={() => setConfirmDelete(true)} className="text-xs underline" style={{ color: '#E07A5F' }}>Delete</button>
+          )}
+          {confirmDelete && (
+            <React.Fragment>
+              <button onClick={onDelete} className="text-xs font-semibold underline" style={{ color: '#E07A5F' }}>Confirm</button>
+              <button onClick={() => setConfirmDelete(false)} className="text-xs underline" style={{ color: COLORS.inkDim }}>Cancel</button>
+            </React.Fragment>
           )}
         </div>
       </div>
