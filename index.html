@@ -299,6 +299,100 @@ const translations = {
     onBreakSince: '☕ En descanso desde',
     breakLabel: 'Descanso',
     whatDidYouWorkOn: '¿En qué trabajaste?',
+    createWorkOrder: 'Crear una orden de trabajo',
+    whichMachine: '¿Qué máquina?',
+    selectMachine: 'Selecciona una máquina…',
+    addNewMachine: '+ Agregar una máquina nueva…',
+    newMachineUnitNumber: 'Número de unidad de la nueva máquina',
+    whatNeedsFixed: '¿Qué necesita arreglo?',
+    whatNeedsFixedPlaceholder: 'ej. Reemplazar bomba hidráulica, Reparar manguera con fuga',
+    whatNeedsFixedHelper: 'Sé específico para que el mecánico sepa qué hacer',
+    whosDoingThis: '¿Quién va a hacer esto?',
+    noMechanicsYet: 'Todavía no hay mecánicos',
+    machineHours: 'Horas de la máquina',
+    hourMeterReading: 'Lectura actual del horómetro',
+    whenNeedDone: '¿Cuándo lo necesitas listo?',
+    createJob: 'Crear trabajo',
+    nevermind: 'Cancelar',
+  },
+  pdt: {
+    whoAreYou: 'Wäa aпобытит vändoag?',
+    pickYourName: 'Wähl dien Nome om aunfangen',
+    tapToSignIn: 'Tekj om aunmelde',
+    firstTimeHere: 'Ieeschtemol hia?',
+    addYourName: 'Doo dien Nome tou',
+    yourName: 'Dien Nome',
+    cancel: 'Opphoole',
+    addMe: 'Mie touféjen',
+    enterNameToSignIn: 'Skriew dien Nome om aunmelde:',
+    signIn: 'Aunmelde',
+    enterPin: 'Skriew dien PIN',
+    createPin: 'Moak en 6-Zahle PIN',
+    confirmPin: 'Bestätj dien PIN',
+    forgotPin: 'PIN vejäte? Nieh moake',
+    wrongPin: 'Väakjeade PIN — proboa nomol',
+    pinMismatch: 'Dee wea nich glikj — fang nomol aun',
+    openWorkOrders: 'Opne Oppdrachte',
+    searchPlaceholder: "🔍 Söak Oppdrachte — en Nome, en Unit, en Wuat…",
+    newWorkOrder: '+ Nieha Oppdrach',
+    machines: 'Moschine',
+    viewByMachine: 'No Moschine kjike',
+    checklists: 'Tjaklieste',
+    team: 'Team',
+    timesheets: 'Tiedbalaunse',
+    timeClock: 'Tiedklock',
+    shoutouts: 'Lov',
+    logout: 'Uttrede',
+    checkForUpdates: '🔄 No Nieheit kjike',
+    noOpenOrders: 'Kjeen opne Oppdrachte opp dise Tiet.',
+    clockIn: 'Aunkjlocke',
+    clockOut: 'Utklocke',
+    startBreak: 'Rast aunfange',
+    endBreak: 'Rast eende',
+    onBreak: 'Om rasten',
+    notClockedIn: 'Du best nich aunjeklockt',
+    clockedInSince: 'Aunjeklockt sied',
+    clockedIn: 'Aunjeklockt',
+    tapToClockIn: 'Tekj om aunzeklocken fa dän Dach',
+    sinceTapToLog: 'tekj om utteklocken oda Tied opptonämen',
+    board: 'Boat',
+    checkMyHours: '🧮 Mien Tied nokjieke',
+    checkMyHoursHelp: 'Wähl en Tiedruum — soo aus disse Loonperiod — om diene Tied to sehne, sonda daut du emma äwarpröwe deist.',
+    from: 'Von',
+    to: 'Bat',
+    pickBothDates: 'Wähl beid Doag baowe om dien Tootal to sehne.',
+    hrsWorked: 'Stund jewoakt',
+    myShifts: 'Miene Shifte',
+    jobsToday: 'Aarbeit vändoag',
+    addJob: '+ Aarbeit touféjen',
+    unit: 'Unit',
+    hours: 'Stund',
+    add: 'Touféjen',
+    askAdminToFix: 'Froag dän Admin om daut to reparieren',
+    noBreakLoggedToday: 'Kjeen Rast vändoag opptonämen',
+    goBackBreakReminder: 'Go trigj un tekj "Rast aunfange" / "Rast eende" wan du eene jehaut hast, oda bestätj daut du direkj derch jewoakt hast.',
+    goBack: 'Trigj gone',
+    workedStraightThrough: 'Ekj hab direkj derchjewoakt — utklocke',
+    backToBoard: '← Trigj no dän Boat',
+    clockedInAt: 'Aunjeklockt om',
+    onBreakSince: '☕ Om rasten sied',
+    breakLabel: 'Rast',
+    whatDidYouWorkOn: 'Waut best du aum arbeide?',
+    createWorkOrder: 'Moak en Oppdrach',
+    whichMachine: 'Waut fa Moschine?',
+    selectMachine: 'Wähl en Moschine…',
+    addNewMachine: '+ Nieha Moschine touféjen…',
+    newMachineUnitNumber: 'Nieha Moschine Unit Nommer',
+    whatNeedsFixed: 'Waut mott reparieat woare?',
+    whatNeedsFixedPlaceholder: 'toom Bispel: Hydraulikpomp utwessle, Läkjend Slang reparieren',
+    whatNeedsFixedHelper: 'Sie derch klor, daut dee Mechaniker weet waut to doone',
+    whosDoingThis: 'Wäa woat daut doone?',
+    noMechanicsYet: 'Noch kjeen Mechanikja',
+    machineHours: 'Moschine Stund',
+    hourMeterReading: 'Jäajenwoatje Stundeteala Uplesung',
+    whenNeedDone: 'Wan brukjst du daut fadich?',
+    createJob: 'Aarbeit moake',
+    nevermind: 'Opphoole',
   },
 };
 
@@ -1886,11 +1980,11 @@ function App() {
         <div className="max-w-md w-full" style={{ position: 'relative', zIndex: 1 }}>
           <div className="text-center mb-4">
             <button
-              onClick={() => setLangPersist(lang === 'en' ? 'es' : 'en')}
+              onClick={() => setLangPersist(lang === 'en' ? 'es' : lang === 'es' ? 'pdt' : 'en')}
               className="font-display text-sm uppercase tracking-wider font-semibold px-4 py-2 rounded-lg"
               style={{ color: COLORS.ink, background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}
             >
-              {lang === 'en' ? '🌐 Cambiar a Español' : '🌐 Switch to English'}
+              {lang === 'en' ? '🌐 Cambiar a Español' : lang === 'es' ? '🌐 No Plautdietsch wesselle' : '🌐 Switch to English'}
             </button>
           </div>
           <div className="text-center mb-10">
@@ -2204,6 +2298,7 @@ function App() {
                   units={units}
                   onCancel={() => setShowAddOrder(false)}
                   onSubmit={createOrder}
+                  t={t}
                 />
               )}
 
@@ -3149,6 +3244,7 @@ function App() {
               lockUnit={activeUnit}
               onCancel={() => setShowAddOrder(false)}
               onSubmit={createOrder}
+              t={t}
             />
           )}
 
@@ -3849,7 +3945,8 @@ function AdHocChecklistForm({ onSubmit, onCancel }) {
   );
 }
 
-function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit }) {
+function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit, t }) {
+  const tr = t || ((k) => translations.en[k] || k);
   const [description, setDescription] = useState('');
   const [assignedMechanics, setAssignedMechanics] = useState([]);
   const [hours, setHours] = useState('');
@@ -3873,11 +3970,11 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit }) {
 
   return (
     <div className="rounded-lg p-6 mb-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
-      <h3 className="font-display text-lg font-bold mb-4">Create a work order</h3>
+      <h3 className="font-display text-lg font-bold mb-4">{tr('createWorkOrder')}</h3>
 
       {!lockUnit && (
         <label className="block mb-4">
-          <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>Which machine?</span>
+          <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>{tr('whichMachine')}</span>
           {!addingNewUnit ? (
             <select
               value={unit}
@@ -3885,16 +3982,16 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit }) {
               className="w-full rounded-lg px-4 py-2.5 text-base focus:outline-none focus:ring-2"
               style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
             >
-              <option value="">Select a machine…</option>
+              <option value="">{tr('selectMachine')}</option>
               {units.map((u) => <option key={u} value={u}>{u}</option>)}
-              <option value="__new__">+ Add a new machine…</option>
+              <option value="__new__">{tr('addNewMachine')}</option>
             </select>
           ) : (
             <div className="flex gap-2">
               <input
                 value={newUnitName}
                 onChange={(e) => setNewUnitName(e.target.value)}
-                placeholder="New machine unit number"
+                placeholder={tr('newMachineUnitNumber')}
                 autoFocus
                 className="flex-1 rounded-lg px-4 py-2.5 text-base focus:outline-none focus:ring-2 font-mono"
                 style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
@@ -3904,16 +4001,16 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit }) {
                 className="px-3 rounded-lg text-sm"
                 style={{ color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
               >
-                Cancel
+                {tr('cancel')}
               </button>
             </div>
           )}
         </label>
       )}
 
-      <TextField label="What needs to be fixed?" value={description} onChange={setDescription} placeholder="e.g. Replace hydraulic pump, Fix leaking hose" helper="Be specific so the mechanic knows what to do" />
+      <TextField label={tr('whatNeedsFixed')} value={description} onChange={setDescription} placeholder={tr('whatNeedsFixedPlaceholder')} helper={tr('whatNeedsFixedHelper')} />
       <div className="mb-4">
-        <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>Who's doing this?</span>
+        <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>{tr('whosDoingThis')}</span>
         <div className="flex flex-wrap gap-2">
           {mechanics.map((m) => {
             const isChecked = assignedMechanics.includes(m);
@@ -3933,16 +4030,16 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit }) {
               </button>
             );
           })}
-          {mechanics.length === 0 && <p className="text-sm" style={{ color: COLORS.inkDim }}>No mechanics yet</p>}
+          {mechanics.length === 0 && <p className="text-sm" style={{ color: COLORS.inkDim }}>{tr('noMechanicsYet')}</p>}
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4 mb-4">
-        <TextField label="Machine hours" value={hours} onChange={setHours} placeholder="Current hour meter reading" type="number" mono />
-        <TextField label="When do you need it done?" value={dueDate} onChange={setDueDate} type="date" mono />
+        <TextField label={tr('machineHours')} value={hours} onChange={setHours} placeholder={tr('hourMeterReading')} type="number" mono />
+        <TextField label={tr('whenNeedDone')} value={dueDate} onChange={setDueDate} type="date" mono />
       </div>
       <div className="flex gap-2 mt-6">
-        <Btn onClick={() => canSubmit && onSubmit({ unit: finalUnit, description, assignedMechanics, hours, dueDate })} disabled={!canSubmit}>Create job</Btn>
-        <Btn variant="ghost" onClick={onCancel}>Nevermind</Btn>
+        <Btn onClick={() => canSubmit && onSubmit({ unit: finalUnit, description, assignedMechanics, hours, dueDate })} disabled={!canSubmit}>{tr('createJob')}</Btn>
+        <Btn variant="ghost" onClick={onCancel}>{tr('nevermind')}</Btn>
       </div>
     </div>
   );
