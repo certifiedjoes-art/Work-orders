@@ -960,11 +960,22 @@ function compressImage(file, maxDim = 1280, quality = 0.7) {
 async function saveMeta(meta) {
   try { await firebase.database().ref('meta').set(meta); } catch (e) { console.error('save meta failed', e); }
 }
+// Firebase Realtime Database rejects an entire write if ANY value anywhere
+// in it is undefined (not null — undefined specifically), even deeply
+// nested and even if the rest of the data is fine. This round-trip through
+// JSON strips those out automatically, since JSON.stringify silently omits
+// undefined properties.
+function stripUndefined(data) {
+  return JSON.parse(JSON.stringify(data));
+}
+
 async function saveOrders(orders) {
-  try { await firebase.database().ref('orders').set(orders); } catch (e) { console.error('save orders failed', e); }
+  // No try/catch here — persistOrders (the caller) needs to see failures
+  // so it can retry and warn the user instead of silently losing the save.
+  await firebase.database().ref('orders').set(stripUndefined(orders));
 }
 async function saveTemplates(templates) {
-  try { await firebase.database().ref('templates').set(templates); } catch (e) { console.error('save templates failed', e); }
+  await firebase.database().ref('templates').set(stripUndefined(templates));
 }
 
 async function savePins(pins) {
@@ -978,7 +989,7 @@ async function saveAdmins(admins) {
 async function saveTimesheets(timesheets) {
   // No try/catch here — persistTimesheets (the caller) needs to see failures
   // so it can retry and warn the user instead of silently losing the save.
-  await firebase.database().ref('timesheets').set(timesheets);
+  await firebase.database().ref('timesheets').set(stripUndefined(timesheets));
 }
 
 async function saveTimesheetSettings(settings) {
@@ -1544,13 +1555,35 @@ function App() {
     setUnits(nextUnits);
     await saveMeta({ mechanics: nextMechanics, units: nextUnits });
   };
+  // Saves are retried once automatically, and if it still fails, the person
+  // is told directly rather than the app silently pretending it worked.
   const persistOrders = async (next) => {
     setOrders(next);
-    await saveOrders(next);
+    try {
+      await saveOrders(next);
+    } catch (e) {
+      try {
+        await new Promise((r) => setTimeout(r, 1500));
+        await saveOrders(next);
+      } catch (e2) {
+        alert("Couldn't save — check your signal and try again. This action was NOT recorded.");
+        throw e2;
+      }
+    }
   };
   const persistTemplates = async (next) => {
     setTemplates(next);
-    await saveTemplates(next);
+    try {
+      await saveTemplates(next);
+    } catch (e) {
+      try {
+        await new Promise((r) => setTimeout(r, 1500));
+        await saveTemplates(next);
+      } catch (e2) {
+        alert("Couldn't save — check your signal and try again. This action was NOT recorded.");
+        throw e2;
+      }
+    }
   };
 
   const persistPins = async (next) => {
