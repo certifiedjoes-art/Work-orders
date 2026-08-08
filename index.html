@@ -300,6 +300,7 @@ const translations = {
     typeOnePerLine: 'Type one step per line. Example:',
     saveChanges: 'Save changes',
     saveChecklist: 'Save checklist',
+    saveFailedWarning: "Couldn't save — check your signal and try again. This action was NOT recorded.",
   },
   es: {
     whoAreYou: '¿Quién trabaja hoy?',
@@ -429,6 +430,7 @@ const translations = {
     typeOnePerLine: 'Escribe un paso por línea. Ejemplo:',
     saveChanges: 'Guardar cambios',
     saveChecklist: 'Guardar lista',
+    saveFailedWarning: 'No se pudo guardar — revisa tu señal e intenta de nuevo. Esta acción NO se registró.',
   },
   pdt: {
     whoAreYou: 'Wäa aпобытит vändoag?',
@@ -558,6 +560,7 @@ const translations = {
     typeOnePerLine: 'Skriew een Schretj per Reaj. Bispel:',
     saveChanges: 'Ändarunge sponere',
     saveChecklist: 'Tjakliest sponere',
+    saveFailedWarning: 'Kunn nich sponere — kjik dien Signaul un proboa nomol. Dit wea NICH oppjenumen.',
   },
 };
 
@@ -869,7 +872,18 @@ function entryHours(entry) {
 }
 
 function fmtHours(h) {
-  return h.toFixed(2).replace(/\.00$/, '');
+  const totalMinutes = Math.round((h || 0) * 60);
+  const hrs = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  if (hrs === 0) return `${mins}m`;
+  if (mins === 0) return `${hrs}h`;
+  return `${hrs}h ${mins}m`;
+}
+
+// Decimal hours — used only for the CSV export, since a bookkeeper opening
+// it in Excel can sum a column of decimals but not "3h 30m" text.
+function fmtHoursDecimal(h) {
+  return (h || 0).toFixed(2).replace(/\.00$/, '');
 }
 
 // Pay week runs Sunday–Saturday. Given any date string ('YYYY-MM-DD'),
@@ -938,7 +952,9 @@ async function saveAdmins(admins) {
 }
 
 async function saveTimesheets(timesheets) {
-  try { await firebase.database().ref('timesheets').set(timesheets); } catch (e) { console.error('save timesheets failed', e); }
+  // No try/catch here — persistTimesheets (the caller) needs to see failures
+  // so it can retry and warn the user instead of silently losing the save.
+  await firebase.database().ref('timesheets').set(timesheets);
 }
 
 async function saveTimesheetSettings(settings) {
@@ -1800,15 +1816,32 @@ function App() {
     await saveAdmins(nextAdmins);
   };
 
+  // Saves are retried once automatically (a weak signal in the shop can make
+  // a single attempt fail), and if it still fails, the person is told
+  // directly rather than the app silently pretending it worked.
   const persistTimesheets = async (next) => {
     setTimesheets(next);
-    await saveTimesheets(next);
+    try {
+      await saveTimesheets(next);
+    } catch (e) {
+      try {
+        await new Promise((r) => setTimeout(r, 1500));
+        await saveTimesheets(next);
+      } catch (e2) {
+        alert(t('saveFailedWarning'));
+      }
+    }
   };
 
   const todayStr = () => new Date().toISOString().slice(0, 10);
 
   // The "open" entry for the current mechanic today: clocked in but not yet clocked out.
-  const openEntry = timesheets.find((t) => t.mechanic === currentMechanic && t.date === todayStr() && !t.clockOut);
+  // Find the mechanic's most recent still-open shift, regardless of what
+  // calendar date it is right now — a shift that started before midnight and
+  // gets clocked out after midnight must still be findable.
+  const openEntry = timesheets
+    .filter((t) => t.mechanic === currentMechanic && !t.clockOut)
+    .sort((a, b) => new Date(b.clockIn) - new Date(a.clockIn))[0];
 
   // Prompt to clock in once per login, if they haven't already for today.
   useEffect(() => {
@@ -1976,7 +2009,7 @@ function App() {
         fmtTime(e.lunchStart),
         fmtTime(e.lunchEnd),
         e.skippedLunch ? 'Yes' : 'No',
-        fmtHours(entryHours(e)),
+        fmtHoursDecimal(entryHours(e)),
         jobsStr,
       ]);
     });
@@ -2773,7 +2806,7 @@ function App() {
                   myEntries
                     .filter((e) => e.date >= mySummaryStart && e.date <= mySummaryEnd)
                     .reduce((sum, e) => sum + entryHours(e), 0)
-                )} {t('hrsWorked')}
+                )}
               </p>
             ) : (
               <p className="text-sm" style={{ color: COLORS.line }}>{t('pickBothDates')}</p>
@@ -2923,7 +2956,7 @@ function App() {
                     <span className="font-display font-semibold">{name}</span>
                     <span className="font-mono flex items-center gap-2">
                       {hours > 40 && <span title="Over 40 hours">⚠️</span>}
-                      <span style={{ color: hours > 40 ? '#E3A23C' : COLORS.ink }}>{fmtHours(hours)} hrs</span>
+                      <span style={{ color: hours > 40 ? '#E3A23C' : COLORS.ink }}>{fmtHours(hours)}</span>
                     </span>
                   </div>
                 ))}
@@ -3053,7 +3086,7 @@ function App() {
               {Object.entries(totalsByMechanic).map(([name, hours]) => (
                 <div key={name} className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
                   <span className="font-display font-semibold">{name}</span>
-                  <span className="font-mono">{fmtHours(hours)} hrs</span>
+                  <span className="font-mono">{fmtHours(hours)}</span>
                 </div>
               ))}
             </div>
@@ -3074,7 +3107,7 @@ function App() {
                     style={{ color: COLORS.accent, borderBottom: `1px solid ${COLORS.line}` }}
                   >
                     <span>{name}</span>
-                    <span>{fmtHours(totalsByMechanic[name] || 0)} hrs total</span>
+                    <span>{fmtHours(totalsByMechanic[name] || 0)} total</span>
                   </p>
                   <div className="space-y-3">
                     {groupedByMechanic[name].map((entry) => (
@@ -3976,7 +4009,7 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
         <span>Out {entry.clockOut ? fmtTime(entry.clockOut) : '—'}</span>
         {entry.lunchStart && entry.lunchEnd && <span>Break {fmtTime(entry.lunchStart)}–{fmtTime(entry.lunchEnd)}</span>}
         {entry.skippedLunch && <span>No break taken</span>}
-        {entry.clockOut && <span className="font-bold" style={{ color: COLORS.accent }}>{fmtHours(entryHours(entry))} hrs</span>}
+        {entry.clockOut && <span className="font-bold" style={{ color: COLORS.accent }}>{fmtHours(entryHours(entry))}</span>}
       </div>
       {(entry.jobs || []).length > 0 && (
         <p className="text-xs" style={{ color: COLORS.line }}>
