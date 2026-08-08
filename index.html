@@ -306,6 +306,9 @@ const translations = {
     noDescription: '(no description)',
     workOrder: 'work order',
     noTranslationYet: "Showing the original — you're viewing this in a different language than it was written in. Edit above to add a translation.",
+    translateExisting: 'Translate everything I\'ve already made',
+    translatingNow: 'Translating… this can take a minute',
+    translateExistingHelper: 'One-time catch-up for checklists and work orders made before language switching existed.',
   },
   es: {
     whoAreYou: '¿Quién trabaja hoy?',
@@ -441,6 +444,9 @@ const translations = {
     noDescription: '(sin descripción)',
     workOrder: 'orden de trabajo',
     noTranslationYet: 'Mostrando el original — lo estás viendo en un idioma diferente al que fue escrito. Edita arriba para agregar una traducción.',
+    translateExisting: 'Traducir todo lo que ya hice',
+    translatingNow: 'Traduciendo… esto puede tardar un minuto',
+    translateExistingHelper: 'Actualización única para listas y órdenes hechas antes de que existiera el cambio de idioma.',
   },
   pdt: {
     whoAreYou: 'Wäa aпобытит vändoag?',
@@ -576,6 +582,9 @@ const translations = {
     noDescription: '(kjeene Beschriewunk)',
     workOrder: 'Oppdrach',
     noTranslationYet: 'Wiest daut Orichenal — du sejst daut en ea aundre Sproak aus et jeschräwe wea. Ändre baowe om en Äwasatunk touféjen.',
+    translateExisting: 'Äwasat aules waut ekj aul jemoakt hab',
+    translatingNow: 'Äwasat nu… daut kaun en Minuut donare',
+    translateExistingHelper: 'Eenmol nofoahre fa Tjakliestes un Oppdrachte, dee jemoakt wearen ea dise Sproakwessel doa wea.',
   },
 };
 
@@ -1708,6 +1717,45 @@ function App() {
   // Translates a checklist's name and every item into the other of
   // {en, es} at save time (Plautdietsch has no automatic translation
   // available — see buildLocalizedField for the same note).
+  const [migratingTranslations, setMigratingTranslations] = useState(false);
+
+  // One-time catch-up for anything created before auto-translation existed —
+  // checklist templates, attached checklists, and work order descriptions
+  // that are still plain strings with no translation data at all. Assumes
+  // that older content was written in English, since that's all the app
+  // supported at the time.
+  const translateAllExistingContent = async () => {
+    setMigratingTranslations(true);
+    try {
+      const updatedTemplates = await Promise.all(templates.map(async (tpl) => {
+        if (tpl.nameTranslations && Object.keys(tpl.nameTranslations).length > 0) return tpl;
+        const result = await translateChecklistContent(tpl.name, tpl.items, tpl.nameOrigLang || 'en');
+        return { ...tpl, ...result };
+      }));
+      await persistTemplates(updatedTemplates);
+
+      const updatedOrders = await Promise.all(orders.map(async (o) => {
+        let next = o;
+        if (typeof o.description === 'string' && o.description.trim()) {
+          next = { ...next, description: await buildLocalizedField(o.description, 'en') };
+        }
+        const existingChecklists = getChecklists(o);
+        if (existingChecklists.length > 0) {
+          const updatedChecklists = await Promise.all(existingChecklists.map(async (c) => {
+            if (c.nameTranslations && Object.keys(c.nameTranslations).length > 0) return c;
+            const result = await translateChecklistContent(c.templateName, c.items.map((i) => i.text), c.nameOrigLang || 'en');
+            return { ...c, ...result };
+          }));
+          next = { ...next, checklists: updatedChecklists, checklist: null };
+        }
+        return next;
+      }));
+      await persistOrders(updatedOrders);
+    } finally {
+      setMigratingTranslations(false);
+    }
+  };
+
   const translateChecklistContent = async (name, items, currentLang) => {
     if (currentLang !== 'en' && currentLang !== 'es') {
       return { nameOrigLang: currentLang, nameTranslations: {}, itemTranslations: {} };
@@ -3446,10 +3494,24 @@ function App() {
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
             {t('backToBoard')}
           </button>
-          <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center justify-between mb-3">
             <h1 className="font-display text-3xl font-bold">{t('checklists')}</h1>
             <Btn onClick={() => setShowNewTemplate((s) => !s)}>{t('newChecklist')}</Btn>
           </div>
+
+          {isAdmin && (
+            <div className="rounded-lg p-4 mb-6 flex items-center justify-between gap-3 flex-wrap" style={{ background: COLORS.surface, border: `1px dashed ${COLORS.line}` }}>
+              <p className="text-xs flex-1" style={{ color: COLORS.inkDim, minWidth: 200 }}>{t('translateExistingHelper')}</p>
+              <button
+                onClick={translateAllExistingContent}
+                disabled={migratingTranslations}
+                className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg"
+                style={{ color: COLORS.accent, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}`, opacity: migratingTranslations ? 0.6 : 1 }}
+              >
+                {migratingTranslations ? t('translatingNow') : t('translateExisting')}
+              </button>
+            </div>
+          )}
 
           {showNewTemplate && (
             <NewTemplateForm onCancel={() => setShowNewTemplate(false)} onSubmit={addTemplate} t={t} />
