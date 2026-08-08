@@ -1028,9 +1028,10 @@ async function translateText(text, targetLang) {
   }
 }
 
-function getLocalizedChecklistText(text, origLang, translations, lang) {
+function getLocalizedChecklistText(text, origLang, translations, lang, index) {
   if (origLang === lang) return text;
-  return (translations && translations[text] && translations[text][lang]) || text;
+  const entry = Array.isArray(translations) ? translations[index] : (translations && translations[text]);
+  return (entry && entry[lang]) || text;
 }
 
 function getLocalizedName(name, origLang, nameTranslations, lang) {
@@ -1801,19 +1802,22 @@ function App() {
     }
   };
 
+  // Translates a checklist's name and every item into the other of
+  // {en, es} at save time (Plautdietsch has no automatic translation
+  // available — see buildLocalizedField for the same note). Item
+  // translations are stored by POSITION (an array matching `items`), not
+  // by the item's own text — some items contain a "/" (like "Check/top up
+  // a/c"), which Firebase flatly refuses as an object key.
   const translateChecklistContent = async (name, items, currentLang) => {
     if (currentLang !== 'en' && currentLang !== 'es') {
-      return { nameOrigLang: currentLang, nameTranslations: {}, itemTranslations: {} };
+      return { nameOrigLang: currentLang, nameTranslations: {}, itemTranslations: [] };
     }
     const other = currentLang === 'en' ? 'es' : 'en';
     const [nameTranslated, itemTranslatedList] = await Promise.all([
       translateText(name, other),
       Promise.all(items.map((it) => translateText(it, other))),
     ]);
-    const itemTranslations = {};
-    items.forEach((it, i) => {
-      if (itemTranslatedList[i]) itemTranslations[it] = { [other]: itemTranslatedList[i] };
-    });
+    const itemTranslations = items.map((it, i) => (itemTranslatedList[i] ? { [other]: itemTranslatedList[i] } : null));
     return {
       nameOrigLang: currentLang,
       nameTranslations: nameTranslated ? { [other]: nameTranslated } : {},
@@ -3611,7 +3615,7 @@ function App() {
                       </div>
                     </div>
                     <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>
-                      {tpl.items.slice(0, 3).map((it) => getLocalizedChecklistText(it, tpl.nameOrigLang, tpl.itemTranslations, lang)).join(' • ')}
+                      {tpl.items.slice(0, 3).map((it, idx) => getLocalizedChecklistText(it, tpl.nameOrigLang, tpl.itemTranslations, lang, idx)).join(' • ')}
                       {tpl.items.length > 3 ? ' • …' : ''}
                     </p>
                     {confirmDeleteTemplate === tpl.id && !isDefault && (
@@ -3935,7 +3939,7 @@ function App() {
                       </div>
                     </div>
                     <div className="space-y-3">
-                      {c.items.map((it) => (
+                      {c.items.map((it, idx) => (
                         <label key={it.id} className="flex items-start gap-3 cursor-pointer group">
                           <input
                             type="checkbox"
@@ -3946,7 +3950,7 @@ function App() {
                           />
                           <div className="flex-1">
                             <span className="text-base" style={{ color: it.checked ? COLORS.line : COLORS.ink, textDecoration: it.checked ? 'line-through' : 'none' }}>
-                              {getLocalizedChecklistText(it.text, c.nameOrigLang, c.itemTranslations, lang)}
+                              {getLocalizedChecklistText(it.text, c.nameOrigLang, c.itemTranslations, lang, idx)}
                             </span>
                             {it.checked && it.checkedBy && (
                               <span className="block font-mono text-xs mt-1" style={{ color: COLORS.line }}>
