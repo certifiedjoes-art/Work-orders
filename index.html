@@ -1008,6 +1008,16 @@ async function translateText(text, targetLang) {
   }
 }
 
+function getLocalizedChecklistText(text, origLang, translations, lang) {
+  if (origLang === lang) return text;
+  return (translations && translations[text] && translations[text][lang]) || text;
+}
+
+function getLocalizedName(name, origLang, nameTranslations, lang) {
+  if (origLang === lang) return name;
+  return (nameTranslations && nameTranslations[lang]) || name;
+}
+
 // Resolves a piece of user-typed content (title, description, checklist
 // item) to whatever language is currently active. `field` can be a plain
 // string (older data, before this existed) or an object built by this
@@ -1695,12 +1705,36 @@ function App() {
     setTimeout(() => setBioMsg(''), 4000);
   };
 
+  // Translates a checklist's name and every item into the other of
+  // {en, es} at save time (Plautdietsch has no automatic translation
+  // available — see buildLocalizedField for the same note).
+  const translateChecklistContent = async (name, items, currentLang) => {
+    if (currentLang !== 'en' && currentLang !== 'es') {
+      return { nameOrigLang: currentLang, nameTranslations: {}, itemTranslations: {} };
+    }
+    const other = currentLang === 'en' ? 'es' : 'en';
+    const [nameTranslated, itemTranslatedList] = await Promise.all([
+      translateText(name, other),
+      Promise.all(items.map((it) => translateText(it, other))),
+    ]);
+    const itemTranslations = {};
+    items.forEach((it, i) => {
+      if (itemTranslatedList[i]) itemTranslations[it] = { [other]: itemTranslatedList[i] };
+    });
+    return {
+      nameOrigLang: currentLang,
+      nameTranslations: nameTranslated ? { [other]: nameTranslated } : {},
+      itemTranslations,
+    };
+  };
+
   const addTemplate = async (name, itemsText) => {
     const trimmedName = name.trim();
     const items = itemsText.split('\n').map((l) => l.trim()).filter(Boolean);
     if (!trimmedName || items.length === 0) return;
-    const t = { id: uid(), name: trimmedName, items };
-    await persistTemplates([...templates, t]);
+    const { nameOrigLang, nameTranslations, itemTranslations } = await translateChecklistContent(trimmedName, items, lang);
+    const newTpl = { id: uid(), name: trimmedName, items, nameOrigLang, nameTranslations, itemTranslations };
+    await persistTemplates([...templates, newTpl]);
     setShowNewTemplate(false);
   };
 
@@ -1713,7 +1747,8 @@ function App() {
     const trimmedName = name.trim();
     const items = itemsText.split('\n').map((l) => l.trim()).filter(Boolean);
     if (!trimmedName || items.length === 0) return;
-    const next = templates.map((t) => (t.id === id ? { ...t, name: trimmedName, items } : t));
+    const { nameOrigLang, nameTranslations, itemTranslations } = await translateChecklistContent(trimmedName, items, lang);
+    const next = templates.map((t) => (t.id === id ? { ...t, name: trimmedName, items, nameOrigLang, nameTranslations, itemTranslations } : t));
     await persistTemplates(next);
     setEditingTemplateId(null);
   };
@@ -1745,6 +1780,9 @@ function App() {
       id: uid(),
       templateId: template.id,
       templateName: template.name,
+      nameOrigLang: template.nameOrigLang,
+      nameTranslations: template.nameTranslations,
+      itemTranslations: template.itemTranslations,
       items: template.items.map((text) => ({ id: uid(), text, checked: false, checkedBy: null, checkedAt: null })),
     };
     const nextChecklists = [...getChecklists(order), checklist];
@@ -1765,16 +1803,20 @@ function App() {
     if (!trimmedName || items.length === 0) return;
     const order = orders.find((o) => o.id === orderId);
     if (!order) return;
+    const { nameOrigLang, nameTranslations, itemTranslations } = await translateChecklistContent(trimmedName, items, lang);
     const checklist = {
       id: uid(),
       templateId: null,
       templateName: trimmedName,
+      nameOrigLang,
+      nameTranslations,
+      itemTranslations,
       items: items.map((text) => ({ id: uid(), text, checked: false, checkedBy: null, checkedAt: null })),
     };
     const nextChecklists = [...getChecklists(order), checklist];
     await updateOrder(orderId, { checklists: nextChecklists, checklist: null });
     if (saveAsTemplate) {
-      await persistTemplates([...templates, { id: uid(), name: trimmedName, items }]);
+      await persistTemplates([...templates, { id: uid(), name: trimmedName, items, nameOrigLang, nameTranslations, itemTranslations }]);
     }
   };
 
@@ -1810,8 +1852,9 @@ function App() {
     // Keep the checked state for any item whose text didn't change; new/edited
     // lines start fresh so a corrected item doesn't stay marked done by mistake.
     const items = lines.map((text) => existingByText[text] || { id: uid(), text, checked: false, checkedBy: null, checkedAt: null });
+    const { nameOrigLang, nameTranslations, itemTranslations } = await translateChecklistContent(trimmedName, lines, lang);
     const nextChecklists = getChecklists(order).map((c) =>
-      c.id === checklistId ? { ...c, templateName: trimmedName, items } : c
+      c.id === checklistId ? { ...c, templateName: trimmedName, items, nameOrigLang, nameTranslations, itemTranslations } : c
     );
     await updateOrder(orderId, { checklists: nextChecklists, checklist: null });
     setEditingOrderChecklistId(null);
@@ -3438,7 +3481,7 @@ function App() {
                   <div key={tpl.id} className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
                     <div className="flex items-start justify-between gap-3 mb-3">
                       <div className="flex-1">
-                        <p className="font-display font-bold text-lg">{tpl.name}</p>
+                        <p className="font-display font-bold text-lg">{getLocalizedName(tpl.name, tpl.nameOrigLang, tpl.nameTranslations, lang)}</p>
                         <p className="text-sm" style={{ color: COLORS.line }}>{tpl.items.length} {t('steps')}</p>
                       </div>
                       <div className="flex gap-3">
@@ -3461,7 +3504,7 @@ function App() {
                       </div>
                     </div>
                     <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>
-                      {tpl.items.slice(0, 3).join(' • ')}
+                      {tpl.items.slice(0, 3).map((it) => getLocalizedChecklistText(it, tpl.nameOrigLang, tpl.itemTranslations, lang)).join(' • ')}
                       {tpl.items.length > 3 ? ' • …' : ''}
                     </p>
                     {confirmDeleteTemplate === tpl.id && !isDefault && (
@@ -3762,7 +3805,7 @@ function App() {
                   <div key={c.id} className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
                     <div className="flex items-center justify-between mb-4 pb-4" style={{ borderBottomColor: COLORS.line, borderBottomWidth: '1px' }}>
                       <p className="font-display font-semibold" style={{ color: COLORS.accent }}>
-                        {c.templateName}
+                        {getLocalizedName(c.templateName, c.nameOrigLang, c.nameTranslations, lang)}
                       </p>
                       <div className="flex items-center gap-3">
                         <span className="font-mono text-sm font-bold" style={{ color: COLORS.accent }}>
@@ -3796,7 +3839,7 @@ function App() {
                           />
                           <div className="flex-1">
                             <span className="text-base" style={{ color: it.checked ? COLORS.line : COLORS.ink, textDecoration: it.checked ? 'line-through' : 'none' }}>
-                              {it.text}
+                              {getLocalizedChecklistText(it.text, c.nameOrigLang, c.itemTranslations, lang)}
                             </span>
                             {it.checked && it.checkedBy && (
                               <span className="block font-mono text-xs mt-1" style={{ color: COLORS.line }}>
