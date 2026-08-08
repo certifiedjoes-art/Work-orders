@@ -1723,13 +1723,18 @@ function App() {
   // checklist templates, attached checklists, and work order descriptions
   // that are still plain strings with no translation data at all. Assumes
   // that older content was written in English, since that's all the app
-  // supported at the time.
+  // supported at the time. Always re-processes everything rather than
+  // trying to detect what's "already done" — safe and cheap to repeat,
+  // and avoids leaving partially-failed items stuck unfixable.
   const translateAllExistingContent = async () => {
     setMigratingTranslations(true);
+    let successCount = 0;
+    let failCount = 0;
     try {
       const updatedTemplates = await Promise.all(templates.map(async (tpl) => {
-        if (tpl.nameTranslations && Object.keys(tpl.nameTranslations).length > 0) return tpl;
         const result = await translateChecklistContent(tpl.name, tpl.items, tpl.nameOrigLang || 'en');
+        if (result.nameTranslations && Object.keys(result.nameTranslations).length > 0) successCount++;
+        else failCount++;
         return { ...tpl, ...result };
       }));
       await persistTemplates(updatedTemplates);
@@ -1737,13 +1742,17 @@ function App() {
       const updatedOrders = await Promise.all(orders.map(async (o) => {
         let next = o;
         if (typeof o.description === 'string' && o.description.trim()) {
-          next = { ...next, description: await buildLocalizedField(o.description, 'en') };
+          const field = await buildLocalizedField(o.description, 'en');
+          if (field.translations && Object.keys(field.translations).length > 0) successCount++;
+          else failCount++;
+          next = { ...next, description: field };
         }
         const existingChecklists = getChecklists(o);
         if (existingChecklists.length > 0) {
           const updatedChecklists = await Promise.all(existingChecklists.map(async (c) => {
-            if (c.nameTranslations && Object.keys(c.nameTranslations).length > 0) return c;
             const result = await translateChecklistContent(c.templateName, c.items.map((i) => i.text), c.nameOrigLang || 'en');
+            if (result.nameTranslations && Object.keys(result.nameTranslations).length > 0) successCount++;
+            else failCount++;
             return { ...c, ...result };
           }));
           next = { ...next, checklists: updatedChecklists, checklist: null };
@@ -1751,6 +1760,9 @@ function App() {
         return next;
       }));
       await persistOrders(updatedOrders);
+      alert(`Done — ${successCount} translated successfully${failCount > 0 ? `, ${failCount} failed (check your connection and try again for those)` : ''}.`);
+    } catch (err) {
+      alert('Something went wrong: ' + err.message);
     } finally {
       setMigratingTranslations(false);
     }
