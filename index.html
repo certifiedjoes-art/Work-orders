@@ -301,6 +301,11 @@ const translations = {
     saveChanges: 'Save changes',
     saveChecklist: 'Save checklist',
     saveFailedWarning: "Couldn't save — check your signal and try again. This action was NOT recorded.",
+    statusOpen: 'Open',
+    statusDone: 'Done',
+    noDescription: '(no description)',
+    workOrder: 'work order',
+    noTranslationYet: "Showing the original — you're viewing this in a different language than it was written in. Edit above to add a translation.",
   },
   es: {
     whoAreYou: '¿Quién trabaja hoy?',
@@ -431,6 +436,11 @@ const translations = {
     saveChanges: 'Guardar cambios',
     saveChecklist: 'Guardar lista',
     saveFailedWarning: 'No se pudo guardar — revisa tu señal e intenta de nuevo. Esta acción NO se registró.',
+    statusOpen: 'Abierto',
+    statusDone: 'Hecho',
+    noDescription: '(sin descripción)',
+    workOrder: 'orden de trabajo',
+    noTranslationYet: 'Mostrando el original — lo estás viendo en un idioma diferente al que fue escrito. Edita arriba para agregar una traducción.',
   },
   pdt: {
     whoAreYou: 'Wäa aпобытит vändoag?',
@@ -561,6 +571,11 @@ const translations = {
     saveChanges: 'Ändarunge sponere',
     saveChecklist: 'Tjakliest sponere',
     saveFailedWarning: 'Kunn nich sponere — kjik dien Signaul un proboa nomol. Dit wea NICH oppjenumen.',
+    statusOpen: 'Opne',
+    statusDone: 'Fadich',
+    noDescription: '(kjeene Beschriewunk)',
+    workOrder: 'Oppdrach',
+    noTranslationYet: 'Wiest daut Orichenal — du sejst daut en ea aundre Sproak aus et jeschräwe wea. Ändre baowe om en Äwasatunk touféjen.',
   },
 };
 
@@ -978,12 +993,12 @@ async function saveMilestonesCelebrated(data) {
 const CLOUD_FUNCTION_URL = 'https://weekly-backup-and-email-337605513419.northamerica-northeast1.run.app';
 const APP_SECRET = '7606b2344e4100126f3eb1ac';
 
-async function translateText(text) {
+async function translateText(text, targetLang) {
   try {
     const res = await fetch(CLOUD_FUNCTION_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, key: APP_SECRET }),
+      body: JSON.stringify({ text, key: APP_SECRET, targetLang: targetLang || 'en' }),
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -991,6 +1006,32 @@ async function translateText(text) {
   } catch (e) {
     return null; // offline or the call failed — fall back to showing the original text untranslated
   }
+}
+
+// Resolves a piece of user-typed content (title, description, checklist
+// item) to whatever language is currently active. `field` can be a plain
+// string (older data, before this existed) or an object built by this
+// feature: { text, origLang, translations: { en, es, pdt } }.
+function getLocalizedText(field, lang) {
+  if (!field) return '';
+  if (typeof field === 'string') return field;
+  if (field.origLang === lang) return field.text;
+  if (field.translations && field.translations[lang]) return field.translations[lang];
+  return field.text;
+}
+
+// Builds a multi-language content object at save time. Auto-translates
+// between English and Spanish immediately (Google's translation service
+// supports both); Plautdietsch has no automatic translation available, so
+// that slot is left for a human to fill in later via the app.
+async function buildLocalizedField(text, currentLang) {
+  const field = { text, origLang: currentLang, translations: {} };
+  if (currentLang === 'en' || currentLang === 'es') {
+    const other = currentLang === 'en' ? 'es' : 'en';
+    const translated = await translateText(text, other);
+    if (translated) field.translations[other] = translated;
+  }
+  return field;
 }
 
 function emailForMechanic(name) {
@@ -1228,7 +1269,9 @@ function PunchHole({ bg }) {
   );
 }
 
-function StatusStamp({ status, small }) {
+function StatusStamp({ status, small, t }) {
+  const tr = t || ((k) => translations.en[k] || k);
+  const display = status === 'Open' ? tr('statusOpen') : status === 'Done' ? tr('statusDone') : status;
   return (
     <span
       style={{
@@ -1239,7 +1282,7 @@ function StatusStamp({ status, small }) {
       }}
       className="font-display border-2 rounded-sm px-2 py-0.5 font-bold uppercase tracking-wider whitespace-nowrap inline-block"
     >
-      {status}
+      {display}
     </span>
   );
 }
@@ -2052,10 +2095,11 @@ function App() {
     if (!units.includes(unitName)) {
       await persistMeta(mechanics, [...units, unitName]);
     }
+    const descriptionField = await buildLocalizedField(data.description, lang);
     const order = {
       id: uid(),
       unit: unitName,
-      description: data.description,
+      description: descriptionField,
       assignedMechanics: data.assignedMechanics || [],
       hours: data.hours,
       dueDate: data.dueDate,
@@ -2279,7 +2323,7 @@ function App() {
     const searchResults = q
       ? orders.filter((o) => {
           const haystack = [
-            o.description,
+            getLocalizedText(o.description, lang),
             o.unit,
             ...getAssignedMechanics(o),
             o.status,
@@ -2314,13 +2358,13 @@ function App() {
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
               <p className="font-mono text-xs mb-1 font-semibold" style={{ color: isDone ? COLORS.line : '#5B5342' }}>{o.unit}</p>
-              <p className="font-body font-semibold text-base leading-snug mb-2">{o.description || '(no description)'}</p>
+              <p className="font-body font-semibold text-base leading-snug mb-2">{getLocalizedText(o.description, lang) || t('noDescription')}</p>
               <div className="flex flex-wrap items-center gap-4 font-mono text-xs" style={{ color: isDone ? COLORS.line : '#5B5342', opacity: isDone ? 0.6 : 1 }}>
                 {getAssignedMechanics(o).length > 0 && <span>👤 {getAssignedMechanics(o).join(', ')}</span>}
                 {o.dueDate && <span>📅 {fmtDate(o.dueDate)}</span>}
               </div>
             </div>
-            <StatusStamp status={o.status} small />
+            <StatusStamp status={o.status} small t={t} />
           </div>
         </button>
       );
@@ -3268,7 +3312,7 @@ function App() {
     orders.forEach((o) => {
       (o.notes || []).forEach((n) => {
         if (n.type === 'shoutout') {
-          allShoutouts.push({ ...n, orderId: o.id, orderUnit: o.unit, orderDescription: o.description });
+          allShoutouts.push({ ...n, orderId: o.id, orderUnit: o.unit, orderDescription: getLocalizedText(o.description, lang) });
         }
       });
     });
@@ -3314,7 +3358,7 @@ function App() {
                   </div>
                   <p className="text-base mb-2">{s.text}</p>
                   <p className="text-xs font-mono" style={{ color: COLORS.inkDim }}>
-                    {s.orderUnit} — {s.orderDescription || 'work order'}
+                    {s.orderUnit} — {s.orderDescription || t('workOrder')}
                   </p>
                 </button>
               ))}
@@ -3506,7 +3550,7 @@ function App() {
                     <PunchHole bg={isDone ? COLORS.line : COLORS.manila} />
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
-                        <p className="font-body font-semibold text-base leading-snug mb-2">{o.description || '(no description)'}</p>
+                        <p className="font-body font-semibold text-base leading-snug mb-2">{getLocalizedText(o.description, lang) || t('noDescription')}</p>
                         <div className="flex flex-wrap items-center gap-4 font-mono text-xs" style={{ color: isDone ? COLORS.line : '#5B5342', opacity: isDone ? 0.6 : 1 }}>
                           {getAssignedMechanics(o).length > 0 && <span>👤 {getAssignedMechanics(o).join(', ')}</span>}
                           {o.hours && o.hours !== '' && <span>⏱️ {o.hours}h</span>}
@@ -3518,7 +3562,7 @@ function App() {
                           </div>
                         )}
                       </div>
-                      <StatusStamp status={o.status} small />
+                      <StatusStamp status={o.status} small t={t} />
                     </div>
                   </button>
                 );
@@ -3585,18 +3629,30 @@ function App() {
               <p className="font-mono text-xs" style={{ color: '#5B5342' }}>
                 {activeUnit} · opened {fmtDate(order.dateCreated)} by {order.createdBy}
               </p>
-              <StatusStamp status={order.status} />
+              <StatusStamp status={order.status} t={t} />
             </div>
 
             <label className="block mb-4">
               <span className="font-display text-xs uppercase tracking-wider block mb-1" style={{ color: '#6B6250' }}>{t('issueDescription')}</span>
               <textarea
-                value={order.description}
-                onChange={(e) => updateOrder(order.id, { description: e.target.value })}
+                value={getLocalizedText(order.description, lang)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const current = typeof order.description === 'string'
+                    ? { text: order.description, origLang: 'en', translations: {} }
+                    : order.description || { text: '', origLang: lang, translations: {} };
+                  const nextDescription = current.origLang === lang
+                    ? { ...current, text: val }
+                    : { ...current, translations: { ...current.translations, [lang]: val } };
+                  updateOrder(order.id, { description: nextDescription });
+                }}
                 rows={3}
                 className="w-full rounded-sm px-3 py-2 text-sm font-body focus:outline-none focus:ring-2"
                 style={{ background: '#EFE3C4', color: COLORS.ink2, border: `1px solid ${COLORS.manilaDark}` }}
               />
+              {typeof order.description === 'object' && order.description.origLang !== lang && !order.description.translations[lang] && (
+                <p className="text-xs mt-1" style={{ color: COLORS.accent }}>{t('noTranslationYet')}</p>
+              )}
             </label>
 
             <div className="mb-4">
