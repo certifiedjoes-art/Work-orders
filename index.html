@@ -303,6 +303,7 @@ const translations = {
     saveFailedWarning: "Couldn't save — check your signal and try again. This action was NOT recorded.",
     statusOpen: 'Open',
     statusDone: 'Done',
+    statusInProgress: 'In progress',
     noDescription: '(no description)',
     workOrder: 'work order',
     noTranslationYet: "Showing the original — you're viewing this in a different language than it was written in. Edit above to add a translation.",
@@ -441,6 +442,7 @@ const translations = {
     saveFailedWarning: 'No se pudo guardar — revisa tu señal e intenta de nuevo. Esta acción NO se registró.',
     statusOpen: 'Abierto',
     statusDone: 'Hecho',
+    statusInProgress: 'En progreso',
     noDescription: '(sin descripción)',
     workOrder: 'orden de trabajo',
     noTranslationYet: 'Mostrando el original — lo estás viendo en un idioma diferente al que fue escrito. Edita arriba para agregar una traducción.',
@@ -579,6 +581,7 @@ const translations = {
     saveFailedWarning: 'Kunn nich sponere — kjik dien Signaul un proboa nomol. Dit wea NICH oppjenumen.',
     statusOpen: 'Opne',
     statusDone: 'Fadich',
+    statusInProgress: 'Em Gang',
     noDescription: '(kjeene Beschriewunk)',
     workOrder: 'Oppdrach',
     noTranslationYet: 'Wiest daut Orichenal — du sejst daut en ea aundre Sproak aus et jeschräwe wea. Ändre baowe om en Äwasatunk touféjen.',
@@ -1146,57 +1149,53 @@ async function verifyBiometric(name) {
 
 // Clean, work-friendly jokes only — rotates once per day, same joke for everyone that day.
 const JOKES = [
-  "Why don't scientists trust atoms? Because they make up everything.",
-  "I used to be a banker, but I lost interest.",
-  "Why did the scarecrow win an award? He was outstanding in his field.",
-  "What do you call a fish with no eyes? A fsh.",
-  "I'm reading a book about anti-gravity. It's impossible to put down.",
-  "Why don't skeletons fight each other? They don't have the guts.",
-  "What do you call a factory that makes okay products? A satisfactory.",
-  "I only know 25 letters of the alphabet. I don't know y.",
-  "Why did the coffee file a police report? It got mugged.",
-  "What do you call a bear with no teeth? A gummy bear.",
-  "I told my wife she should embrace her mistakes. She gave me a hug.",
-  "Why can't you give Elsa a balloon? She'll let it go.",
-  "What did the ocean say to the beach? Nothing, it just waved.",
-  "Why did the bicycle fall over? It was two-tired.",
-  "How do you organize a space party? You planet.",
-  "I would tell you a construction joke, but I'm still working on it.",
-  "Why did the golfer bring two pairs of pants? In case he got a hole in one.",
-  "What do you call a dinosaur that crashes his car? Tyrannosaurus wrecks.",
-  "Why don't eggs tell jokes? They'd crack each other up.",
-  "I used to hate facial hair, but then it grew on me.",
-  "What's the best time to go to the dentist? Tooth-hurty.",
-  "Why did the tomato turn red? Because it saw the salad dressing.",
-  "How does a penguin build its house? Igloos it together.",
-  "I'm on a seafood diet. I see food and I eat it.",
-  "Why did the invisible man turn down the job offer? He couldn't see himself doing it.",
-  "What do you call cheese that isn't yours? Nacho cheese.",
-  "Why did the math book look sad? It had too many problems.",
-  "What did one wall say to the other? I'll meet you at the corner.",
-  "Why don't oysters share? Because they're shellfish.",
-  "I got a job at a bakery because I kneaded dough.",
-  "What do you call a can opener that doesn't work? A can't opener.",
-  "Why did the worker get fired from the calendar factory? He took a day off.",
-  "How do trees get on the internet? They log in.",
-  "What's a mechanic's favorite type of music? Heavy metal.",
-  "Why did the truck driver bring extra socks? In case he got a flat.",
-  "What do you call a lazy kangaroo? Pouch potato.",
+  "My mechanic told me my car needs a new engine. I told him it needs a new mechanic.",
+  "I'm not saying my job is dangerous, but my safety glasses have seen things.",
+  "Coffee: because adulting is hard and mornings are undefeated.",
+  "I told my boss I needed a raise because three companies were after me. He asked which ones. I said the gas company, the power company, and the water company.",
+  "The five stages of grief now include checking your bank account.",
+  "My therapist says I have a preoccupation with revenge. We'll see about that.",
+  "I asked the torque wrench for advice. It just kept telling me the same thing, over and over, tighter each time.",
+  "Nothing ruins a Friday afternoon faster than a Monday-shaped problem showing up early.",
+  "I'm on a whiskey diet. I've lost three days already.",
+  "My give-a-damn's busted, and parts are on backorder.",
+  "There are two kinds of duct tape: the kind that works, and the kind you find out doesn't at the worst possible time.",
+  "I told the new guy 'righty tighty, lefty loosey.' He's been in there a while.",
+  "Behind every successful mechanic is a substantial amount of caffeine and a complete disregard for their own knuckles.",
+  "My blood type is diesel.",
+  "I used to think I was indecisive. Now I'm not so sure.",
+  "The shortest horror story: 'Low oil pressure light.'",
+  "I'm not lazy, I'm on energy-saving mode.",
+  "Every tool has two uses: what it's for, and what you use it for at 4:45 on a Friday.",
+  "I told my wife I was going to fix the leak myself. That was three trips to the hardware store ago.",
+  "There's no such thing as a five-minute job. There's only a job that starts out looking like five minutes.",
+  "I don't always test my code, but when I do, I do it in production. Same energy as 'it'll probably hold.'",
+  "My New Year's resolution was to stop leaving tools on top of the machine. Update: the machine remembers.",
+  "Rust never sleeps, and neither does whatever's making that noise.",
+  "I'm not arguing, I'm just explaining why I'm right, loudly, near a running engine.",
+  "The optimist says the glass is half full. The mechanic says someone left the reservoir cap off again.",
+  "Whoever said 'money can't buy happiness' never bought the right size wrench on the first try.",
+  "I put my phone on silent. That's why I didn't hear you asking who broke it.",
+  "A good mechanic can fix anything except their own truck.",
+  "Some people call it stubbornness. I call it 'refusing to admit the bolt won.'",
+  "I'm fluent in sarcasm and hydraulic fluid.",
+  "The check engine light isn't a warning, it's a personality trait at this point.",
+  "I asked for a five-minute break. That was an hour, three coffees, and one existential crisis ago.",
 ];
 
 const JOKES_ES = [
-  "¿Por qué los pájaros no usan Facebook? Porque ya tienen Twitter.",
-  "¿Qué le dice un pez a otro pez? Nada.",
-  "¿Cómo se llama un boomerang que no vuelve? Un palo.",
-  "¿Qué hace una abeja en el gimnasio? Zum-ba.",
-  "¿Por qué el libro de matemáticas está triste? Porque tiene muchos problemas.",
-  "¿Cómo se dice pañuelo en náhuatl? Muéveloparaacáparaallá.",
-  "¿Qué le dijo un techo a otro techo? Estoy techo polvo.",
-  "¿Cuál es el café más peligroso del mundo? El ex-preso.",
-  "¿Por qué el gallo no usa reloj? Porque tiene despertador.",
-  "¿Qué hace un pez payaso? Se ríe con la boca cerrada porque está bajo el agua.",
-  "¿Cómo se llama el campeón de buceo japonés? Tokofondo.",
-  "¿Qué le dijo una impresora a otra? ¿Esa hoja es tuya o es una impresión mía?",
+  "Mi mecánico me dijo que el auto necesita un motor nuevo. Le dije que él necesita un cliente nuevo.",
+  "No digo que mi trabajo sea peligroso, pero mis lentes de seguridad han visto cosas.",
+  "El café: porque ser adulto es difícil y las mañanas siempre ganan.",
+  "Las cinco etapas del duelo ahora incluyen revisar tu cuenta bancaria.",
+  "Le pregunté a la llave de torque qué opinaba. Me repitió lo mismo, cada vez más apretado.",
+  "No hay trabajo de cinco minutos. Solo hay trabajos que empiezan pareciendo de cinco minutos.",
+  "Mi tipo de sangre es diésel.",
+  "El optimista dice que el vaso está medio lleno. El mecánico dice que alguien dejó la tapa del depósito abierta otra vez.",
+  "No soy terco, solo me niego a admitir que el tornillo ganó.",
+  "La luz de 'revisar motor' ya no es una advertencia, es parte de mi personalidad.",
+  "Pedí un descanso de cinco minutos. Eso fue hace una hora, tres cafés y una crisis existencial.",
+  "Detrás de todo buen mecánico hay una cantidad importante de café y ningún cuidado por sus propios nudillos.",
 ];
 
 const JOKES_PDT = [
@@ -1208,6 +1207,8 @@ const JOKES_PDT = [
   "Wua läajt en Fesch soo goot? En Bad.",
   "Waut sajcht een Boom toom aundren? Blada mie nich aun.",
   "Waut es en Boa aun dän Torn? Doa woont dee Klock.",
+  "Ekj sie nich fut, ekj sie bloos langsom scharp.",
+  "Mien Bloot es diesel.",
 ];
 
 function jokeOfTheDay(lang) {
@@ -2828,15 +2829,15 @@ function App() {
                     <p className="font-mono text-xl font-semibold mb-4 truncate">{u}</p>
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-sm">
-                        <span style={{ color: COLORS.open }}>📋 Open</span>
+                        <span style={{ color: COLORS.open }}>📋 {t('statusOpen')}</span>
                         <span className="font-semibold" style={{ color: COLORS.open }}>{c.Open}</span>
                       </div>
                       <div className="flex items-center justify-between text-sm">
-                        <span style={{ color: COLORS.progress }}>🔧 In progress</span>
+                        <span style={{ color: COLORS.progress }}>🔧 {t('statusInProgress')}</span>
                         <span className="font-semibold" style={{ color: COLORS.progress }}>{c['In Progress']}</span>
                       </div>
                       <div className="flex items-center justify-between text-sm">
-                        <span style={{ color: COLORS.done }}>✓ Done</span>
+                        <span style={{ color: COLORS.done }}>✓ {t('statusDone')}</span>
                         <span className="font-semibold" style={{ color: COLORS.done }}>{c.Done}</span>
                       </div>
                     </div>
@@ -3548,24 +3549,10 @@ function App() {
           <button onClick={() => setScreen('dashboard')} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
             {t('backToBoard')}
           </button>
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-8">
             <h1 className="font-display text-3xl font-bold">{t('checklists')}</h1>
             <Btn onClick={() => setShowNewTemplate((s) => !s)}>{t('newChecklist')}</Btn>
           </div>
-
-          {isAdmin && (
-            <div className="rounded-lg p-4 mb-6 flex items-center justify-between gap-3 flex-wrap" style={{ background: COLORS.surface, border: `1px dashed ${COLORS.line}` }}>
-              <p className="text-xs flex-1" style={{ color: COLORS.inkDim, minWidth: 200 }}>{t('translateExistingHelper')}</p>
-              <button
-                onClick={translateAllExistingContent}
-                disabled={migratingTranslations}
-                className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg"
-                style={{ color: COLORS.accent, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}`, opacity: migratingTranslations ? 0.6 : 1 }}
-              >
-                {migratingTranslations ? t('translatingNow') : t('translateExisting')}
-              </button>
-            </div>
-          )}
 
           {showNewTemplate && (
             <NewTemplateForm onCancel={() => setShowNewTemplate(false)} onSubmit={addTemplate} t={t} />
@@ -3880,7 +3867,7 @@ function App() {
                     background: order.status === 'Open' ? statusColor('Open') : 'transparent',
                   }}
                 >
-                  Open
+                  {t('statusOpen')}
                 </button>
                 <button
                   onClick={() => {
@@ -3898,7 +3885,7 @@ function App() {
                     boxShadow: order.status === 'Done' ? `0 2px 12px ${statusColor('Done')}66` : 'none',
                   }}
                 >
-                  ✓ Done
+                  ✓ {t('statusDone')}
                 </button>
               </div>
             </div>
