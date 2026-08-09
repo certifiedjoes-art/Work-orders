@@ -780,7 +780,7 @@ function FireworksOverlay({ show }) {
   );
 }
 
-function JokeBanner({ lang }) {
+function JokeBanner({ lang, customPdtJokes }) {
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
   return (
@@ -789,7 +789,7 @@ function JokeBanner({ lang }) {
       style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
     >
       <span style={{ fontSize: '1.4rem' }}>😄</span>
-      <p className="flex-1 text-sm italic" style={{ color: COLORS.inkDim }}>{jokeOfTheDay(lang)}</p>
+      <p className="flex-1 text-sm italic" style={{ color: COLORS.inkDim }}>{jokeOfTheDay(lang, customPdtJokes)}</p>
       <button onClick={() => setDismissed(true)} className="text-sm" style={{ color: COLORS.line }}>✕</button>
     </div>
   );
@@ -1077,6 +1077,14 @@ async function saveAuthMigrated(data) {
   try { await firebase.database().ref('authMigrated').set(data); } catch (e) { console.error('save authMigrated failed', e); }
 }
 
+async function saveCustomPdtStrings(data) {
+  await firebase.database().ref('customPdtStrings').set(stripUndefined(data));
+}
+
+async function saveCustomPdtJokes(data) {
+  await firebase.database().ref('customPdtJokes').set(stripUndefined(data));
+}
+
 // Small milestones celebrate themselves automatically. Big ones prompt the
 // admin for a personal note so they feel like a bigger deal.
 const AUTO_MILESTONES = [5, 10];
@@ -1211,8 +1219,8 @@ const JOKES_PDT = [
   "Mien Bloot es diesel.",
 ];
 
-function jokeOfTheDay(lang) {
-  const list = lang === 'es' ? JOKES_ES : lang === 'pdt' ? JOKES_PDT : JOKES;
+function jokeOfTheDay(lang, customPdtJokes) {
+  const list = lang === 'es' ? JOKES_ES : lang === 'pdt' ? [...JOKES_PDT, ...(customPdtJokes || [])] : JOKES;
   const start = new Date(new Date().getFullYear(), 0, 0);
   const diff = new Date() - start;
   const dayOfYear = Math.floor(diff / (1000 * 60 * 60 * 24));
@@ -1372,7 +1380,12 @@ function App() {
     localStorage.setItem('appLang', l);
     setLang(l);
   };
-  const t = (key) => (translations[lang] && translations[lang][key]) || translations.en[key] || key;
+  const [customPdtStrings, setCustomPdtStrings] = useState({});
+  const [customPdtJokes, setCustomPdtJokes] = useState([]);
+  const t = (key) => {
+    if (lang === 'pdt' && customPdtStrings[key]) return customPdtStrings[key];
+    return (translations[lang] && translations[lang][key]) || translations.en[key] || key;
+  };
   const [activeUnit, setActiveUnit] = useState(null);
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [newMechanicName, setNewMechanicName] = useState('');
@@ -1405,6 +1418,8 @@ function App() {
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(null);
   const [showRemoveAllConfirm, setShowRemoveAllConfirm] = useState(false);
   const [editingTemplateId, setEditingTemplateId] = useState(null);
+  const [pdtEditingTemplateId, setPdtEditingTemplateId] = useState(null);
+  const [pdtEditingChecklistId, setPdtEditingChecklistId] = useState(null);
   const [showAdHocChecklist, setShowAdHocChecklist] = useState(false);
   const [timesheets, setTimesheets] = useState(() => cacheGet('timesheets', []));
   const [timesheetSettings, setTimesheetSettings] = useState({ email: '', autoEmail: false });
@@ -1483,6 +1498,23 @@ function App() {
       setAuthMigrated(snap.val() || {});
     });
     return () => amRef.off('value', onAm);
+  }, []);
+
+  useEffect(() => {
+    const pdtRef = firebase.database().ref('customPdtStrings');
+    const onPdt = pdtRef.on('value', (snap) => {
+      setCustomPdtStrings(snap.val() || {});
+    });
+    return () => pdtRef.off('value', onPdt);
+  }, []);
+
+  useEffect(() => {
+    const pdtJokesRef = firebase.database().ref('customPdtJokes');
+    const onPdtJokes = pdtJokesRef.on('value', (snap) => {
+      const val = snap.val();
+      setCustomPdtJokes(Array.isArray(val) ? val : []);
+    });
+    return () => pdtJokesRef.off('value', onPdtJokes);
   }, []);
 
   useEffect(() => {
@@ -1585,6 +1617,26 @@ function App() {
         alert("Couldn't save — check your signal and try again. This action was NOT recorded.");
         throw e2;
       }
+    }
+  };
+
+  const persistCustomPdtStrings = async (next) => {
+    setCustomPdtStrings(next);
+    try {
+      await saveCustomPdtStrings(next);
+    } catch (e) {
+      alert("Couldn't save — check your signal and try again.");
+      throw e;
+    }
+  };
+
+  const persistCustomPdtJokes = async (next) => {
+    setCustomPdtJokes(next);
+    try {
+      await saveCustomPdtJokes(next);
+    } catch (e) {
+      alert("Couldn't save — check your signal and try again.");
+      throw e;
     }
   };
 
@@ -1854,6 +1906,44 @@ function App() {
     const next = templates.map((t) => (t.id === id ? { ...t, name: trimmedName, items, nameOrigLang, nameTranslations, itemTranslations } : t));
     await persistTemplates(next);
     setEditingTemplateId(null);
+  };
+
+  // Adds (or fixes) just the Plautdietsch wording for a template's name and
+  // items, without touching the original text or the English/Spanish
+  // translations already there — since Plautdietsch can't be auto-translated,
+  // this is the manual path for filling it in.
+  const updateTemplatePdt = async (templateId, namePdt, itemPdtList) => {
+    const next = templates.map((tpl) => {
+      if (tpl.id !== templateId) return tpl;
+      const nameTranslations = { ...(tpl.nameTranslations || {}) };
+      if (namePdt.trim()) nameTranslations.pdt = namePdt.trim(); else delete nameTranslations.pdt;
+      const itemTranslations = (tpl.items || []).map((_, i) => {
+        const existing = { ...((tpl.itemTranslations && tpl.itemTranslations[i]) || {}) };
+        const val = itemPdtList[i];
+        if (val && val.trim()) existing.pdt = val.trim(); else delete existing.pdt;
+        return Object.keys(existing).length > 0 ? existing : null;
+      });
+      return { ...tpl, nameTranslations, itemTranslations };
+    });
+    await persistTemplates(next);
+  };
+
+  const updateChecklistPdt = async (orderId, checklistId, namePdt, itemPdtList) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return;
+    const nextChecklists = getChecklists(order).map((c) => {
+      if (c.id !== checklistId) return c;
+      const nameTranslations = { ...(c.nameTranslations || {}) };
+      if (namePdt.trim()) nameTranslations.pdt = namePdt.trim(); else delete nameTranslations.pdt;
+      const itemTranslations = (c.items || []).map((_, i) => {
+        const existing = { ...((c.itemTranslations && c.itemTranslations[i]) || {}) };
+        const val = itemPdtList[i];
+        if (val && val.trim()) existing.pdt = val.trim(); else delete existing.pdt;
+        return Object.keys(existing).length > 0 ? existing : null;
+      });
+      return { ...c, nameTranslations, itemTranslations };
+    });
+    await updateOrder(orderId, { checklists: nextChecklists, checklist: null });
   };
 
   // A work order can hold several checklists at once (e.g. the standard
@@ -2632,7 +2722,7 @@ function App() {
             </div>
           </div>
 
-          <JokeBanner lang={lang} />
+          <JokeBanner lang={lang} customPdtJokes={customPdtJokes} />
 
           <div className="flex items-center justify-end gap-4 -mt-2 mb-8">
             <button onClick={startChangePin} className="text-xs underline" style={{ color: COLORS.inkDim }}>
@@ -3356,6 +3446,14 @@ function App() {
             Manage who can sign in, and who has admin access like you.
           </p>
 
+          <button
+            onClick={() => setScreen('pdtTranslations')}
+            className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg mb-6"
+            style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+          >
+            🌐 Plautdietsch Translations
+          </button>
+
           {mechanics.length > 1 && (
             <div className="mb-8">
               {showRemoveAllConfirm ? (
@@ -3516,6 +3614,29 @@ function App() {
   }
 
   // ---------- CHECKLIST TEMPLATES ----------
+  if (screen === 'pdtTranslations') {
+    if (!isAdmin) {
+      return (
+        <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8 flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-lg mb-4">Admins only.</p>
+            <button onClick={() => setScreen('dashboard')} className="font-display text-sm underline" style={{ color: COLORS.accent }}>{t('backToBoard')}</button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <PdtTranslationsScreen
+        customPdtStrings={customPdtStrings}
+        customPdtJokes={customPdtJokes}
+        onSaveStrings={persistCustomPdtStrings}
+        onSaveJokes={persistCustomPdtJokes}
+        onBack={() => setScreen('dashboard')}
+        t={t}
+      />
+    );
+  }
+
   if (screen === 'checklists') {
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
@@ -3595,6 +3716,13 @@ function App() {
                         >
                           {t('edit')}
                         </button>
+                        <button
+                          onClick={() => setPdtEditingTemplateId(pdtEditingTemplateId === tpl.id ? null : tpl.id)}
+                          className="text-xs font-display uppercase tracking-wider hover:opacity-70"
+                          style={{ color: COLORS.inkDim }}
+                        >
+                          🌐
+                        </button>
                         {!isDefault && (
                           <button 
                             onClick={() => setConfirmDeleteTemplate(confirmDeleteTemplate === tpl.id ? null : tpl.id)} 
@@ -3606,6 +3734,19 @@ function App() {
                         )}
                       </div>
                     </div>
+                    {pdtEditingTemplateId === tpl.id && (
+                      <PdtChecklistForm
+                        name={tpl.name}
+                        items={tpl.items}
+                        nameTranslations={tpl.nameTranslations}
+                        itemTranslations={tpl.itemTranslations}
+                        onSave={async (namePdt, itemPdts) => {
+                          await updateTemplatePdt(tpl.id, namePdt, itemPdts);
+                          setPdtEditingTemplateId(null);
+                        }}
+                        onCancel={() => setPdtEditingTemplateId(null)}
+                      />
+                    )}
                     <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>
                       {tpl.items.slice(0, 3).map((it, idx) => getLocalizedChecklistText(it, tpl.nameOrigLang, tpl.itemTranslations, lang, idx)).join(' • ')}
                       {tpl.items.length > 3 ? ' • …' : ''}
@@ -3922,6 +4063,13 @@ function App() {
                           {t('edit')}
                         </button>
                         <button
+                          onClick={() => setPdtEditingChecklistId(pdtEditingChecklistId === c.id ? null : c.id)}
+                          className="text-xs font-display uppercase tracking-wider hover:opacity-70"
+                          style={{ color: COLORS.inkDim }}
+                        >
+                          🌐
+                        </button>
+                        <button
                           onClick={() => detachChecklist(order.id, c.id)}
                           className="text-xs font-display uppercase tracking-wider hover:opacity-70"
                           style={{ color: '#D6604A' }}
@@ -3930,6 +4078,19 @@ function App() {
                         </button>
                       </div>
                     </div>
+                    {pdtEditingChecklistId === c.id && (
+                      <PdtChecklistForm
+                        name={c.templateName}
+                        items={c.items.map((it) => it.text)}
+                        nameTranslations={c.nameTranslations}
+                        itemTranslations={c.itemTranslations}
+                        onSave={async (namePdt, itemPdts) => {
+                          await updateChecklistPdt(order.id, c.id, namePdt, itemPdts);
+                          setPdtEditingChecklistId(null);
+                        }}
+                        onCancel={() => setPdtEditingChecklistId(null)}
+                      />
+                    )}
                     <div className="space-y-3">
                       {c.items.map((it, idx) => (
                         <label key={it.id} className="flex items-start gap-3 cursor-pointer group">
@@ -4247,6 +4408,168 @@ function OrderChecklistEditForm({ checklist, onSave, onCancel }) {
       <div className="flex gap-2">
         <Btn disabled={!canSave} onClick={() => onSave(name, itemsText)}>Save changes</Btn>
         <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
+function PdtChecklistForm({ name, items, nameTranslations, itemTranslations, onSave, onCancel }) {
+  const [namePdt, setNamePdt] = useState((nameTranslations && nameTranslations.pdt) || '');
+  const [itemPdts, setItemPdts] = useState(
+    items.map((_, i) => (itemTranslations && itemTranslations[i] && itemTranslations[i].pdt) || '')
+  );
+  return (
+    <div className="rounded-lg p-5 mb-4" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>
+      <h4 className="font-display text-sm font-bold uppercase tracking-wide mb-3">🌐 Add Plautdietsch</h4>
+      <label className="block mb-3">
+        <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>{name}</span>
+        <input
+          value={namePdt}
+          onChange={(e) => setNamePdt(e.target.value)}
+          placeholder="Plautdietsch name..."
+          className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
+          style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+        />
+      </label>
+      <div className="space-y-3 mb-4">
+        {items.map((item, i) => (
+          <label key={i} className="block">
+            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>{item}</span>
+            <input
+              value={itemPdts[i]}
+              onChange={(e) => {
+                const next = [...itemPdts];
+                next[i] = e.target.value;
+                setItemPdts(next);
+              }}
+              placeholder="Plautdietsch..."
+              className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
+              style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+            />
+          </label>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <Btn onClick={() => onSave(namePdt, itemPdts)}>Save Plautdietsch</Btn>
+        <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
+function PdtTranslationsScreen({ customPdtStrings, customPdtJokes, onSaveStrings, onSaveJokes, onBack, t }) {
+  const [search, setSearch] = useState('');
+  const [drafts, setDrafts] = useState(customPdtStrings);
+  const [jokeDrafts, setJokeDrafts] = useState(customPdtJokes.length ? customPdtJokes : ['']);
+  const [saving, setSaving] = useState(false);
+
+  const keys = Object.keys(translations.en).sort();
+  const q = search.trim().toLowerCase();
+  const filteredKeys = q
+    ? keys.filter((k) => translations.en[k].toLowerCase().includes(q) || k.toLowerCase().includes(q))
+    : keys;
+
+  const handleSaveStrings = async () => {
+    setSaving(true);
+    try {
+      const cleaned = {};
+      Object.entries(drafts).forEach(([k, v]) => { if (v && v.trim()) cleaned[k] = v.trim(); });
+      await onSaveStrings(cleaned);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveJokes = async () => {
+    setSaving(true);
+    try {
+      const cleaned = jokeDrafts.map((j) => j.trim()).filter(Boolean);
+      await onSaveJokes(cleaned);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
+      <div className="max-w-3xl mx-auto">
+        <button onClick={onBack} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
+          {t('backToBoard')}
+        </button>
+        <h1 className="font-display text-3xl font-bold mb-2">Plautdietsch Translations</h1>
+        <p className="text-sm mb-6" style={{ color: COLORS.inkDim }}>
+          Fix or add Plautdietsch wording for any button, label, or joke in the app. Leave a box blank to keep using the built-in default.
+        </p>
+
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by the English text..."
+          className="w-full rounded-lg px-4 py-2.5 text-base mb-6 focus:outline-none focus:ring-2"
+          style={{ background: COLORS.surface, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+        />
+
+        <div className="rounded-lg p-5 mb-6" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+          <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+            <h2 className="font-display text-sm font-bold uppercase tracking-wide">Buttons & Labels ({filteredKeys.length})</h2>
+            <Btn onClick={handleSaveStrings} disabled={saving}>{saving ? 'Saving…' : 'Save all'}</Btn>
+          </div>
+          <div className="space-y-4" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+            {filteredKeys.map((k) => (
+              <div key={k}>
+                <span className="text-xs block mb-1" style={{ color: COLORS.line }}>{translations.en[k]}</span>
+                <input
+                  value={drafts[k] || ''}
+                  onChange={(e) => setDrafts({ ...drafts, [k]: e.target.value })}
+                  placeholder={translations.pdt[k] || translations.en[k]}
+                  className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                  style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                />
+              </div>
+            ))}
+            {filteredKeys.length === 0 && (
+              <p className="text-sm" style={{ color: COLORS.line }}>No matches for that search.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-display text-sm font-bold uppercase tracking-wide">Jokes</h2>
+            <Btn onClick={handleSaveJokes} disabled={saving}>{saving ? 'Saving…' : 'Save jokes'}</Btn>
+          </div>
+          <div className="space-y-3">
+            {jokeDrafts.map((j, i) => (
+              <div key={i} className="flex gap-2">
+                <input
+                  value={j}
+                  onChange={(e) => {
+                    const next = [...jokeDrafts];
+                    next[i] = e.target.value;
+                    setJokeDrafts(next);
+                  }}
+                  placeholder="Type a joke in Plautdietsch..."
+                  className="flex-1 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                  style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                />
+                <button
+                  onClick={() => setJokeDrafts(jokeDrafts.filter((_, idx) => idx !== i))}
+                  className="px-2 text-sm"
+                  style={{ color: '#E07A5F' }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() => setJokeDrafts([...jokeDrafts, ''])}
+              className="text-sm underline"
+              style={{ color: COLORS.accent }}
+            >
+              + Add another joke
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
