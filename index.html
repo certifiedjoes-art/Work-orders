@@ -1775,8 +1775,13 @@ function App() {
 
       const updatedOrders = await Promise.all(orders.map(async (o) => {
         let next = o;
-        if (typeof o.description === 'string' && o.description.trim()) {
-          const field = await buildLocalizedField(o.description, 'en');
+        // Always reprocess, whether description is still a plain string
+        // (never touched) or already an object with empty/broken
+        // translations (created while the backend was still broken) —
+        // pull out the original text either way and retranslate.
+        const origText = typeof o.description === 'string' ? o.description : (o.description ? o.description.text : '');
+        if (origText && origText.trim()) {
+          const field = await buildLocalizedField(origText, 'en');
           if (field.translations && Object.keys(field.translations).length > 0) successCount++;
           else failCount++;
           next = { ...next, description: field };
