@@ -1420,6 +1420,7 @@ function App() {
   const [editingTemplateId, setEditingTemplateId] = useState(null);
   const [pdtEditingTemplateId, setPdtEditingTemplateId] = useState(null);
   const [pdtEditingChecklistId, setPdtEditingChecklistId] = useState(null);
+  const [pdtEditingDescription, setPdtEditingDescription] = useState(false);
   const [showAdHocChecklist, setShowAdHocChecklist] = useState(false);
   const [timesheets, setTimesheets] = useState(() => cacheGet('timesheets', []));
   const [timesheetSettings, setTimesheetSettings] = useState({ email: '', autoEmail: false });
@@ -2383,6 +2384,15 @@ function App() {
   const deleteNote = async (orderId, noteId) => {
     const next = orders.map((o) =>
       o.id === orderId ? { ...o, notes: (o.notes || []).filter((n) => n.id !== noteId) } : o
+    );
+    await persistOrders(next);
+  };
+
+  const saveNotePdt = async (orderId, noteId, pdtText) => {
+    const next = orders.map((o) =>
+      o.id === orderId
+        ? { ...o, notes: (o.notes || []).map((n) => (n.id === noteId ? { ...n, pdtText: pdtText.trim() || null } : n)) }
+        : o
     );
     await persistOrders(next);
   };
@@ -3920,7 +3930,17 @@ function App() {
             </div>
 
             <label className="block mb-4">
-              <span className="font-display text-xs uppercase tracking-wider block mb-1" style={{ color: '#6B6250' }}>{t('issueDescription')}</span>
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-display text-xs uppercase tracking-wider" style={{ color: '#6B6250' }}>{t('issueDescription')}</span>
+                <button
+                  type="button"
+                  onClick={() => setPdtEditingDescription((s) => !s)}
+                  className="text-xs"
+                  style={{ color: COLORS.inkDim }}
+                >
+                  🌐
+                </button>
+              </div>
               <textarea
                 value={getLocalizedText(order.description, lang)}
                 onChange={(e) => {
@@ -3939,6 +3959,24 @@ function App() {
               />
               {typeof order.description === 'object' && order.description.origLang !== lang && !order.description.translations[lang] && (
                 <p className="text-xs mt-1" style={{ color: COLORS.accent }}>{t('noTranslationYet')}</p>
+              )}
+              {pdtEditingDescription && (
+                <PdtChecklistForm
+                  name={getLocalizedText(order.description, 'en')}
+                  items={[]}
+                  nameTranslations={typeof order.description === 'object' ? order.description.translations : {}}
+                  itemTranslations={[]}
+                  onSave={async (namePdt) => {
+                    const current = typeof order.description === 'string'
+                      ? { text: order.description, origLang: 'en', translations: {} }
+                      : order.description || { text: '', origLang: 'en', translations: {} };
+                    const translations = { ...current.translations };
+                    if (namePdt.trim()) translations.pdt = namePdt.trim(); else delete translations.pdt;
+                    await updateOrder(order.id, { description: { ...current, translations } });
+                    setPdtEditingDescription(false);
+                  }}
+                  onCancel={() => setPdtEditingDescription(false)}
+                />
               )}
             </label>
 
@@ -4184,6 +4222,7 @@ function App() {
                   onCancel={() => setEditingNoteId(null)}
                   onSave={(text) => updateNote(order.id, n.id, text)}
                   onDelete={() => deleteNote(order.id, n.id)}
+                  onSavePdt={(pdtText) => saveNotePdt(order.id, n.id, pdtText)}
                   lang={lang}
                 />
               ))}
@@ -4820,9 +4859,11 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit, t }) {
   );
 }
 
-function NoteCard({ note, isEditing, canEdit, onEdit, onCancel, onSave, onDelete, lang }) {
+function NoteCard({ note, isEditing, canEdit, onEdit, onCancel, onSave, onDelete, onSavePdt, lang }) {
   const [text, setText] = useState(note.text);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [pdtEditing, setPdtEditing] = useState(false);
+  const [pdtDraft, setPdtDraft] = useState(note.pdtText || '');
 
   if (isEditing) {
     return (
@@ -4865,6 +4906,9 @@ function NoteCard({ note, isEditing, canEdit, onEdit, onCancel, onSave, onDelete
             <button onClick={onEdit} className="text-xs underline" style={{ color: COLORS.inkDim }}>Edit</button>
           )}
           {canEdit && !confirmDelete && (
+            <button onClick={() => setPdtEditing((s) => !s)} className="text-xs" style={{ color: COLORS.inkDim }}>🌐</button>
+          )}
+          {canEdit && !confirmDelete && (
             <button onClick={() => setConfirmDelete(true)} className="text-xs underline" style={{ color: '#E07A5F' }}>Delete</button>
           )}
           {confirmDelete && (
@@ -4875,9 +4919,25 @@ function NoteCard({ note, isEditing, canEdit, onEdit, onCancel, onSave, onDelete
           )}
         </div>
       </div>
-      <p className="text-base">{lang === 'es' && note.originalLang === 'es' ? note.originalText : note.text}</p>
-      {note.originalLang === 'es' && lang !== 'es' && (
+      <p className="text-base">{lang === 'pdt' && note.pdtText ? note.pdtText : lang === 'es' && note.originalLang === 'es' ? note.originalText : note.text}</p>
+      {note.originalLang === 'es' && lang !== 'es' && lang !== 'pdt' && (
         <p className="text-xs mt-1" style={{ color: COLORS.line }}>Translated from Spanish</p>
+      )}
+      {pdtEditing && (
+        <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+          <textarea
+            value={pdtDraft}
+            onChange={(e) => setPdtDraft(e.target.value)}
+            placeholder="Plautdietsch..."
+            rows={2}
+            className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 resize-none mb-2"
+            style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+          <div className="flex gap-2">
+            <Btn onClick={() => { onSavePdt(pdtDraft); setPdtEditing(false); }}>Save Plautdietsch</Btn>
+            <Btn variant="ghost" onClick={() => setPdtEditing(false)}>Cancel</Btn>
+          </div>
+        </div>
       )}
     </div>
   );
