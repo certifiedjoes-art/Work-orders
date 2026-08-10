@@ -12,6 +12,13 @@ const TRANSLATE_API_KEY = process.env.TRANSLATE_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY; // separate key, used only for reading receipt/invoice photos
 const FROM_EMAIL = 'reports@hardercontracting.ca';
 
+// Same slug used for a mechanic's synthetic login email and their Firebase
+// key elsewhere — must exactly match emailForMechanic() in the app, or
+// lookups here will silently fail to find the right account.
+function slugify(name) {
+  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
 // Sends a photo of a vendor receipt/invoice to Claude and asks for the
 // handful of fields worth pulling into a work order draft. Returns null
 // fields for anything that wasn't legible rather than guessing.
@@ -174,6 +181,71 @@ exports.weeklyBackupAndEmail = async (req, res) => {
       } catch (err) {
         console.error(err);
         res.status(500).json({ error: err.message });
+      }
+      return;
+    }
+
+    // Self-service login recovery — someone lost access and wants a fresh
+    // link emailed to them. Always responds the same way whether or not
+    // the name/email actually matched, so this can't be used to check
+    // which names or emails exist in the system.
+    if (body.mode === 'requestLoginLink') {
+      try {
+        const name = (body.name || '').trim();
+        const email = (body.email || '').trim().toLowerCase();
+        if (name && email) {
+          const db = admin.database();
+          const emailsSnap = await db.ref('mechanicEmails/' + slugify(name)).once('value');
+          const storedEmail = (emailsSnap.val() || '').trim().toLowerCase();
+          if (storedEmail && storedEmail === email) {
+            const token = require('crypto').randomBytes(24).toString('hex');
+            await db.ref('loginTokens/' + token).set({
+              mechanic: name,
+              createdAt: Date.now(),
+              expiresAt: Date.now() + 60 * 60 * 1000, // 1 hour
+            });
+            const link = `https://certifiedjoes-art.github.io/Work-orders/?loginToken=${token}`;
+            await sendEmail({
+              to: [email],
+              subject: 'Harder Contracting — Your login link',
+              text: `Hi ${name},\n\nHere's your link to set a new login PIN for the Work Order Board app:\n\n${link}\n\nThis link works once and expires in 1 hour. If you didn't request this, you can ignore this email.`,
+            });
+          }
+        }
+      } catch (err) {
+        console.error(err);
+        // still respond normally below — never reveal failure details
+      }
+      res.status(200).json({ ok: true });
+      return;
+    }
+
+    // Using a link from that email to actually set a new PIN. The token
+    // proves identity here, since knowing it required receiving the email.
+    if (body.mode === 'resetPinWithToken') {
+      const token = body.token;
+      const newPin = body.newPin;
+      if (!token || !newPin || newPin.length < 6) {
+        res.status(400).json({ error: 'Invalid request' });
+        return;
+      }
+      try {
+        const db = admin.database();
+        const tokenSnap = await db.ref('loginTokens/' + token).once('value');
+        const tokenData = tokenSnap.val();
+        if (!tokenData || Date.now() > tokenData.expiresAt) {
+          res.status(400).json({ error: 'This link has expired. Request a new one.' });
+          return;
+        }
+        const mechanic = tokenData.mechanic;
+        const email = `${slugify(mechanic)}@harder-contracting.app`;
+        const user = await admin.auth().getUserByEmail(email);
+        await admin.auth().updateUser(user.uid, { password: newPin });
+        await db.ref('loginTokens/' + token).remove();
+        res.status(200).json({ ok: true, mechanic });
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Could not reset PIN. Try requesting a new link.' });
       }
       return;
     }
