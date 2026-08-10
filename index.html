@@ -1392,6 +1392,8 @@ function App() {
   const [newUnitName, setNewUnitName] = useState('');
   const [showAddUnit, setShowAddUnit] = useState(false);
   const [showAddOrder, setShowAddOrder] = useState(false);
+  const [scanningReceipt, setScanningReceipt] = useState(false);
+  const [scanReviewData, setScanReviewData] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [templates, setTemplates] = useState(() => cacheGet('templates', []));
   const [showNewTemplate, setShowNewTemplate] = useState(false);
@@ -2326,7 +2328,7 @@ function App() {
     setShowAddUnit(false);
   };
 
-  const createOrder = async (data) => {
+  const createOrder = async (data, scanPhotoDataUrl) => {
     const unitName = (data.unit || activeUnit || '').trim();
     if (!unitName) return;
     if (!units.includes(unitName)) {
@@ -2344,9 +2346,46 @@ function App() {
       status: 'Open',
       notes: [],
       createdBy: currentMechanic,
+      media: scanPhotoDataUrl ? [{ id: uid(), dataUrl: scanPhotoDataUrl, author: currentMechanic, ts: new Date().toISOString() }] : [],
     };
     await persistOrders([order, ...orders]);
     setShowAddOrder(false);
+    setScanReviewData(null);
+  };
+
+  // Sends a photo of a receipt/invoice to the backend, which asks Claude to
+  // read it, then opens the normal new-work-order form pre-filled with
+  // whatever it found — nothing is ever saved without the person reviewing
+  // and confirming it first.
+  const handleScanReceipt = async (file) => {
+    setScanningReceipt(true);
+    try {
+      const compressed = await compressImage(file);
+      const base64 = compressed.split(',')[1];
+      const res = await fetch(CLOUD_FUNCTION_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: APP_SECRET, mode: 'scanReceipt', image: base64, mediaType: 'image/jpeg' }),
+      });
+      if (!res.ok) throw new Error('Scan failed');
+      const data = await res.json();
+      const ex = data.extracted || {};
+      const descParts = [];
+      if (ex.vendor) descParts.push(`Vendor: ${ex.vendor}`);
+      if (ex.amount) descParts.push(`Amount: ${ex.amount}`);
+      if (ex.date) descParts.push(`Date on receipt: ${ex.date}`);
+      if (ex.description) descParts.push(ex.description);
+      setScanReviewData({
+        description: descParts.join('\n'),
+        unit: ex.unit && units.includes(ex.unit) ? ex.unit : '',
+        photoDataUrl: compressed,
+      });
+      setShowAddOrder(true);
+    } catch (e) {
+      alert("Couldn't read that photo — check your signal and try again, or just type in the work order normally.");
+    } finally {
+      setScanningReceipt(false);
+    }
   };
 
   const updateOrder = async (id, patch) => {
@@ -2816,6 +2855,24 @@ function App() {
                   >
                     {t('viewByMachine')}
                   </button>
+                  <label
+                    className="font-display font-bold uppercase tracking-wide text-sm px-4 py-3 rounded-xl transition-all cursor-pointer text-center"
+                    style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `2px solid ${COLORS.accent}` }}
+                  >
+                    {scanningReceipt ? 'Reading photo…' : '📷 Scan a receipt'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      disabled={scanningReceipt}
+                      onChange={(e) => {
+                        const file = e.target.files && e.target.files[0];
+                        if (file) handleScanReceipt(file);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
                   <Btn onClick={() => setShowAddOrder((s) => !s)}>{t('newWorkOrder')}</Btn>
                 </div>
               </div>
@@ -2824,8 +2881,11 @@ function App() {
                 <NewOrderForm
                   mechanics={mechanics}
                   units={units}
-                  onCancel={() => setShowAddOrder(false)}
-                  onSubmit={createOrder}
+                  onCancel={() => { setShowAddOrder(false); setScanReviewData(null); }}
+                  onSubmit={(data) => createOrder(data, scanReviewData ? scanReviewData.photoDataUrl : null)}
+                  initialDescription={scanReviewData ? scanReviewData.description : ''}
+                  initialUnit={scanReviewData ? scanReviewData.unit : ''}
+                  scanBanner={!!scanReviewData}
                   t={t}
                 />
               )}
@@ -4759,13 +4819,13 @@ function AdHocChecklistForm({ onSubmit, onCancel }) {
   );
 }
 
-function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit, t }) {
+function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit, t, initialDescription, initialUnit, scanBanner }) {
   const tr = t || ((k) => translations.en[k] || k);
-  const [description, setDescription] = useState('');
+  const [description, setDescription] = useState(initialDescription || '');
   const [assignedMechanics, setAssignedMechanics] = useState([]);
   const [hours, setHours] = useState('');
   const [dueDate, setDueDate] = useState('');
-  const [unit, setUnit] = useState(lockUnit || '');
+  const [unit, setUnit] = useState(lockUnit || initialUnit || '');
   const [addingNewUnit, setAddingNewUnit] = useState(false);
   const [newUnitName, setNewUnitName] = useState('');
 
@@ -4785,6 +4845,11 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit, t }) {
   return (
     <div className="rounded-lg p-6 mb-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
       <h3 className="font-display text-lg font-bold mb-4">{tr('createWorkOrder')}</h3>
+      {scanBanner && (
+        <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: 'rgba(127,163,126,0.15)', border: `1px solid ${COLORS.accent}`, color: COLORS.inkDim }}>
+          📷 Filled in from a scanned photo — double-check everything below before saving.
+        </div>
+      )}
 
       {!lockUnit && (
         <label className="block mb-4">
