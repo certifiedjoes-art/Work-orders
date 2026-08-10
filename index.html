@@ -304,6 +304,18 @@ const translations = {
     statusOpen: 'Open',
     statusDone: 'Done',
     statusInProgress: 'In progress',
+    welcomeBack: 'Welcome back',
+    notYouSwitchUser: "Not you? Switch user",
+    lostAccess: 'Lost access?',
+    getLoginLink: 'Get a login link',
+    lostAccessHelper: "Enter your name and the email you saved earlier, and we'll send you a link to set a new PIN.",
+    lostAccessEmailPlaceholder: 'your@email.com',
+    sendLink: 'Send link',
+    lostAccessSubmitted: "If that name and email match, a link is on its way — check your email.",
+    setNewPin: 'Set a new PIN',
+    setNewPinHelper: 'Choose a new 6-digit PIN to sign back in.',
+    linkExpiredOrInvalid: "This link is invalid or has expired. Request a new one from the login screen.",
+    pinSetSuccess: 'PIN updated — you can sign in now.',
     noDescription: '(no description)',
     workOrder: 'work order',
     noTranslationYet: "Showing the original — you're viewing this in a different language than it was written in. Edit above to add a translation.",
@@ -443,6 +455,18 @@ const translations = {
     statusOpen: 'Abierto',
     statusDone: 'Hecho',
     statusInProgress: 'En progreso',
+    welcomeBack: 'Bienvenido de nuevo',
+    notYouSwitchUser: '¿No eres tú? Cambiar usuario',
+    lostAccess: '¿Perdiste acceso?',
+    getLoginLink: 'Obtener un enlace de acceso',
+    lostAccessHelper: 'Ingresa tu nombre y el correo que guardaste antes, y te enviaremos un enlace para crear un nuevo PIN.',
+    lostAccessEmailPlaceholder: 'tu@correo.com',
+    sendLink: 'Enviar enlace',
+    lostAccessSubmitted: 'Si ese nombre y correo coinciden, un enlace está en camino — revisa tu correo.',
+    setNewPin: 'Crear un nuevo PIN',
+    setNewPinHelper: 'Elige un nuevo PIN de 6 dígitos para volver a entrar.',
+    linkExpiredOrInvalid: 'Este enlace no es válido o ha expirado. Solicita uno nuevo desde la pantalla de inicio de sesión.',
+    pinSetSuccess: 'PIN actualizado — ya puedes iniciar sesión.',
     noDescription: '(sin descripción)',
     workOrder: 'orden de trabajo',
     noTranslationYet: 'Mostrando el original — lo estás viendo en un idioma diferente al que fue escrito. Edita arriba para agregar una traducción.',
@@ -582,6 +606,18 @@ const translations = {
     statusOpen: 'Opne',
     statusDone: 'Fadich',
     statusInProgress: 'Em Gang',
+    welcomeBack: 'Wellkomm trigj',
+    notYouSwitchUser: 'Nich du? Wessel Bruka',
+    lostAccess: 'Toagang velore?',
+    getLoginLink: 'Kjrieg en Aunmeldunk-Lenkj',
+    lostAccessHelper: 'Skriew dien Nome un dee Email dee du fria jespoat hast, un wie schekje die en Lenkj fa en nieha PIN.',
+    lostAccessEmailPlaceholder: 'dien@email.com',
+    sendLink: 'Schekj Lenkj',
+    lostAccessSubmitted: 'Wan dee Nome un Email passe, es en Lenkj oppem Wajch — kjik dien Email.',
+    setNewPin: 'Moak en nieha PIN',
+    setNewPinHelper: 'Tjees en nieha 6-Zahle PIN om trigj to kome.',
+    linkExpiredOrInvalid: 'Dise Lenkj es nich rejcht oda es aul rüm. Fereesch eene nieha fom Aunmeldschirm.',
+    pinSetSuccess: 'PIN aul jeändat — du kaust nu aunmelde.',
     noDescription: '(kjeene Beschriewunk)',
     workOrder: 'Oppdrach',
     noTranslationYet: 'Wiest daut Orichenal — du sejst daut en ea aundre Sproak aus et jeschräwe wea. Ändre baowe om en Äwasatunk touféjen.',
@@ -706,6 +742,150 @@ function PinModalOverlay({ pinModal, pinInput, setPinInput, pinError, onSubmit, 
             {tr('forgotPin')}
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+function SetNewPinScreen({ state, t, onDone }) {
+  const [stage, setStage] = useState('first'); // 'first' | 'confirm'
+  const [firstEntry, setFirstEntry] = useState('');
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  if (state === 'invalid') {
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-6 flex items-center justify-center">
+        <div className="max-w-sm text-center">
+          <p className="text-4xl mb-4">⚠️</p>
+          <p className="text-base">{t('linkExpiredOrInvalid')}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const handleDigit = (d) => {
+    const next = pin + d;
+    if (next.length > 6) return;
+    setPin(next);
+    if (next.length === 6) {
+      if (stage === 'first') {
+        setFirstEntry(next);
+        setPin('');
+        setStage('confirm');
+      } else {
+        if (next !== firstEntry) {
+          setError(t('pinMismatch'));
+          setStage('first');
+          setFirstEntry('');
+          setPin('');
+          return;
+        }
+        submitNewPin(next);
+      }
+    }
+  };
+
+  const submitNewPin = async (newPin) => {
+    setSubmitting(true);
+    setError('');
+    try {
+      const res = await fetch(CLOUD_FUNCTION_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: APP_SECRET, mode: 'resetPinWithToken', token: state.token, newPin }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Failed');
+      await firebase.auth().signInWithEmailAndPassword(emailForMechanic(state.mechanic), newPin);
+      onDone(state.mechanic);
+    } catch (e) {
+      setError(t('linkExpiredOrInvalid'));
+      setSubmitting(false);
+      setStage('first');
+      setFirstEntry('');
+      setPin('');
+    }
+  };
+
+  return (
+    <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-6 flex flex-col items-center justify-center">
+      <div className="max-w-xs w-full text-center">
+        <p className="font-display text-2xl font-bold mb-2">{t('setNewPin')}</p>
+        <p className="text-sm mb-2" style={{ color: COLORS.inkDim }}>{state.mechanic}</p>
+        <p className="text-sm mb-6" style={{ color: COLORS.inkDim }}>
+          {stage === 'first' ? t('setNewPinHelper') : 'Enter it again to confirm.'}
+        </p>
+        <div className="flex justify-center gap-2 mb-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div
+              key={i}
+              className="w-8 h-10 rounded-lg flex items-center justify-center text-lg font-mono"
+              style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}
+            >
+              {pin[i] ? '•' : ''}
+            </div>
+          ))}
+        </div>
+        {error && <p className="text-sm mb-4" style={{ color: '#E07A5F' }}>{error}</p>}
+        {submitting ? (
+          <p className="text-sm" style={{ color: COLORS.inkDim }}>…</p>
+        ) : (
+          <div className="grid grid-cols-3 gap-3">
+            {['1','2','3','4','5','6','7','8','9','','0','⌫'].map((d, i) =>
+              d === '' ? <div key={i} /> : (
+                <button
+                  key={i}
+                  onClick={() => (d === '⌫' ? setPin(pin.slice(0, -1)) : handleDigit(d))}
+                  className="rounded-lg py-4 text-xl font-display font-bold"
+                  style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}`, color: COLORS.ink }}
+                >
+                  {d}
+                </button>
+              )
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EmailPromptOverlay({ show, onSave, onSkip }) {
+  const [email, setEmail] = useState('');
+  const [saving, setSaving] = useState(false);
+  if (!show) return null;
+  const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  return (
+    <div className="absolute inset-0 z-50 p-6" style={{ background: 'rgba(0,0,0,0.75)', minHeight: '100vh' }}>
+      <div className="w-full max-w-xs mx-auto my-8 rounded-2xl p-6 text-center overflow-y-auto" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}`, maxHeight: '85vh' }}>
+        <p className="text-4xl mb-3">📧</p>
+        <p className="font-display text-lg font-bold mb-2">Add a recovery email</p>
+        <p className="text-sm mb-5" style={{ color: COLORS.inkDim }}>
+          If you ever lose access, this lets you get a fresh login link sent to you directly — no need to wait on an admin.
+        </p>
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="your@email.com"
+          className="w-full rounded-lg px-4 py-2.5 text-base mb-4 focus:outline-none focus:ring-2 text-center"
+          style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          autoFocus
+        />
+        <div className="flex flex-col gap-2">
+          <Btn
+            onClick={async () => {
+              setSaving(true);
+              try { await onSave(email); } finally { setSaving(false); }
+            }}
+            disabled={!isValid || saving}
+          >
+            {saving ? 'Saving…' : 'Save email'}
+          </Btn>
+          <Btn variant="ghost" onClick={onSkip}>Not now</Btn>
+        </div>
       </div>
     </div>
   );
@@ -1077,6 +1257,14 @@ async function saveAuthMigrated(data) {
   try { await firebase.database().ref('authMigrated').set(data); } catch (e) { console.error('save authMigrated failed', e); }
 }
 
+function slugForMechanic(name) {
+  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+async function saveMechanicEmail(name, email) {
+  await firebase.database().ref('mechanicEmails/' + slugForMechanic(name)).set(email.trim().toLowerCase());
+}
+
 async function saveCustomPdtStrings(data) {
   await firebase.database().ref('customPdtStrings').set(stripUndefined(data));
 }
@@ -1381,6 +1569,9 @@ function App() {
     setLang(l);
   };
   const [customPdtStrings, setCustomPdtStrings] = useState({});
+  const [mechanicEmails, setMechanicEmails] = useState({});
+  const [showEmailPrompt, setShowEmailPrompt] = useState(false);
+  const [loginTokenState, setLoginTokenState] = useState(null); // { token, mechanic } | 'invalid' | null while checking
   const [customPdtJokes, setCustomPdtJokes] = useState([]);
   const t = (key) => {
     if (lang === 'pdt' && customPdtStrings[key]) return customPdtStrings[key];
@@ -1423,6 +1614,12 @@ function App() {
   const [pdtEditingTemplateId, setPdtEditingTemplateId] = useState(null);
   const [pdtEditingChecklistId, setPdtEditingChecklistId] = useState(null);
   const [pdtEditingDescription, setPdtEditingDescription] = useState(false);
+  const [showAllMechanics, setShowAllMechanics] = useState(false);
+  const [showLostAccess, setShowLostAccess] = useState(false);
+  const [lostAccessName, setLostAccessName] = useState('');
+  const [lostAccessEmail, setLostAccessEmail] = useState('');
+  const [lostAccessSubmitting, setLostAccessSubmitting] = useState(false);
+  const [lostAccessSubmitted, setLostAccessSubmitted] = useState(false);
   const [showAdHocChecklist, setShowAdHocChecklist] = useState(false);
   const [timesheets, setTimesheets] = useState(() => cacheGet('timesheets', []));
   const [timesheetSettings, setTimesheetSettings] = useState({ email: '', autoEmail: false });
@@ -1495,6 +1692,30 @@ function App() {
     return () => pinsRef.off('value', onPins);
   }, []);
 
+  // Check for a login-recovery link (?loginToken=...) on load. Validated
+  // directly against Firebase — reads are open, and the token itself is
+  // the proof of identity here (only reachable via the emailed link).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('loginToken');
+    if (!token) return;
+    (async () => {
+      try {
+        const snap = await firebase.database().ref('loginTokens/' + token).once('value');
+        const data = snap.val();
+        if (!data || Date.now() > data.expiresAt) {
+          setLoginTokenState('invalid');
+        } else {
+          setLoginTokenState({ token, mechanic: data.mechanic });
+        }
+      } catch (e) {
+        setLoginTokenState('invalid');
+      }
+      // Clean the token out of the visible URL either way.
+      window.history.replaceState({}, '', window.location.pathname);
+    })();
+  }, []);
+
   useEffect(() => {
     const amRef = firebase.database().ref('authMigrated');
     const onAm = amRef.on('value', (snap) => {
@@ -1509,6 +1730,14 @@ function App() {
       setCustomPdtStrings(snap.val() || {});
     });
     return () => pdtRef.off('value', onPdt);
+  }, []);
+
+  useEffect(() => {
+    const emailsRef = firebase.database().ref('mechanicEmails');
+    const onEmails = emailsRef.on('value', (snap) => {
+      setMechanicEmails(snap.val() || {});
+    });
+    return () => emailsRef.off('value', onEmails);
   }, []);
 
   useEffect(() => {
@@ -1648,6 +1877,34 @@ function App() {
     await savePins(next);
   };
 
+  const requestLoginLink = async () => {
+    if (!lostAccessName.trim() || !lostAccessEmail.trim()) return;
+    setLostAccessSubmitting(true);
+    try {
+      await fetch(CLOUD_FUNCTION_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: APP_SECRET,
+          mode: 'requestLoginLink',
+          name: lostAccessName.trim(),
+          email: lostAccessEmail.trim(),
+        }),
+      });
+    } catch (e) {
+      // still show the same confirmation regardless — see backend comment
+    } finally {
+      setLostAccessSubmitting(false);
+      setLostAccessSubmitted(true);
+    }
+  };
+
+  const checkAndPromptEmail = (name) => {
+    if (!mechanicEmails[slugForMechanic(name)]) {
+      setShowEmailPrompt(true);
+    }
+  };
+
   const handleMechanicTap = async (name) => {
     setPinError('');
     const hasCred = !!localStorage.getItem('webauthn_cred_' + name);
@@ -1667,8 +1924,10 @@ function App() {
         });
       }
       if (ok && sessionUser && sessionUser.email === emailForMechanic(name)) {
+        localStorage.setItem('deviceMechanic', name);
         setCurrentMechanic(name);
         setScreen('dashboard');
+        checkAndPromptEmail(name);
         return;
       }
       // if biometric fails, is cancelled, or the session isn't valid, fall through to PIN entry
@@ -1687,12 +1946,14 @@ function App() {
       try {
         await firebase.auth().signInWithEmailAndPassword(emailForMechanic(pinModal.mechanic), pinInput);
         const mechanic = pinModal.mechanic;
+        localStorage.setItem('deviceMechanic', mechanic);
         setPinModal(null);
         setPinInput('');
         setPinError('');
         setCurrentMechanic(mechanic);
         setScreen('dashboard');
         maybeOfferBiometric(mechanic);
+        checkAndPromptEmail(mechanic);
       } catch (e) {
         setPinError(t('wrongPin'));
         setPinInput('');
@@ -1744,9 +2005,11 @@ function App() {
           if (isNewMechanic) {
             await persistMeta([...mechanics, mechanic], units);
           }
+          localStorage.setItem('deviceMechanic', mechanic);
           setCurrentMechanic(mechanic);
           setScreen('dashboard');
           maybeOfferBiometric(mechanic);
+          checkAndPromptEmail(mechanic);
         } else {
           setPinError(t('pinMismatch'));
           setPinModal({ ...pinModal, stage: 'first', firstEntry: '' });
@@ -2279,9 +2542,10 @@ function App() {
     await saveTimesheetApprovals(next);
   };
 
-  const exportTimesheets = async (entries) => {
+  const exportTimesheets = async (entries, filenamePrefix) => {
+    const sorted = [...entries].sort((a, b) => (a.mechanic || '').localeCompare(b.mechanic || '') || a.date.localeCompare(b.date));
     const rows = [['Mechanic', 'Date', 'Clock In', 'Clock Out', 'Break Start', 'Break End', 'Worked Through Break', 'Paid Hours', 'Jobs (unit: hours)']];
-    entries.forEach((e) => {
+    sorted.forEach((e) => {
       const jobsStr = (e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`).join(' | ');
       rows.push([
         e.mechanic,
@@ -2296,7 +2560,7 @@ function App() {
       ]);
     });
     const csv = rows.map((r) => r.map((cell) => `"${String(cell || '').replace(/"/g, '""')}"`).join(',')).join('\n');
-    const filename = `timesheets-${todayStr()}.csv`;
+    const filename = `${filenamePrefix || 'timesheets'}-${todayStr()}.csv`;
     const file = new File([csv], filename, { type: 'text/csv' });
 
     if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -2475,6 +2739,14 @@ function App() {
           onForgot={forgotPin}
           t={t}
         />
+        <EmailPromptOverlay
+          show={showEmailPrompt}
+          onSave={async (email) => {
+            await saveMechanicEmail(currentMechanic, email);
+            setShowEmailPrompt(false);
+          }}
+          onSkip={() => setShowEmailPrompt(false)}
+        />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
           onEnable={async () => {
@@ -2490,6 +2762,25 @@ function App() {
         />
         <span className="text-sm uppercase tracking-widest" style={{ color: COLORS.inkDim }}>Loading board…</span>
       </div>
+    );
+  }
+
+  // ---------- LOGIN-RECOVERY LINK ----------
+  // Takes priority over the normal login screen whenever a valid or
+  // invalid token is present in the URL — someone arrived here from the
+  // emailed link, not through the usual sign-in flow.
+  if (loginTokenState) {
+    return (
+      <SetNewPinScreen
+        state={loginTokenState}
+        t={t}
+        onDone={(mechanic) => {
+          localStorage.setItem('deviceMechanic', mechanic);
+          setCurrentMechanic(mechanic);
+          setScreen('dashboard');
+          setLoginTokenState(null);
+        }}
+      />
     );
   }
 
@@ -2518,6 +2809,14 @@ function App() {
           onCancel={cancelPinModal}
           onForgot={forgotPin}
           t={t}
+        />
+        <EmailPromptOverlay
+          show={showEmailPrompt}
+          onSave={async (email) => {
+            await saveMechanicEmail(currentMechanic, email);
+            setShowEmailPrompt(false);
+          }}
+          onSkip={() => setShowEmailPrompt(false)}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -2559,27 +2858,56 @@ function App() {
             <p className="text-base" style={{ color: COLORS.inkDim }}>{t('pickYourName')}</p>
           </div>
 
-          {mechanics.length > 0 && (
-            <div className="mb-8">
-              <p className="font-display text-xs uppercase tracking-wider mb-3 block" style={{ color: COLORS.inkDim }}>{t('tapToSignIn')}</p>
-              <div className="grid grid-cols-2 gap-3">
-                {mechanics.map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => handleMechanicTap(m)}
-                    className="rounded-lg px-4 py-5 font-medium text-center focus:outline-none focus:ring-2 transition-all hover:scale-105 active:scale-95 relative"
-                    style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}`, color: COLORS.ink }}
-                  >
-                    {m}
-                    {!!localStorage.getItem('webauthn_cred_' + m) && (
-                      <span className="absolute top-1.5 right-2 text-xs" title="Face ID / Touch ID available">🔓</span>
-                    )}
-                  </button>
-                ))}
+          {mechanics.length > 0 && (() => {
+            const rememberedName = localStorage.getItem('deviceMechanic');
+            const rememberedStillExists = rememberedName && mechanics.includes(rememberedName);
+            const revealAll = showAllMechanics || !rememberedStillExists;
+            return (
+              <div className="mb-8">
+                <p className="font-display text-xs uppercase tracking-wider mb-3 block" style={{ color: COLORS.inkDim }}>
+                  {revealAll ? t('tapToSignIn') : t('welcomeBack')}
+                </p>
+                {revealAll ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    {mechanics.map((m) => (
+                      <button
+                        key={m}
+                        onClick={() => handleMechanicTap(m)}
+                        className="rounded-lg px-4 py-5 font-medium text-center focus:outline-none focus:ring-2 transition-all hover:scale-105 active:scale-95 relative"
+                        style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}`, color: COLORS.ink }}
+                      >
+                        {m}
+                        {!!localStorage.getItem('webauthn_cred_' + m) && (
+                          <span className="absolute top-1.5 right-2 text-xs" title="Face ID / Touch ID available">🔓</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div>
+                    <button
+                      onClick={() => handleMechanicTap(rememberedName)}
+                      className="w-full rounded-lg px-4 py-6 font-display font-bold text-xl text-center focus:outline-none focus:ring-2 transition-all hover:scale-105 active:scale-95 relative"
+                      style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}`, color: COLORS.ink }}
+                    >
+                      {rememberedName}
+                      {!!localStorage.getItem('webauthn_cred_' + rememberedName) && (
+                        <span className="absolute top-2 right-3 text-sm" title="Face ID / Touch ID available">🔓</span>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setShowAllMechanics(true)}
+                      className="w-full text-center text-xs underline mt-3"
+                      style={{ color: COLORS.inkDim }}
+                    >
+                      {t('notYouSwitchUser')}
+                    </button>
+                  </div>
+                )}
+                <div className="h-px my-6" style={{ background: COLORS.line }} />
               </div>
-              <div className="h-px my-6" style={{ background: COLORS.line }} />
-            </div>
-          )}
+            );
+          })()}
 
           <div className="rounded-lg p-5 shop-card" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>
             <p className="font-display text-sm uppercase tracking-wide mb-3 block" style={{ color: COLORS.accent }}>{t('firstTimeHere')}</p>
@@ -2596,6 +2924,45 @@ function App() {
               />
               <Btn onClick={addMechanic}>{t('signIn')}</Btn>
             </div>
+          </div>
+
+          <div className="text-center mt-4">
+            {!showLostAccess ? (
+              <button
+                onClick={() => setShowLostAccess(true)}
+                className="text-xs underline"
+                style={{ color: COLORS.inkDim }}
+              >
+                {t('lostAccess')} {t('getLoginLink')}
+              </button>
+            ) : lostAccessSubmitted ? (
+              <p className="text-sm rounded-lg p-4" style={{ background: COLORS.surface, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}>
+                {t('lostAccessSubmitted')}
+              </p>
+            ) : (
+              <div className="rounded-lg p-5 text-left" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+                <p className="font-display text-sm uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>{t('getLoginLink')}</p>
+                <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>{t('lostAccessHelper')}</p>
+                <input
+                  value={lostAccessName}
+                  onChange={(e) => setLostAccessName(e.target.value)}
+                  placeholder={t('yourName')}
+                  className="w-full rounded-lg px-4 py-2 text-base mb-2 focus:outline-none focus:ring-2"
+                  style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                />
+                <input
+                  type="email"
+                  value={lostAccessEmail}
+                  onChange={(e) => setLostAccessEmail(e.target.value)}
+                  placeholder={t('lostAccessEmailPlaceholder')}
+                  className="w-full rounded-lg px-4 py-2 text-base mb-3 focus:outline-none focus:ring-2"
+                  style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                />
+                <Btn onClick={requestLoginLink} disabled={lostAccessSubmitting || !lostAccessName.trim() || !lostAccessEmail.trim()}>
+                  {lostAccessSubmitting ? '…' : t('sendLink')}
+                </Btn>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -2669,6 +3036,14 @@ function App() {
           onCancel={cancelPinModal}
           onForgot={forgotPin}
           t={t}
+        />
+        <EmailPromptOverlay
+          show={showEmailPrompt}
+          onSave={async (email) => {
+            await saveMechanicEmail(currentMechanic, email);
+            setShowEmailPrompt(false);
+          }}
+          onSkip={() => setShowEmailPrompt(false)}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -2931,6 +3306,14 @@ function App() {
           onCancel={cancelPinModal}
           onForgot={forgotPin}
           t={t}
+        />
+        <EmailPromptOverlay
+          show={showEmailPrompt}
+          onSave={async (email) => {
+            await saveMechanicEmail(currentMechanic, email);
+            setShowEmailPrompt(false);
+          }}
+          onSkip={() => setShowEmailPrompt(false)}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
@@ -3316,9 +3699,14 @@ function App() {
             {weekApproved ? (
               <Btn variant="ghost" onClick={() => unapproveWeek(viewedWeekStart)}>Un-approve this week</Btn>
             ) : (
-              <Btn onClick={() => approveWeek(viewedWeekStart)} disabled={Object.keys(weekTotalsByMechanic).length === 0}>
-                Approve this week
-              </Btn>
+              <div className="flex gap-2 flex-wrap">
+                <Btn onClick={() => approveWeek(viewedWeekStart)} disabled={Object.keys(weekTotalsByMechanic).length === 0}>
+                  Approve this week
+                </Btn>
+                <Btn variant="ghost" onClick={() => exportTimesheets(weekEntries, 'week-review')} disabled={weekEntries.length === 0}>
+                  📊 Open as spreadsheet
+                </Btn>
+              </div>
             )}
             <p className="text-xs mt-3" style={{ color: COLORS.line }}>
               Approving a week locks it — mechanics can no longer edit shifts within it themselves.
@@ -3723,6 +4111,14 @@ function App() {
           onForgot={forgotPin}
           t={t}
         />
+        <EmailPromptOverlay
+          show={showEmailPrompt}
+          onSave={async (email) => {
+            await saveMechanicEmail(currentMechanic, email);
+            setShowEmailPrompt(false);
+          }}
+          onSkip={() => setShowEmailPrompt(false)}
+        />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
           onEnable={async () => {
@@ -3855,6 +4251,14 @@ function App() {
           onForgot={forgotPin}
           t={t}
         />
+        <EmailPromptOverlay
+          show={showEmailPrompt}
+          onSave={async (email) => {
+            await saveMechanicEmail(currentMechanic, email);
+            setShowEmailPrompt(false);
+          }}
+          onSkip={() => setShowEmailPrompt(false)}
+        />
         <BiometricOfferOverlay
           mechanic={offerBiometric}
           onEnable={async () => {
@@ -3952,6 +4356,14 @@ function App() {
           onCancel={cancelPinModal}
           onForgot={forgotPin}
           t={t}
+        />
+        <EmailPromptOverlay
+          show={showEmailPrompt}
+          onSave={async (email) => {
+            await saveMechanicEmail(currentMechanic, email);
+            setShowEmailPrompt(false);
+          }}
+          onSkip={() => setShowEmailPrompt(false)}
         />
         <BiometricOfferOverlay
           mechanic={offerBiometric}

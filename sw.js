@@ -1,6 +1,6 @@
 // Bump this version string every time index.html changes, so phones
 // reliably pick up the new version instead of getting stuck on an old one.
-const CACHE_NAME = 'harder-work-orders-v58';
+const CACHE_NAME = 'harder-work-orders-v62';
 
 const APP_SHELL = [
   './',
@@ -25,14 +25,23 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME).then(async (cache) => {
       // Same-origin files: normal caching.
       await cache.addAll(APP_SHELL).catch(() => {});
-      // Cross-origin CDN files: cache individually with no-cors so one
-      // failure (e.g. a font file) doesn't block the whole install.
+      // Cross-origin CDN files are essential — if even one fails to cache
+      // (e.g. a signal drop mid-install), the whole app can break later
+      // when truly offline, since there's nowhere else to load it from.
+      // Retry each one a few times before giving up.
       await Promise.all(
-        CDN_ASSETS.map((url) =>
-          fetch(url, { mode: 'no-cors' })
-            .then((res) => cache.put(url, res))
-            .catch(() => {})
-        )
+        CDN_ASSETS.map(async (url) => {
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              const res = await fetch(url, { mode: 'no-cors' });
+              await cache.put(url, res);
+              return;
+            } catch (e) {
+              // wait a moment and try again
+              await new Promise((r) => setTimeout(r, 800));
+            }
+          }
+        })
       );
     })
   );
@@ -50,7 +59,10 @@ self.addEventListener('activate', (event) => {
 
 // Network-first: always try to get the latest version when online (so
 // updates show up right away), but fall back to the cached copy — of the
-// app itself, or any CDN library — when there's no signal at all.
+// app itself, or any CDN library — when there's no signal at all. Only
+// navigation requests (loading the page itself) fall back to index.html;
+// falling back to it for a failed script/CSS request would serve HTML
+// content where JS was expected, breaking the app with a syntax error.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   event.respondWith(
@@ -60,6 +72,12 @@ self.addEventListener('fetch', (event) => {
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, resClone)).catch(() => {});
         return res;
       })
-      .catch(() => caches.match(event.request).then((cached) => cached || caches.match('./index.html')))
+      .catch(() =>
+        caches.match(event.request).then((cached) => {
+          if (cached) return cached;
+          if (event.request.mode === 'navigate') return caches.match('./index.html');
+          return new Response('', { status: 504, statusText: 'Offline and not cached' });
+        })
+      )
   );
 });
