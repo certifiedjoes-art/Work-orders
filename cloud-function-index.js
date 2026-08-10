@@ -9,13 +9,52 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const TRIGGER_SECRET = process.env.TRIGGER_SECRET;
 const APP_SECRET = process.env.APP_SECRET; // separate secret, used only by the app's live translation calls
 const TRANSLATE_API_KEY = process.env.TRANSLATE_API_KEY;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY; // separate key, used only for reading receipt/invoice photos
 const FROM_EMAIL = 'reports@hardercontracting.ca';
 
-async function translateToEnglish(text) {
+// Sends a photo of a vendor receipt/invoice to Claude and asks for the
+// handful of fields worth pulling into a work order draft. Returns null
+// fields for anything that wasn't legible rather than guessing.
+async function extractReceiptInfo(base64Image, mediaType) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 500,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Image } },
+            {
+              type: 'text',
+              text: 'This is a photo of a vendor receipt, invoice, or work order for equipment repair/maintenance. Extract what you can read. Respond with ONLY valid JSON, no markdown formatting, no explanation, exactly this shape: {"vendor": string or null, "date": "YYYY-MM-DD" or null, "description": string describing the work/parts done, "amount": string like "$123.45" or null, "unit": string if a unit/equipment number is visible or null}. If the photo is unclear or something is not legible, use null for that field rather than guessing.',
+            },
+          ],
+        },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Claude API error: ${res.status} ${body}`);
+  }
+  const data = await res.json();
+  const text = (data.content || []).map((c) => c.text || '').join('');
+  const cleaned = text.replace(/```json|```/g, '').trim();
+  return JSON.parse(cleaned);
+}
+
+async function translateText(text, targetLang) {
   const res = await fetch(`https://translation.googleapis.com/language/translate/v2?key=${TRANSLATE_API_KEY}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ q: text, target: 'en', format: 'text' }),
+    body: JSON.stringify({ q: text, target: targetLang, format: 'text' }),
   });
   if (!res.ok) {
     const body = await res.text();
@@ -122,12 +161,30 @@ exports.weeklyBackupAndEmail = async (req, res) => {
       res.status(403).json({ error: 'Forbidden' });
       return;
     }
+
+    // Receipt-scanning requests come with an image instead of text.
+    if (body.mode === 'scanReceipt') {
+      if (!body.image || !body.mediaType) {
+        res.status(400).json({ error: 'No image provided' });
+        return;
+      }
+      try {
+        const extracted = await extractReceiptInfo(body.image, body.mediaType);
+        res.status(200).json({ extracted });
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+      }
+      return;
+    }
+
     if (!body.text || !body.text.trim()) {
       res.status(400).json({ error: 'No text provided' });
       return;
     }
     try {
-      const translated = await translateToEnglish(body.text);
+      const targetLang = body.targetLang || 'en';
+      const translated = await translateText(body.text, targetLang);
       res.status(200).json({ translated });
     } catch (err) {
       console.error(err);
