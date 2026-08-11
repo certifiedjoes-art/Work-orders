@@ -2545,7 +2545,12 @@ function App() {
   const exportTimesheets = async (entries, filenamePrefix) => {
     const sorted = [...entries].sort((a, b) => (a.mechanic || '').localeCompare(b.mechanic || '') || a.date.localeCompare(b.date));
     const rows = [['Mechanic', 'Date', 'Clock In', 'Clock Out', 'Break Start', 'Break End', 'Worked Through Break', 'Paid Hours', 'Jobs (unit: hours)']];
+    let lastMechanic = null;
     sorted.forEach((e) => {
+      if (lastMechanic !== null && e.mechanic !== lastMechanic) {
+        rows.push([]); // blank row between each person's shifts, for readability
+      }
+      lastMechanic = e.mechanic;
       const jobsStr = (e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`).join(' | ');
       rows.push([
         e.mechanic,
