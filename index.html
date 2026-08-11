@@ -2547,8 +2547,9 @@ function App() {
     const rows = [['Mechanic', 'Date', 'Clock In', 'Clock Out', 'Break Start', 'Break End', 'Worked Through Break', 'Paid Hours', 'Jobs (unit: hours)']];
     let lastMechanic = null;
     sorted.forEach((e) => {
-      if (lastMechanic !== null && e.mechanic !== lastMechanic) {
-        rows.push([]); // blank row between each person's shifts, for readability
+      if (e.mechanic !== lastMechanic) {
+        if (lastMechanic !== null) rows.push([]); // a blank row alone can collapse to nothing in some previews
+        rows.push([`── ${e.mechanic} ──`]); // so a clearly labeled divider does the actual separating
       }
       lastMechanic = e.mechanic;
       const jobsStr = (e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`).join(' | ');
