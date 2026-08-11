@@ -4806,10 +4806,26 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
     const pad = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
+  // Break times are time-only inputs (no date picker) — a break is always
+  // on the same calendar day as the shift itself, so there's no reason to
+  // let someone accidentally pick the wrong date here. This is exactly
+  // what caused a real mis-entry: a break end landed two days later than
+  // intended, which zeroed out an entire day's hours.
+  const toLocalTime = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const combineLunchDateTime = (clockInLocal, time) => {
+    if (!time || !clockInLocal) return null;
+    const datePart = clockInLocal.slice(0, 10);
+    return new Date(`${datePart}T${time}`).toISOString();
+  };
   const [clockIn, setClockIn] = useState(toLocalInput(entry.clockIn));
   const [clockOut, setClockOut] = useState(toLocalInput(entry.clockOut));
-  const [lunchStart, setLunchStart] = useState(toLocalInput(entry.lunchStart));
-  const [lunchEnd, setLunchEnd] = useState(toLocalInput(entry.lunchEnd));
+  const [lunchStartTime, setLunchStartTime] = useState(toLocalTime(entry.lunchStart));
+  const [lunchEndTime, setLunchEndTime] = useState(toLocalTime(entry.lunchEnd));
 
   if (isEditing) {
     return (
@@ -4826,11 +4842,11 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
           </label>
           <label className="block">
             <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Break start</span>
-            <input type="datetime-local" value={lunchStart} onChange={(e) => setLunchStart(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            <input type="time" value={lunchStartTime} onChange={(e) => setLunchStartTime(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
           </label>
           <label className="block">
             <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Break end</span>
-            <input type="datetime-local" value={lunchEnd} onChange={(e) => setLunchEnd(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            <input type="time" value={lunchEndTime} onChange={(e) => setLunchEndTime(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
           </label>
         </div>
         <TimesheetJobsEditor entry={entry} onAdd={onAddJob} onRemove={onRemoveJob} />
@@ -4849,8 +4865,8 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
                 onSave({
                   clockIn: clockIn ? new Date(clockIn).toISOString() : null,
                   clockOut: clockOut ? new Date(clockOut).toISOString() : null,
-                  lunchStart: lunchStart ? new Date(lunchStart).toISOString() : null,
-                  lunchEnd: lunchEnd ? new Date(lunchEnd).toISOString() : null,
+                  lunchStart: combineLunchDateTime(clockIn, lunchStartTime),
+                  lunchEnd: combineLunchDateTime(clockIn, lunchEndTime),
                 })
               }
             >
@@ -4878,13 +4894,17 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
           <button onClick={onEdit} className="text-xs underline" style={{ color: COLORS.accent }}>Edit</button>
         )}
       </div>
-      <div className="flex flex-wrap gap-4 text-xs font-mono mb-2" style={{ color: COLORS.inkDim }}>
+      <div className="flex flex-wrap gap-4 text-xs font-mono mb-1" style={{ color: COLORS.inkDim }}>
         <span>In {fmtTime(entry.clockIn)}</span>
         <span>Out {entry.clockOut ? fmtTime(entry.clockOut) : '—'}</span>
         {entry.lunchStart && entry.lunchEnd && <span>Break {fmtTime(entry.lunchStart)}–{fmtTime(entry.lunchEnd)}</span>}
         {entry.skippedLunch && <span>No break taken</span>}
-        {entry.clockOut && <span className="font-bold" style={{ color: COLORS.accent }}>{fmtHours(entryHours(entry))}</span>}
       </div>
+      {entry.clockOut && (
+        <p className="text-xs font-mono mb-2" style={{ color: COLORS.accent }}>
+          Total for the day: <span className="font-bold">{fmtHours(entryHours(entry))}</span>
+        </p>
+      )}
       {(entry.jobs || []).length > 0 && (
         <p className="text-xs" style={{ color: COLORS.line }}>
           {entry.jobs.map((j) => `${j.unit} (${j.hours}h)`).join(' • ')}
