@@ -161,7 +161,7 @@
 </script>
 
 <script type="text/babel" data-presets="react">
-const { useState, useEffect, useContext, createContext } = React;
+const { useState, useEffect, useContext, createContext, useRef } = React;
 
 // --- Language / translation system -----------------------------------
 // Each mechanic can pick English or Spanish for their own device — it's
@@ -1003,6 +1003,136 @@ function MilestonePromptOverlay({ prompt, onSubmit, onSkip }) {
   );
 }
 
+function SignaturePad({ onChange, savedSignature }) {
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+
+  useEffect(() => {
+    if (savedSignature && canvasRef.current) {
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      img.onload = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      };
+      img.src = savedSignature;
+      onChange(savedSignature);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const getPos = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches ? e.touches[0] : e;
+    return { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+  };
+
+  const start = (e) => {
+    e.preventDefault();
+    drawing.current = true;
+    const ctx = canvasRef.current.getContext('2d');
+    const { x, y } = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+  const move = (e) => {
+    if (!drawing.current) return;
+    e.preventDefault();
+    const ctx = canvasRef.current.getContext('2d');
+    const { x, y } = getPos(e);
+    ctx.lineTo(x, y);
+    ctx.strokeStyle = '#1B1F19';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    onChange(canvasRef.current.toDataURL('image/png'));
+  };
+  const end = () => { drawing.current = false; };
+  const clear = () => {
+    const canvas = canvasRef.current;
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+    onChange(null);
+  };
+
+  return (
+    <div>
+      {savedSignature && (
+        <p className="text-xs mb-2" style={{ color: COLORS.accent }}>Using your saved signature — clear it below if you'd like to redraw.</p>
+      )}
+      <canvas
+        ref={canvasRef}
+        width={320}
+        height={140}
+        onMouseDown={start}
+        onMouseMove={move}
+        onMouseUp={end}
+        onMouseLeave={end}
+        onTouchStart={start}
+        onTouchMove={move}
+        onTouchEnd={end}
+        className="w-full rounded-lg"
+        style={{ background: '#fff', border: `2px solid ${COLORS.line}`, touchAction: 'none', display: 'block' }}
+      />
+      <button type="button" onClick={clear} className="text-xs underline mt-2" style={{ color: COLORS.inkDim }}>Clear signature</button>
+    </div>
+  );
+}
+
+function ClockOutReviewOverlay({ show, openEntry, skippedLunch, mechanic, onConfirm, onCancel }) {
+  const savedSignature = mechanic ? localStorage.getItem('savedSignature_' + mechanic) : null;
+  const [signature, setSignature] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => { if (show) { setSubmitting(false); } }, [show]);
+  if (!show || !openEntry) return null;
+  const previewHours = (() => {
+    let ms = new Date() - new Date(openEntry.clockIn);
+    if (openEntry.lunchStart && openEntry.lunchEnd) ms -= new Date(openEntry.lunchEnd) - new Date(openEntry.lunchStart);
+    return Math.max(0, ms / 1000 / 60 / 60);
+  })();
+  return (
+    <div className="absolute inset-0 z-50 p-6" style={{ background: 'rgba(0,0,0,0.85)', minHeight: '100vh' }}>
+      <div className="w-full max-w-sm mx-auto my-8 rounded-2xl p-6 overflow-y-auto" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}`, maxHeight: '90vh' }}>
+        <p className="font-display text-lg font-bold text-center mb-1">Review & sign off</p>
+        <p className="text-sm text-center mb-5" style={{ color: COLORS.inkDim }}>{mechanic}</p>
+        <div className="rounded-lg p-4 mb-5 space-y-2" style={{ background: COLORS.surfaceRaised }}>
+          <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Clock in</span><span>{fmtTime(openEntry.clockIn)}</span></div>
+          <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Clock out</span><span>{fmtTime(new Date().toISOString())}</span></div>
+          {openEntry.lunchStart && openEntry.lunchEnd && (
+            <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Break</span><span>{fmtTime(openEntry.lunchStart)}–{fmtTime(openEntry.lunchEnd)}</span></div>
+          )}
+          {skippedLunch && (
+            <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Break</span><span>None taken</span></div>
+          )}
+          {(openEntry.jobs || []).length > 0 && (
+            <div className="text-sm"><span style={{ color: COLORS.inkDim }}>Jobs: </span>{openEntry.jobs.map((j) => `${j.unit} (${j.hours}h)`).join(', ')}</div>
+          )}
+          <div className="flex justify-between pt-2" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+            <span className="font-semibold">Total</span>
+            <span className="font-bold" style={{ color: COLORS.accent }}>{fmtHours(previewHours)}</span>
+          </div>
+        </div>
+        <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Sign below to confirm this is accurate:</p>
+        <SignaturePad onChange={setSignature} savedSignature={savedSignature} />
+        <div className="flex flex-col gap-2 mt-5">
+          <Btn
+            onClick={async () => {
+              setSubmitting(true);
+              if (mechanic && signature) localStorage.setItem('savedSignature_' + mechanic, signature);
+              await onConfirm(signature);
+            }}
+            disabled={!signature || submitting}
+          >
+            {submitting ? '…' : 'Confirm & clock out'}
+          </Btn>
+          <Btn variant="ghost" onClick={onCancel} disabled={submitting}>Go back</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ClockInPromptOverlay({ show, mechanic, onClockIn, onSkip, t }) {
   const tr = t || ((k) => translations.en[k] || k);
   if (!show) return null;
@@ -1647,6 +1777,7 @@ function App() {
   }, []);
   const [timesheetApprovals, setTimesheetApprovals] = useState({});
   const [tsWeekOffset, setTsWeekOffset] = useState(0);
+  const [showWeekTable, setShowWeekTable] = useState(false);
   const [mySummaryStart, setMySummaryStart] = useState('');
   const [mySummaryEnd, setMySummaryEnd] = useState('');
 
@@ -2463,13 +2594,24 @@ function App() {
     await persistTimesheets(next);
   };
 
-  const clockOut = async (skippedLunch) => {
+  const [pendingClockOutSkippedLunch, setPendingClockOutSkippedLunch] = useState(null);
+
+  const clockOut = async (skippedLunch, signatureDataUrl) => {
     if (!openEntry) return;
     const next = timesheets.map((t) =>
-      t.id === openEntry.id ? { ...t, clockOut: new Date().toISOString(), skippedLunch: !!skippedLunch } : t
+      t.id === openEntry.id
+        ? {
+            ...t,
+            clockOut: new Date().toISOString(),
+            skippedLunch: !!skippedLunch,
+            signature: signatureDataUrl || null,
+            signedAt: signatureDataUrl ? new Date().toISOString() : null,
+          }
+        : t
     );
     await persistTimesheets(next);
     setLunchPrompt(false);
+    setPendingClockOutSkippedLunch(null);
   };
 
   const attemptClockOut = () => {
@@ -2479,7 +2621,7 @@ function App() {
       setLunchPrompt(true);
       return;
     }
-    clockOut(openEntry.skippedLunch);
+    setPendingClockOutSkippedLunch(openEntry.skippedLunch || false);
   };
 
   const addTimesheetJob = async (entryId, unit, hours) => {
@@ -2544,7 +2686,7 @@ function App() {
 
   const exportTimesheets = async (entries, filenamePrefix) => {
     const sorted = [...entries].sort((a, b) => (a.mechanic || '').localeCompare(b.mechanic || '') || a.date.localeCompare(b.date));
-    const rows = [['Mechanic', 'Date', 'Clock In', 'Clock Out', 'Break Start', 'Break End', 'Worked Through Break', 'Paid Hours', 'Jobs (unit: hours)']];
+    const rows = [['Mechanic', 'Date', 'Clock In', 'Clock Out', 'Break Start', 'Break End', 'Worked Through Break', 'Paid Hours', 'Signed', 'Jobs (unit: hours)']];
     let lastMechanic = null;
     sorted.forEach((e) => {
       if (e.mechanic !== lastMechanic) {
@@ -2562,6 +2704,7 @@ function App() {
         fmtTime(e.lunchEnd),
         e.skippedLunch ? 'Yes' : 'No',
         fmtHoursDecimal(entryHours(e)),
+        e.signature ? 'Yes' : 'No',
         jobsStr,
       ]);
     });
@@ -3472,11 +3615,20 @@ function App() {
                 </p>
                 <div className="flex flex-col gap-2">
                   <Btn variant="ghost" onClick={() => setLunchPrompt(false)}>{t('goBack')}</Btn>
-                  <Btn variant="danger" onClick={() => clockOut(true)}>{t('workedStraightThrough')}</Btn>
+                  <Btn variant="danger" onClick={() => { setLunchPrompt(false); setPendingClockOutSkippedLunch(true); }}>{t('workedStraightThrough')}</Btn>
                 </div>
               </div>
             </div>
           )}
+
+          <ClockOutReviewOverlay
+            show={pendingClockOutSkippedLunch !== null}
+            openEntry={openEntry}
+            skippedLunch={pendingClockOutSkippedLunch}
+            mechanic={currentMechanic}
+            onConfirm={(signature) => clockOut(pendingClockOutSkippedLunch, signature)}
+            onCancel={() => setPendingClockOutSkippedLunch(null)}
+          />
 
           {/* Jobs worked on today */}
           {openEntry && (
@@ -3709,11 +3861,15 @@ function App() {
                 <Btn onClick={() => approveWeek(viewedWeekStart)} disabled={Object.keys(weekTotalsByMechanic).length === 0}>
                   Approve this week
                 </Btn>
+                <Btn variant="ghost" onClick={() => setShowWeekTable((s) => !s)} disabled={weekEntries.length === 0}>
+                  {showWeekTable ? '✕ Hide table' : '👁️ View here'}
+                </Btn>
                 <Btn variant="ghost" onClick={() => exportTimesheets(weekEntries, 'week-review')} disabled={weekEntries.length === 0}>
                   📊 Open as spreadsheet
                 </Btn>
               </div>
             )}
+            {showWeekTable && <WeekReviewTable entries={weekEntries} />}
             <p className="text-xs mt-3" style={{ color: COLORS.line }}>
               Approving a week locks it — mechanics can no longer edit shifts within it themselves.
             </p>
@@ -4755,6 +4911,64 @@ function NewTemplateForm({ onSubmit, onCancel, initialName, initialItemsText, is
   );
 }
 
+function WeekReviewTable({ entries }) {
+  const sorted = [...entries].sort((a, b) => (a.mechanic || '').localeCompare(b.mechanic || '') || a.date.localeCompare(b.date));
+  const groups = [];
+  sorted.forEach((e) => {
+    const last = groups[groups.length - 1];
+    if (last && last.mechanic === e.mechanic) {
+      last.entries.push(e);
+    } else {
+      groups.push({ mechanic: e.mechanic, entries: [e] });
+    }
+  });
+
+  const th = { padding: '8px 12px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: `2px solid ${COLORS.line}` };
+  const td = { padding: '8px 12px', whiteSpace: 'nowrap', borderBottom: `1px solid ${COLORS.line}` };
+
+  return (
+    <div className="mt-4 rounded-lg overflow-x-auto" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+      <table className="text-xs font-mono w-full" style={{ borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ color: COLORS.inkDim }}>
+            <th style={th}>Date</th>
+            <th style={th}>In</th>
+            <th style={th}>Out</th>
+            <th style={th}>Break</th>
+            <th style={th}>Worked thru break</th>
+            <th style={th}>Paid hrs</th>
+            <th style={th}>Signed</th>
+            <th style={th}>Jobs</th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map((g) => (
+            <React.Fragment key={g.mechanic}>
+              <tr>
+                <td colSpan={8} style={{ padding: '8px 12px', fontWeight: 700, color: COLORS.accent, background: COLORS.surface, borderBottom: `1px solid ${COLORS.line}` }}>
+                  {g.mechanic}
+                </td>
+              </tr>
+              {g.entries.map((e) => (
+                <tr key={e.id} style={{ color: COLORS.ink }}>
+                  <td style={td}>{fmtDate(e.date)}</td>
+                  <td style={td}>{fmtTime(e.clockIn)}</td>
+                  <td style={td}>{e.clockOut ? fmtTime(e.clockOut) : '—'}</td>
+                  <td style={td}>{e.lunchStart && e.lunchEnd ? `${fmtTime(e.lunchStart)}–${fmtTime(e.lunchEnd)}` : '—'}</td>
+                  <td style={td}>{e.skippedLunch ? 'Yes' : 'No'}</td>
+                  <td style={{ ...td, color: COLORS.accent, fontWeight: 700 }}>{fmtHoursDecimal(entryHours(e))}</td>
+                  <td style={{ ...td, color: e.signature ? COLORS.done : COLORS.line }}>{e.signature ? '✓' : '—'}</td>
+                  <td style={td}>{(e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`).join(' | ') || '—'}</td>
+                </tr>
+              ))}
+            </React.Fragment>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function TimesheetJobsEditor({ entry, onAdd, onRemove }) {
   const [unit, setUnit] = useState('');
   const [hours, setHours] = useState('');
@@ -4806,6 +5020,7 @@ function TimesheetJobsEditor({ entry, onAdd, onRemove }) {
 
 function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCancelEdit, onSave, onDelete, onAddJob, onRemoveJob }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showSignature, setShowSignature] = useState(false);
   const toLocalInput = (iso) => {
     if (!iso) return '';
     const d = new Date(iso);
@@ -4915,6 +5130,22 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
         <p className="text-xs" style={{ color: COLORS.line }}>
           {entry.jobs.map((j) => `${j.unit} (${j.hours}h)`).join(' • ')}
         </p>
+      )}
+      {entry.signature && (
+        <div className="mt-2">
+          <button
+            onClick={() => setShowSignature((s) => !s)}
+            className="text-xs underline"
+            style={{ color: COLORS.done }}
+          >
+            ✓ Signed {showSignature ? '(hide)' : '(view)'}
+          </button>
+          {showSignature && (
+            <div className="mt-2 rounded-lg p-2 inline-block" style={{ background: '#fff' }}>
+              <img src={entry.signature} alt="Signature" style={{ height: 60, display: 'block' }} />
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
