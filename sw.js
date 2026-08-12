@@ -1,6 +1,6 @@
 // Bump this version string every time index.html changes, so phones
 // reliably pick up the new version instead of getting stuck on an old one.
-const CACHE_NAME = 'harder-work-orders-v76';
+const CACHE_NAME = 'harder-work-orders-v77';
 
 // Handles push notifications arriving while the app isn't open — separate
 // from the caching logic below, using Firebase Cloud Messaging's own

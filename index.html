@@ -103,15 +103,27 @@
 <!-- On-screen error reporting: if anything fails, show it instead of a blank screen -->
 <script>
   window.addEventListener('error', function (e) {
+    const root = document.getElementById('root');
+    // If the app already rendered real content, a later, unrelated error
+    // (e.g. a delayed background script trying to reload) shouldn't wipe
+    // out a screen that's genuinely working — only act on this if the app
+    // never actually got on its feet in the first place.
+    if (root.children.length > 0) return;
     showFatalError((e.message || 'Script failed to load') + (e.filename ? '\n\nFile: ' + e.filename + (e.lineno ? ':' + e.lineno : '') : ''));
   }, true); // capture:true so we also catch <script src> load failures, not just JS errors
   window.addEventListener('unhandledrejection', function (e) {
+    const root = document.getElementById('root');
+    if (root.children.length > 0) return;
     showFatalError('Unhandled error: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
   });
   function showFatalError(msg) {
     const root = document.getElementById('root');
     if (root.dataset.errorShown) return;
     root.dataset.errorShown = '1';
+    const status = window.__loadStatus || {};
+    const lines = ['tailwind', 'react', 'react-dom', 'babel', 'firebase-app', 'firebase-db', 'firebase-auth', 'firebase-messaging'].map(function (k) {
+      return k + ': ' + (status[k] || 'never finished loading');
+    });
     root.innerHTML =
       '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem;font-family:sans-serif;color:#ECE8DF;background:#1B1E20;text-align:center;">' +
       '<div style="max-width:520px;"><h1 style="color:#E8622C;font-size:1.4rem;">Something went wrong loading the app</h1>' +
@@ -119,7 +131,7 @@
       '<button onclick="window.location.reload()" style="margin-top:1rem;padding:0.75rem 1.5rem;font-size:1rem;font-weight:bold;background:#7FA37E;color:#1B1F19;border:none;border-radius:8px;cursor:pointer;">Try again</button>' +
       '<p style="margin-top:1.5rem;">If it keeps happening, screenshot this and send it back:</p>' +
       '<pre style="text-align:left;background:#242829;padding:1rem;border-radius:8px;overflow:auto;font-size:0.75rem;white-space:pre-wrap;">' +
-      String(msg).replace(/</g, '&lt;') + '</pre></div></div>';
+      String(msg).replace(/</g, '&lt;') + '\n\n' + lines.join('\n') + '</pre></div></div>';
   }
 
   // Fallback diagnostic: if nothing has rendered into #root after 6 seconds,
