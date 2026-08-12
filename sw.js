@@ -1,6 +1,30 @@
 // Bump this version string every time index.html changes, so phones
 // reliably pick up the new version instead of getting stuck on an old one.
-const CACHE_NAME = 'harder-work-orders-v70';
+const CACHE_NAME = 'harder-work-orders-v72';
+
+// Handles push notifications arriving while the app isn't open — separate
+// from the caching logic below, using Firebase Cloud Messaging's own
+// background-message handler.
+importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
+firebase.initializeApp({
+  apiKey: "AIzaSyAcKWZYgawRHLBIqbUWPPYHmP812_4gODI",
+  authDomain: "harder-contracting.firebaseapp.com",
+  databaseURL: "https://harder-contracting-default-rtdb.firebaseio.com",
+  projectId: "harder-contracting",
+  storageBucket: "harder-contracting.firebasestorage.app",
+  messagingSenderId: "337605513419",
+  appId: "1:337605513419:web:f599c3a5fa57f005ed4b4e"
+});
+const messaging = firebase.messaging();
+messaging.onBackgroundMessage((payload) => {
+  const title = (payload.notification && payload.notification.title) || 'Harder Contracting';
+  const options = {
+    body: (payload.notification && payload.notification.body) || '',
+    icon: './icon-192.png',
+  };
+  self.registration.showNotification(title, options);
+});
 
 const APP_SHELL = [
   './',
