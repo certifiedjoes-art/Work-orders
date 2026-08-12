@@ -1,30 +1,41 @@
 // Bump this version string every time index.html changes, so phones
 // reliably pick up the new version instead of getting stuck on an old one.
-const CACHE_NAME = 'harder-work-orders-v74';
+const CACHE_NAME = 'harder-work-orders-v75';
 
 // Handles push notifications arriving while the app isn't open — separate
 // from the caching logic below, using Firebase Cloud Messaging's own
-// background-message handler.
-importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
-firebase.initializeApp({
-  apiKey: "AIzaSyAcKWZYgawRHLBIqbUWPPYHmP812_4gODI",
-  authDomain: "harder-contracting.firebaseapp.com",
-  databaseURL: "https://harder-contracting-default-rtdb.firebaseio.com",
-  projectId: "harder-contracting",
-  storageBucket: "harder-contracting.firebasestorage.app",
-  messagingSenderId: "337605513419",
-  appId: "1:337605513419:web:f599c3a5fa57f005ed4b4e"
-});
-const messaging = firebase.messaging();
-messaging.onBackgroundMessage((payload) => {
-  const title = (payload.notification && payload.notification.title) || 'Harder Contracting';
-  const options = {
-    body: (payload.notification && payload.notification.body) || '',
-    icon: './icon-192.png',
-  };
+// background-message handler. Wrapped in try/catch: importScripts() makes
+// its own network request every time this file is evaluated, completely
+// outside the caching system below — if it fails (e.g. no signal at all),
+// an uncaught error here would stop this ENTIRE script cold before any of
+// the offline-fallback logic below ever runs. A failure here should only
+// mean "no background push handling this time", not "the whole app breaks".
+try {
+  importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
+  importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
+  firebase.initializeApp({
+    apiKey: "AIzaSyAcKWZYgawRHLBIqbUWPPYHmP812_4gODI",
+    authDomain: "harder-contracting.firebaseapp.com",
+    databaseURL: "https://harder-contracting-default-rtdb.firebaseio.com",
+    projectId: "harder-contracting",
+    storageBucket: "harder-contracting.firebasestorage.app",
+    messagingSenderId: "337605513419",
+    appId: "1:337605513419:web:f599c3a5fa57f005ed4b4e"
+  });
+  const messaging = firebase.messaging();
+  messaging.onBackgroundMessage((payload) => {
+    const title = (payload.notification && payload.notification.title) || 'Harder Contracting';
+    const options = {
+      body: (payload.notification && payload.notification.body) || '',
+      icon: './icon-192.png',
+    };
   self.registration.showNotification(title, options);
-});
+  });
+} catch (e) {
+  // No signal, or the import failed for some other reason — background push
+  // notifications won't work this time, but the rest of the app (caching,
+  // offline fallback, everything below) still works completely normally.
+}
 
 const APP_SHELL = [
   './',
