@@ -115,7 +115,7 @@
     if (root.dataset.errorShown) return;
     if (root.children.length > 0) return; // app rendered fine
     const status = window.__loadStatus || {};
-    const lines = ['tailwind', 'react', 'react-dom', 'babel', 'firebase-app', 'firebase-db', 'firebase-auth'].map(function (k) {
+    const lines = ['tailwind', 'react', 'react-dom', 'babel', 'firebase-app', 'firebase-db', 'firebase-auth', 'firebase-messaging'].map(function (k) {
       return k + ': ' + (status[k] || 'never finished loading');
     });
     showFatalError('The app never finished starting up. Here is what loaded:\n\n' + lines.join('\n'));
