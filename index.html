@@ -5,6 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
 <title>Harder Contracting — Work Order Board</title>
 
+<!-- Registers the service worker as the very first thing this page does,
+     before any other script tag below gets a chance to request anything.
+     On a cold app launch (fully closed, then reopened) with weak or no
+     signal, every script below is racing to load — registering this early
+     gives the service worker the best possible chance to be ready to
+     intercept and serve those requests from cache before they fail. -->
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+</script>
+
 <!-- PWA / Add to Home Screen -->
 <meta name="theme-color" content="#1B1F19" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -103,7 +115,9 @@
     root.innerHTML =
       '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem;font-family:sans-serif;color:#ECE8DF;background:#1B1E20;text-align:center;">' +
       '<div style="max-width:520px;"><h1 style="color:#E8622C;font-size:1.4rem;">Something went wrong loading the app</h1>' +
-      '<p style="margin-top:1rem;">Please screenshot this and send it back:</p>' +
+      '<p style="margin-top:1rem;">This can happen on a fresh launch with a weak signal. Try again first:</p>' +
+      '<button onclick="window.location.reload()" style="margin-top:1rem;padding:0.75rem 1.5rem;font-size:1rem;font-weight:bold;background:#7FA37E;color:#1B1F19;border:none;border-radius:8px;cursor:pointer;">Try again</button>' +
+      '<p style="margin-top:1.5rem;">If it keeps happening, screenshot this and send it back:</p>' +
       '<pre style="text-align:left;background:#242829;padding:1rem;border-radius:8px;overflow:auto;font-size:0.75rem;white-space:pre-wrap;">' +
       String(msg).replace(/</g, '&lt;') + '</pre></div></div>';
   }
@@ -146,18 +160,6 @@
       'and paste in your project\'s config values. See the setup guide for step-by-step instructions.</p></div></div>';
   } else {
     firebase.initializeApp(firebaseConfig);
-  }
-</script>
-
-<!-- Register the service worker so the app itself (not just its data) works
-     with no signal at all. sw.js uses a versioned cache name — whenever this
-     app is updated, sw.js's CACHE_NAME is bumped too, which is what makes
-     phones pick up the new version instead of getting stuck on an old one. -->
-<script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
-    });
   }
 </script>
 
