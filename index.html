@@ -1554,6 +1554,10 @@ async function clearMechanicSchedule(name) {
   await firebase.database().ref('mechanicSchedules/' + slugForMechanic(name)).remove();
 }
 
+async function savePushMessages(data) {
+  await firebase.database().ref('pushMessages').set(stripUndefined(data));
+}
+
 async function saveCustomPdtStrings(data) {
   await firebase.database().ref('customPdtStrings').set(stripUndefined(data));
 }
@@ -1861,6 +1865,7 @@ function App() {
   const [mechanicEmails, setMechanicEmails] = useState({});
   const [pushTokens, setPushTokens] = useState({});
   const [mechanicSchedules, setMechanicSchedules] = useState({});
+  const [pushMessages, setPushMessages] = useState({});
   const [editingScheduleFor, setEditingScheduleFor] = useState(null);
   const [inviteNameDraft, setInviteNameDraft] = useState('');
   const [generatedInviteLink, setGeneratedInviteLink] = useState(null);
@@ -1947,6 +1952,7 @@ function App() {
   const [tsWeekOffset, setTsWeekOffset] = useState(0);
   const [showWeekTable, setShowWeekTable] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
+  const [orderSortBy, setOrderSortBy] = useState('dueDate');
   const [mySummaryStart, setMySummaryStart] = useState('');
   const [mySummaryEnd, setMySummaryEnd] = useState('');
 
@@ -2089,6 +2095,14 @@ function App() {
       setMechanicSchedules(snap.val() || {});
     });
     return () => schedulesRef.off('value', onSchedules);
+  }, []);
+
+  useEffect(() => {
+    const pushMsgRef = firebase.database().ref('pushMessages');
+    const onPushMsg = pushMsgRef.on('value', (snap) => {
+      setPushMessages(snap.val() || {});
+    });
+    return () => pushMsgRef.off('value', onPushMsg);
   }, []);
 
   useEffect(() => {
@@ -2604,9 +2618,12 @@ function App() {
     return [];
   };
 
-  // Older orders saved before multi-mechanic assignment have a single
-  // `assignedMechanic` string instead of an `assignedMechanics` array.
+  // Who's "worked on" a job is now tracked automatically (see
+  // withWorkedOnBy above) rather than manually assigned. Older orders from
+  // before that existed still have the old assignedMechanics/assignedMechanic
+  // fields — this reads whichever shape an order happens to have.
   const getAssignedMechanics = (order) => {
+    if (order.workedOnBy) return order.workedOnBy;
     if (order.assignedMechanics) return order.assignedMechanics;
     if (order.assignedMechanic) return [order.assignedMechanic];
     return [];
@@ -3026,7 +3043,7 @@ function App() {
       id: uid(),
       unit: unitName,
       description: descriptionField,
-      assignedMechanics: data.assignedMechanics || [],
+      workedOnBy: [currentMechanic],
       hours: data.hours,
       dueDate: data.dueDate,
       dateCreated: new Date().toISOString().slice(0, 10),
@@ -3075,8 +3092,19 @@ function App() {
     }
   };
 
+  // Instead of pre-assigning who's "supposed" to work on something,
+  // whoever actually opens and edits an order (including just checking
+  // off a checklist item) gets automatically credited on it — every
+  // checklist-related function already funnels through here, so this one
+  // spot covers all of them.
+  const withWorkedOnBy = (order) => {
+    const existing = order.workedOnBy || [];
+    if (existing.includes(currentMechanic)) return existing;
+    return [...existing, currentMechanic];
+  };
+
   const updateOrder = async (id, patch) => {
-    const next = orders.map((o) => (o.id === id ? { ...o, ...patch } : o));
+    const next = orders.map((o) => (o.id === id ? { ...o, ...patch, workedOnBy: withWorkedOnBy(o) } : o));
     await persistOrders(next);
   };
 
@@ -3092,7 +3120,7 @@ function App() {
         note.text = translated;
       }
     }
-    const next = orders.map((o) => (o.id === id ? { ...o, notes: [...(o.notes || []), note] } : o));
+    const next = orders.map((o) => (o.id === id ? { ...o, notes: [...(o.notes || []), note], workedOnBy: withWorkedOnBy(o) } : o));
     await persistOrders(next);
   };
 
@@ -3130,7 +3158,7 @@ function App() {
       author: currentMechanic,
       ts: new Date().toISOString(),
     }));
-    const next = orders.map((o) => (o.id === id ? { ...o, media: [...(o.media || []), ...photos] } : o));
+    const next = orders.map((o) => (o.id === id ? { ...o, media: [...(o.media || []), ...photos], workedOnBy: withWorkedOnBy(o) } : o));
     await persistOrders(next);
   };
 
@@ -3423,6 +3451,9 @@ function App() {
       .filter((o) => o.status !== 'Done')
       .slice()
       .sort((a, b) => {
+        if (orderSortBy === 'unit') {
+          return (a.unit || '').localeCompare(b.unit || '', undefined, { numeric: true });
+        }
         if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
         if (a.dueDate) return -1;
         if (b.dueDate) return 1;
@@ -3622,7 +3653,18 @@ function App() {
           ) : (
             <React.Fragment>
               <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-                <h2 className="font-display text-lg font-semibold uppercase tracking-wide">{t('openWorkOrders')}</h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="font-display text-lg font-semibold uppercase tracking-wide">{t('openWorkOrders')}</h2>
+                  <select
+                    value={orderSortBy}
+                    onChange={(e) => setOrderSortBy(e.target.value)}
+                    className="text-xs font-display uppercase tracking-wider font-semibold px-2 py-1.5 rounded-lg focus:outline-none focus:ring-2"
+                    style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+                  >
+                    <option value="dueDate">Sort: Due date</option>
+                    <option value="unit">Sort: Unit number</option>
+                  </select>
+                </div>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setScreen('machines')}
@@ -4612,6 +4654,8 @@ function App() {
               />
             </label>
           </div>
+
+          {isAdmin && <PushMessageEditor pushMessages={pushMessages} onSave={savePushMessages} />}
         </div>
       </div>
     );
@@ -5025,32 +5069,13 @@ function App() {
             </label>
 
             <div className="mb-4">
-              <span className="font-display text-xs uppercase tracking-wider block mb-2" style={{ color: '#6B6250' }}>{t('assignedMechanics')}</span>
-              <div className="flex flex-wrap gap-2">
-                {mechanics.map((m) => {
-                  const current = getAssignedMechanics(order);
-                  const isChecked = current.includes(m);
-                  return (
-                    <button
-                      key={m}
-                      onClick={() => {
-                        const next = isChecked ? current.filter((x) => x !== m) : [...current, m];
-                        updateOrder(order.id, { assignedMechanics: next, assignedMechanic: null });
-                      }}
-                      className="px-3 py-1.5 rounded-full text-sm font-body transition-all"
-                      style={{
-                        background: isChecked ? COLORS.ink2 : 'transparent',
-                        color: isChecked ? COLORS.manila : COLORS.ink2,
-                        border: `1.5px solid ${COLORS.manilaDark}`,
-                      }}
-                    >
-                      {isChecked ? '✓ ' : ''}{m}
-                    </button>
-                  );
-                })}
-              </div>
-              {mechanics.length === 0 && (
-                <p className="text-sm" style={{ color: '#6B6250' }}>{t('noMechanicsOnTeam')}</p>
+              <span className="font-display text-xs uppercase tracking-wider block mb-2" style={{ color: '#6B6250' }}>Worked on by</span>
+              {getAssignedMechanics(order).length > 0 ? (
+                <p className="text-sm" style={{ color: COLORS.ink2 }}>
+                  {getAssignedMechanics(order).join(', ')}
+                </p>
+              ) : (
+                <p className="text-sm" style={{ color: '#6B6250' }}>Nobody yet — this fills in automatically as people open and work on this job.</p>
               )}
             </div>
 
@@ -5827,6 +5852,60 @@ function AddMissedDayForm({ onSubmit, onCancel, mechanics, defaultMechanic, t })
   );
 }
 
+function PushMessageEditor({ pushMessages, onSave }) {
+  const defaults = {
+    startTitle: 'Shift starting soon',
+    startBody: "Your shift starts at {time} — see you soon!",
+    endTitle: 'Shift ending soon',
+    endBody: "Your shift ends at {time} — don't forget to clock out.",
+  };
+  const [drafts, setDrafts] = useState({ ...defaults, ...pushMessages });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const field = (key, label) => (
+    <label className="block mb-3">
+      <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>{label}</span>
+      <input
+        value={drafts[key]}
+        onChange={(e) => setDrafts({ ...drafts, [key]: e.target.value })}
+        className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
+        style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+      />
+    </label>
+  );
+
+  return (
+    <div className="rounded-lg p-5 mt-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+      <p className="text-sm font-semibold mb-1" style={{ color: COLORS.ink }}>🔔 Shift reminder wording</p>
+      <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>
+        What everyone's push notifications actually say. Use <code>{'{time}'}</code> anywhere you want their shift time inserted.
+      </p>
+      <p className="text-xs font-display uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>On clock-in</p>
+      {field('startTitle', 'Title')}
+      {field('startBody', 'Message')}
+      <p className="text-xs font-display uppercase tracking-wide mb-2 mt-4" style={{ color: COLORS.accent }}>On clock-out</p>
+      {field('endTitle', 'Title')}
+      {field('endBody', 'Message')}
+      <Btn
+        onClick={async () => {
+          setSaving(true);
+          try {
+            await onSave(drafts);
+            setSaved(true);
+            setTimeout(() => setSaved(false), 2000);
+          } finally {
+            setSaving(false);
+          }
+        }}
+        disabled={saving}
+      >
+        {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save wording'}
+      </Btn>
+    </div>
+  );
+}
+
 function MechanicScheduleEditor({ mechanic, schedule, onSave, onResetDefault, onCancel }) {
   const [start, setStart] = useState((schedule || { start: '07:50' }).start);
   const [end, setEnd] = useState((schedule || { end: '17:50' }).end);
@@ -5926,7 +6005,6 @@ function AdHocChecklistForm({ onSubmit, onCancel }) {
 function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit, t, initialDescription, initialUnit, scanBanner }) {
   const tr = t || ((k) => translations.en[k] || k);
   const [description, setDescription] = useState(initialDescription || '');
-  const [assignedMechanics, setAssignedMechanics] = useState([]);
   const [hours, setHours] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [unit, setUnit] = useState(lockUnit || initialUnit || '');
@@ -5992,36 +6070,12 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit, t, initi
       )}
 
       <TextField label={tr('whatNeedsFixed')} value={description} onChange={setDescription} placeholder={tr('whatNeedsFixedPlaceholder')} helper={tr('whatNeedsFixedHelper')} />
-      <div className="mb-4">
-        <span className="font-display text-sm font-semibold block mb-2" style={{ color: COLORS.ink }}>{tr('whosDoingThis')}</span>
-        <div className="flex flex-wrap gap-2">
-          {mechanics.map((m) => {
-            const isChecked = assignedMechanics.includes(m);
-            return (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setAssignedMechanics(isChecked ? assignedMechanics.filter((x) => x !== m) : [...assignedMechanics, m])}
-                className="px-3 py-1.5 rounded-full text-sm transition-all"
-                style={{
-                  background: isChecked ? COLORS.accent : 'transparent',
-                  color: isChecked ? '#1B1F19' : COLORS.ink,
-                  border: `1.5px solid ${isChecked ? COLORS.accent : COLORS.line}`,
-                }}
-              >
-                {isChecked ? '✓ ' : ''}{m}
-              </button>
-            );
-          })}
-          {mechanics.length === 0 && <p className="text-sm" style={{ color: COLORS.inkDim }}>{tr('noMechanicsYet')}</p>}
-        </div>
-      </div>
       <div className="grid grid-cols-2 gap-4 mb-4">
         <TextField label={tr('machineHours')} value={hours} onChange={setHours} placeholder={tr('hourMeterReading')} type="number" mono />
         <TextField label={tr('whenNeedDone')} value={dueDate} onChange={setDueDate} type="date" mono />
       </div>
       <div className="flex gap-2 mt-6">
-        <Btn onClick={() => canSubmit && onSubmit({ unit: finalUnit, description, assignedMechanics, hours, dueDate })} disabled={!canSubmit}>{tr('createJob')}</Btn>
+        <Btn onClick={() => canSubmit && onSubmit({ unit: finalUnit, description, hours, dueDate })} disabled={!canSubmit}>{tr('createJob')}</Btn>
         <Btn variant="ghost" onClick={onCancel}>{tr('nevermind')}</Btn>
       </div>
     </div>
