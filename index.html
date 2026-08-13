@@ -3287,18 +3287,13 @@ function App() {
             );
           })()}
 
-          <div className="rounded-lg p-5 shop-card" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>
-            <p className="font-display text-sm uppercase tracking-wide mb-3 block" style={{ color: COLORS.accent }}>{t('firstTimeHere')}</p>
-            {inviteTokenState === 'invalid' ? (
+          {inviteTokenState === 'invalid' && (
+            <div className="rounded-lg p-5 shop-card" style={{ background: COLORS.surface, border: `2px dashed #E07A5F` }}>
               <p className="text-sm" style={{ color: '#E07A5F' }}>
                 That invite link is invalid or has expired. Ask your admin to send you a fresh one.
               </p>
-            ) : (
-              <p className="text-sm" style={{ color: COLORS.inkDim }}>
-                New to the team? Ask an admin to send you an invite link — accounts can no longer be created just by having this app's address.
-              </p>
-            )}
-          </div>
+            </div>
+          )}
 
           <div className="text-center mt-4">
             {!showLostAccess ? (
