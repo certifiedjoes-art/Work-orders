@@ -1184,6 +1184,68 @@ function ClockOutReviewOverlay({ show, openEntry, skippedLunch, mechanic, onConf
   );
 }
 
+function SidebarMenu({ show, onClose, mechanic, isAdmin, hasBiometric, onNavigate, onChangePin, onToggleBiometric, onLogout, onCheckUpdates, t }) {
+  if (!show) return null;
+  const item = (icon, label, onClick, color) => (
+    <button
+      onClick={() => { onClick(); onClose(); }}
+      className="w-full flex items-center gap-3 text-left px-4 py-3.5 rounded-lg font-display font-semibold text-sm uppercase tracking-wide transition-all hover:scale-102"
+      style={{ color: color || COLORS.ink, background: COLORS.surface }}
+    >
+      <span style={{ fontSize: '1.1rem' }}>{icon}</span>
+      {label}
+    </button>
+  );
+  return (
+    <React.Fragment>
+      <div
+        onClick={onClose}
+        className="fixed inset-0 z-40"
+        style={{ background: 'rgba(0,0,0,0.6)' }}
+      />
+      <div
+        className="fixed top-0 left-0 h-full z-50 overflow-y-auto"
+        style={{ width: '85vw', maxWidth: 340, background: COLORS.bg, borderRight: `2px solid ${COLORS.line}`, boxShadow: '4px 0 20px rgba(0,0,0,0.4)' }}
+      >
+        <div className="p-5">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <p className="font-display text-xs uppercase tracking-[0.3em]" style={{ color: COLORS.accent }}>Harder Contracting</p>
+              <p className="font-display text-xl font-bold mt-1">👤 {mechanic}</p>
+            </div>
+            <button onClick={onClose} className="text-2xl leading-none" style={{ color: COLORS.inkDim }}>✕</button>
+          </div>
+
+          <div className="space-y-1 mb-4">
+            {isAdmin && item('📊', t('timesheets'), () => onNavigate('timesheets'))}
+            {isAdmin && item('⚙️', t('team'), () => onNavigate('team'))}
+            {item('🎉', t('shoutouts'), () => onNavigate('shoutouts'))}
+            {item('📋', t('checklists'), () => onNavigate('checklists'))}
+            {item('⚙️', 'Settings', () => onNavigate('settings'))}
+          </div>
+
+          <div className="h-px my-4" style={{ background: COLORS.line }} />
+
+          <div className="space-y-1 mb-4">
+            {item('🔑', 'Change PIN', onChangePin)}
+            {item('🔓', hasBiometric ? 'Turn off Face/Touch ID' : 'Enable Face/Touch ID', onToggleBiometric)}
+          </div>
+
+          <div className="h-px my-4" style={{ background: COLORS.line }} />
+
+          <div className="space-y-1 mb-4">
+            {item('🔄', t('checkForUpdates').replace('🔄 ', ''), onCheckUpdates)}
+          </div>
+
+          <div className="h-px my-4" style={{ background: COLORS.line }} />
+
+          {item('🚪', t('logout'), onLogout, '#E07A5F')}
+        </div>
+      </div>
+    </React.Fragment>
+  );
+}
+
 function ClockInPromptOverlay({ show, mechanic, onClockIn, onSkip, t }) {
   const tr = t || ((k) => translations.en[k] || k);
   if (!show) return null;
@@ -1884,6 +1946,7 @@ function App() {
   const [timesheetApprovals, setTimesheetApprovals] = useState({});
   const [tsWeekOffset, setTsWeekOffset] = useState(0);
   const [showWeekTable, setShowWeekTable] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
   const [mySummaryStart, setMySummaryStart] = useState('');
   const [mySummaryEnd, setMySummaryEnd] = useState('');
 
@@ -3457,89 +3520,44 @@ function App() {
               <p className="font-display text-xs uppercase tracking-[0.3em] mb-2" style={{ color: COLORS.accent }}>Harder Contracting</p>
               <h1 className="font-display text-3xl sm:text-4xl font-bold">{t('board')}</h1>
             </div>
-            <div className="flex items-center gap-3 flex-wrap justify-end">
-              {isAdmin && (
-                <button
-                  onClick={() => setScreen('timesheets')}
-                  className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
-                  style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
-                >
-                  📊 {t('timesheets')}
-                </button>
-              )}
-              {isAdmin && (
-                <button
-                  onClick={() => setScreen('team')}
-                  className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
-                  style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
-                >
-                  ⚙️ {t('team')}
-                </button>
-              )}
-              <button
-                onClick={() => setScreen('shoutouts')}
-                className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
-                style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
-              >
-                🎉 {t('shoutouts')}
-              </button>
-              <button
-                onClick={() => setScreen('checklists')}
-                className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
-                style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
-              >
-                📋 {t('checklists')}
-              </button>
-              <button
-                onClick={() => setScreen('settings')}
-                className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
-                style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
-              >
-                ⚙️ Settings
-              </button>
-              <button
-                onClick={async () => {
-                  const keepSession = !!localStorage.getItem('webauthn_cred_' + currentMechanic);
-                  if (!keepSession) { await firebase.auth().signOut().catch(() => {}); }
-                  setCurrentMechanic(null);
-                  setScreen('login');
-                  setShowClockInPrompt(false);
-                }}
-                className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
-                style={{ color: COLORS.inkDim, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
-              >
-                👤 {currentMechanic}
-              </button>
-              <button
-                onClick={async () => {
-                  try {
-                    const regs = await navigator.serviceWorker.getRegistrations();
-                    await Promise.all(regs.map((r) => r.unregister()));
-                    const keys = await caches.keys();
-                    await Promise.all(keys.map((k) => caches.delete(k)));
-                  } catch (e) {
-                    // ignore — reload will still fetch fresh from network
-                  }
-                  window.location.reload(true);
-                }}
-                className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
-                style={{ color: COLORS.inkDim, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
-                title="Force the app to grab the latest version"
-              >
-                {t('checkForUpdates')}
-              </button>
-            </div>
+            <button
+              onClick={() => setShowSidebar(true)}
+              className="text-3xl leading-none px-3 py-2 rounded-lg transition-all hover:scale-105"
+              style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+            >
+              ☰
+            </button>
           </div>
 
-          <div className="flex items-center justify-end gap-4 -mt-2 mb-8">
-            <button onClick={startChangePin} className="text-xs underline" style={{ color: COLORS.inkDim }}>
-              Change PIN
-            </button>
-            <button onClick={toggleBiometric} className="text-xs underline" style={{ color: COLORS.inkDim }}>
-              {localStorage.getItem('webauthn_cred_' + currentMechanic) ? 'Turn off Face/Touch ID' : 'Enable Face/Touch ID'}
-            </button>
-            {bioMsg && <span className="text-xs font-semibold" style={{ color: COLORS.accent }}>{bioMsg}</span>}
-          </div>
+          <SidebarMenu
+            show={showSidebar}
+            onClose={() => setShowSidebar(false)}
+            mechanic={currentMechanic}
+            isAdmin={isAdmin}
+            hasBiometric={!!localStorage.getItem('webauthn_cred_' + currentMechanic)}
+            onNavigate={(s) => setScreen(s)}
+            onChangePin={startChangePin}
+            onToggleBiometric={toggleBiometric}
+            onCheckUpdates={async () => {
+              try {
+                const regs = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(regs.map((r) => r.unregister()));
+                const keys = await caches.keys();
+                await Promise.all(keys.map((k) => caches.delete(k)));
+              } catch (e) {
+                // ignore — reload will still fetch fresh from network
+              }
+              window.location.reload(true);
+            }}
+            onLogout={async () => {
+              const keepSession = !!localStorage.getItem('webauthn_cred_' + currentMechanic);
+              if (!keepSession) { await firebase.auth().signOut().catch(() => {}); }
+              setCurrentMechanic(null);
+              setScreen('login');
+              setShowClockInPrompt(false);
+            }}
+            t={t}
+          />
 
           <button
             onClick={() => setScreen('timeclock')}
