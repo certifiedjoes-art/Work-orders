@@ -1952,7 +1952,7 @@ function App() {
   const [tsWeekOffset, setTsWeekOffset] = useState(0);
   const [showWeekTable, setShowWeekTable] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
-  const [orderSortBy, setOrderSortBy] = useState('dueDate');
+  const [openOrdersUnitFilter, setOpenOrdersUnitFilter] = useState('');
   const [mySummaryStart, setMySummaryStart] = useState('');
   const [mySummaryEnd, setMySummaryEnd] = useState('');
 
@@ -3451,14 +3451,21 @@ function App() {
       .filter((o) => o.status !== 'Done')
       .slice()
       .sort((a, b) => {
-        if (orderSortBy === 'unit') {
-          return (a.unit || '').localeCompare(b.unit || '', undefined, { numeric: true });
-        }
         if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
         if (a.dueDate) return -1;
         if (b.dueDate) return 1;
         return 0;
       });
+
+    // Grouped by unit, each unit collapsible — sorted numerically so
+    // "C10" comes after "C2", not before it.
+    const openOrdersByUnit = {};
+    openOrders.forEach((o) => {
+      const key = o.unit || 'No unit';
+      if (!openOrdersByUnit[key]) openOrdersByUnit[key] = [];
+      openOrdersByUnit[key].push(o);
+    });
+    const unitGroups = Object.keys(openOrdersByUnit).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
     const renderOrderCard = (o) => {
       const isDone = o.status === 'Done';
@@ -3656,13 +3663,15 @@ function App() {
                 <div className="flex items-center gap-3">
                   <h2 className="font-display text-lg font-semibold uppercase tracking-wide">{t('openWorkOrders')}</h2>
                   <select
-                    value={orderSortBy}
-                    onChange={(e) => setOrderSortBy(e.target.value)}
+                    value={openOrdersUnitFilter}
+                    onChange={(e) => setOpenOrdersUnitFilter(e.target.value)}
                     className="text-xs font-display uppercase tracking-wider font-semibold px-2 py-1.5 rounded-lg focus:outline-none focus:ring-2"
                     style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
                   >
-                    <option value="dueDate">Sort: Due date</option>
-                    <option value="unit">Sort: Unit number</option>
+                    <option value="">All units</option>
+                    {unitGroups.map((u) => (
+                      <option key={u} value={u}>{u} ({openOrdersByUnit[u].length})</option>
+                    ))}
                   </select>
                 </div>
                 <div className="flex gap-2">
@@ -3714,7 +3723,9 @@ function App() {
                   <p className="font-body text-sm" style={{ color: COLORS.line }}>{t('noOpenOrders')}</p>
                 </div>
               ) : (
-                <div className="space-y-3">{openOrders.map(renderOrderCard)}</div>
+                <div className="space-y-3">
+                  {(openOrdersUnitFilter ? (openOrdersByUnit[openOrdersUnitFilter] || []) : openOrders).map(renderOrderCard)}
+                </div>
               )}
             </React.Fragment>
           )}
