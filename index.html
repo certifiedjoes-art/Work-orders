@@ -1952,7 +1952,6 @@ function App() {
   const [tsWeekOffset, setTsWeekOffset] = useState(0);
   const [showWeekTable, setShowWeekTable] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
-  const [openOrdersUnitFilter, setOpenOrdersUnitFilter] = useState('');
   const [mySummaryStart, setMySummaryStart] = useState('');
   const [mySummaryEnd, setMySummaryEnd] = useState('');
 
@@ -3050,11 +3049,25 @@ function App() {
       status: 'Open',
       notes: [],
       createdBy: currentMechanic,
+      onBoard: true, // new orders show up right away; older/queued ones need to be pulled out deliberately
       media: scanPhotoDataUrl ? [{ id: uid(), dataUrl: scanPhotoDataUrl, author: currentMechanic, ts: new Date().toISOString() }] : [],
     };
     await persistOrders([order, ...orders]);
     setShowAddOrder(false);
     setScanReviewData(null);
+  };
+
+  // Older orders saved before this feature existed have no onBoard field at
+  // all — treated as already on the board so nothing already-visible
+  // suddenly vanishes the moment this ships.
+  const isOnBoard = (order) => order.onBoard !== false;
+
+  const pullOntoBoard = async (orderId) => {
+    await updateOrder(orderId, { onBoard: true });
+  };
+
+  const pullOffBoard = async (orderId) => {
+    await updateOrder(orderId, { onBoard: false });
   };
 
   // Sends a photo of a receipt/invoice to the backend, which asks Claude to
@@ -3457,24 +3470,32 @@ function App() {
         return 0;
       });
 
-    // Grouped by unit, each unit collapsible — sorted numerically so
-    // "C10" comes after "C2", not before it.
-    const openOrdersByUnit = {};
-    openOrders.forEach((o) => {
+    // Only orders someone has actually pulled onto the board show here —
+    // everything else stays tucked away in the dropdown until picked, so
+    // the board doesn't get cluttered with every open job at once.
+    const visibleOpenOrders = openOrders.filter(isOnBoard);
+    const queuedOrders = openOrders.filter((o) => !isOnBoard(o));
+
+    // Queued orders, grouped by unit for the "pull onto board" dropdown —
+    // sorted numerically so "C10" comes after "C2", not before it.
+    const queuedByUnit = {};
+    queuedOrders.forEach((o) => {
       const key = o.unit || 'No unit';
-      if (!openOrdersByUnit[key]) openOrdersByUnit[key] = [];
-      openOrdersByUnit[key].push(o);
+      if (!queuedByUnit[key]) queuedByUnit[key] = [];
+      queuedByUnit[key].push(o);
     });
-    const unitGroups = Object.keys(openOrdersByUnit).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const queuedUnitGroups = Object.keys(queuedByUnit).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
     const renderOrderCard = (o) => {
       const isDone = o.status === 'Done';
       return (
-        <button
+        <div
           key={o.id}
           onClick={() => { setActiveUnit(o.unit); setActiveOrderId(o.id); setScreen('order'); setConfirmDelete(false); }}
+          role="button"
+          tabIndex={0}
           style={{ background: isDone ? COLORS.line : COLORS.manila, color: isDone ? COLORS.inkDim : COLORS.ink2 }}
-          className="relative rounded-lg p-5 pl-8 text-left w-full focus:outline-none focus:ring-2 transition-all hover:scale-102 active:scale-98"
+          className="relative rounded-lg p-5 pl-8 text-left w-full focus:outline-none focus:ring-2 transition-all hover:scale-102 active:scale-98 cursor-pointer"
         >
           <PunchHole bg={isDone ? COLORS.line : COLORS.manila} />
           <div className="flex items-start justify-between gap-3">
@@ -3486,9 +3507,22 @@ function App() {
                 {o.dueDate && <span>📅 {fmtDate(o.dueDate)}</span>}
               </div>
             </div>
-            <StatusStamp status={o.status} small t={t} />
+            <div className="flex flex-col items-end gap-2">
+              <StatusStamp status={o.status} small t={t} />
+              {!isDone && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); pullOffBoard(o.id); }}
+                  title="Take off the board — waiting on parts, etc."
+                  className="text-xs px-2 py-1 rounded-full focus:outline-none"
+                  style={{ color: '#8A7F5E', background: 'rgba(0,0,0,0.08)' }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
-        </button>
+        </div>
       );
     };
 
@@ -3660,21 +3694,28 @@ function App() {
           ) : (
             <React.Fragment>
               <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-                <div className="flex items-center gap-3">
-                  <h2 className="font-display text-lg font-semibold uppercase tracking-wide">{t('openWorkOrders')}</h2>
+                <h2 className="font-display text-lg font-semibold uppercase tracking-wide">{t('openWorkOrders')}</h2>
+                <div className="flex gap-2 flex-wrap">
                   <select
-                    value={openOrdersUnitFilter}
-                    onChange={(e) => setOpenOrdersUnitFilter(e.target.value)}
+                    value=""
+                    onChange={(e) => { if (e.target.value) pullOntoBoard(e.target.value); }}
+                    disabled={queuedOrders.length === 0}
                     className="text-xs font-display uppercase tracking-wider font-semibold px-2 py-1.5 rounded-lg focus:outline-none focus:ring-2"
-                    style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+                    style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}`, opacity: queuedOrders.length === 0 ? 0.5 : 1 }}
                   >
-                    <option value="">All units</option>
-                    {unitGroups.map((u) => (
-                      <option key={u} value={u}>{u} ({openOrdersByUnit[u].length})</option>
+                    <option value="">
+                      {queuedOrders.length === 0 ? 'Nothing queued' : `+ Pull a job onto the board (${queuedOrders.length} queued)`}
+                    </option>
+                    {queuedUnitGroups.map((unit) => (
+                      <optgroup key={unit} label={unit}>
+                        {queuedByUnit[unit].map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {getLocalizedText(o.description, lang) || t('noDescription')}
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
-                </div>
-                <div className="flex gap-2">
                   <button
                     onClick={() => setScreen('machines')}
                     className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
@@ -3717,14 +3758,20 @@ function App() {
                 />
               )}
 
-              {openOrders.length === 0 ? (
+              {visibleOpenOrders.length === 0 ? (
                 <div className="rounded-lg p-10 text-center" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
-                  <p className="font-body text-base mb-2" style={{ color: COLORS.inkDim }}>All caught up!</p>
-                  <p className="font-body text-sm" style={{ color: COLORS.line }}>{t('noOpenOrders')}</p>
+                  <p className="font-body text-base mb-2" style={{ color: COLORS.inkDim }}>
+                    {queuedOrders.length > 0 ? 'Board is clear' : 'All caught up!'}
+                  </p>
+                  <p className="font-body text-sm" style={{ color: COLORS.line }}>
+                    {queuedOrders.length > 0
+                      ? `${queuedOrders.length} job${queuedOrders.length !== 1 ? 's' : ''} waiting in the dropdown above — pull one out when you're ready to start it.`
+                      : t('noOpenOrders')}
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {(openOrdersUnitFilter ? (openOrdersByUnit[openOrdersUnitFilter] || []) : openOrders).map(renderOrderCard)}
+                  {visibleOpenOrders.map(renderOrderCard)}
                 </div>
               )}
             </React.Fragment>
