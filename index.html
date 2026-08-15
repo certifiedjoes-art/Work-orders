@@ -2977,7 +2977,7 @@ function App() {
 
   const exportTimesheets = async (entries, filenamePrefix) => {
     const sorted = [...entries].sort((a, b) => (a.mechanic || '').localeCompare(b.mechanic || '') || a.date.localeCompare(b.date));
-    const rows = [['Mechanic', 'Date', 'Clock In', 'Clock Out', 'Break Start', 'Break End', 'Worked Through Break', 'Paid Hours', 'Signed', 'Jobs (unit: hours)']];
+    const rows = [['Mechanic', 'Date', 'Clock In', 'Clock Out', 'Break Start', 'Break End', 'Paid Hours', 'Signed', 'Jobs (unit: hours)']];
     let lastMechanic = null;
     sorted.forEach((e) => {
       if (e.mechanic !== lastMechanic) {
@@ -2993,7 +2993,6 @@ function App() {
         fmtTime(e.clockOut),
         fmtTime(e.lunchStart),
         fmtTime(e.lunchEnd),
-        e.skippedLunch ? 'Yes' : 'No',
         fmtHoursDecimal(entryHours(e)),
         e.signature ? 'Yes' : 'No',
         jobsStr,
@@ -5381,7 +5380,6 @@ function WeekReviewTable({ entries }) {
             <th style={th}>In</th>
             <th style={th}>Out</th>
             <th style={th}>Break</th>
-            <th style={th}>Worked thru break</th>
             <th style={th}>Paid hrs</th>
             <th style={th}>Signed</th>
             <th style={th}>Jobs</th>
@@ -5391,7 +5389,7 @@ function WeekReviewTable({ entries }) {
           {groups.map((g) => (
             <React.Fragment key={g.mechanic}>
               <tr>
-                <td colSpan={8} style={{ padding: '8px 12px', fontWeight: 700, color: COLORS.accent, background: COLORS.surface, borderBottom: `1px solid ${COLORS.line}` }}>
+                <td colSpan={7} style={{ padding: '8px 12px', fontWeight: 700, color: COLORS.accent, background: COLORS.surface, borderBottom: `1px solid ${COLORS.line}` }}>
                   {g.mechanic}
                 </td>
               </tr>
@@ -5401,7 +5399,6 @@ function WeekReviewTable({ entries }) {
                   <td style={td}>{fmtTime(e.clockIn)}</td>
                   <td style={td}>{e.clockOut ? fmtTime(e.clockOut) : '—'}</td>
                   <td style={td}>{!e.skippedLunch && e.lunchStart && e.lunchEnd ? `${fmtTime(e.lunchStart)}–${fmtTime(e.lunchEnd)}` : '—'}</td>
-                  <td style={td}>{e.skippedLunch ? 'Yes' : 'No'}</td>
                   <td style={{ ...td, color: COLORS.accent, fontWeight: 700 }}>{fmtHoursDecimal(entryHours(e))}</td>
                   <td style={{ ...td, color: e.signature ? COLORS.done : COLORS.line }}>{e.signature ? '✓' : '—'}</td>
                   <td style={td}>{(e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`).join(' | ') || '—'}</td>
@@ -5552,6 +5549,7 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
                   clockOut: combineDateTime(clockOutDatePart, clockOutTime),
                   lunchStart: combineDateTime(clockInDatePart, lunchStartTime),
                   lunchEnd: combineDateTime(clockInDatePart, lunchEndTime),
+                  skippedLunch: !(lunchStartTime && lunchEndTime),
                 })
               }
             >
@@ -5582,8 +5580,7 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
       <div className="flex flex-wrap gap-4 text-xs font-mono mb-1" style={{ color: COLORS.inkDim }}>
         <span>In {fmtTime(entry.clockIn)}</span>
         <span>Out {entry.clockOut ? fmtTime(entry.clockOut) : '—'}</span>
-        {!entry.skippedLunch && entry.lunchStart && entry.lunchEnd && <span>Break {fmtTime(entry.lunchStart)}–{fmtTime(entry.lunchEnd)}</span>}
-        {entry.skippedLunch && <span>No break taken</span>}
+        {entry.lunchStart && entry.lunchEnd && <span>Break {fmtTime(entry.lunchStart)}–{fmtTime(entry.lunchEnd)}</span>}
       </div>
       {entry.clockOut && (
         <p className="text-xs font-mono mb-2" style={{ color: COLORS.accent }}>
