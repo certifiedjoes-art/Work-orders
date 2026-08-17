@@ -4463,7 +4463,18 @@ function App() {
           >
             🌐 Plautdietsch Translations
           </button>
+<button
+  onClick={() => setScreen('timesheets')}
+  className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg mb-6 ml-2"
+  style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+>
+  📊 Payroll / Timesheets
+</button>
 
+<div className="rounded-lg p-5 mb-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+  <p className="text-sm font-semibold mb-3" style={{ color: COLORS.ink }}>🔔 Shift reminder wording</p>
+  <PushMessageEditor pushMessages={pushMessages} onSave={savePushMessages} />
+</div>
           {mechanics.length > 1 && (
             <div className="mb-8">
               {showRemoveAllConfirm ? (
