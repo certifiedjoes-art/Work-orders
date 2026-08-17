@@ -1217,7 +1217,7 @@ function SidebarMenu({ show, onClose, mechanic, isAdmin, hasBiometric, onNavigat
           </div>
 
           <div className="space-y-1 mb-4">
-            {isAdmin && item('📊', t('timesheets'), () => onNavigate('timesheets'))}
+            
             {isAdmin && item('⚙️', t('team'), () => onNavigate('team'))}
             {item('🎉', t('shoutouts'), () => onNavigate('shoutouts'))}
            {item('🚜', 'Production Timesheets', () => { window.location.href = 'https://certifiedjoes-art.github.io/Timesheets/'; })}
@@ -4688,7 +4688,7 @@ function App() {
             </label>
           </div>
 
-          {isAdmin && <PushMessageEditor pushMessages={pushMessages} onSave={savePushMessages} />}
+          
         </div>
       </div>
     );
