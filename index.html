@@ -4449,59 +4449,12 @@ function App() {
             Manage who can sign in, and who has admin access like you.
           </p>
 
-          <div className="rounded-lg p-5 mb-6" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>
-            <p className="font-display text-sm uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>+ Invite a new employee</p>
-            <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>
-              Accounts can only be created via an invite link now — type their name and send them the link this generates.
-            </p>
-            <div className="flex gap-2 mb-3">
-              <input
-                value={inviteNameDraft}
-                onChange={(e) => setInviteNameDraft(e.target.value)}
-                placeholder="Their name"
-                className="flex-1 rounded-lg px-4 py-2 text-base focus:outline-none focus:ring-2"
-                style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
-              />
-              <Btn
-                onClick={async () => {
-                  setGeneratingInvite(true);
-                  const link = await generateInvite(inviteNameDraft);
-                  setGeneratedInviteLink(link);
-                  setGeneratingInvite(false);
-                }}
-                disabled={!inviteNameDraft.trim() || generatingInvite}
-              >
-                {generatingInvite ? '…' : 'Generate link'}
-              </Btn>
-            </div>
-            {generatedInviteLink && (
-              <div className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised }}>
-                <p className="text-xs mb-2 break-all font-mono" style={{ color: COLORS.ink }}>{generatedInviteLink}</p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={async () => {
-                      if (navigator.share) {
-                        navigator.share({ title: 'Harder Contracting — join the team', url: generatedInviteLink }).catch(() => {});
-                      } else {
-                        navigator.clipboard.writeText(generatedInviteLink).catch(() => {});
-                      }
-                    }}
-                    className="text-xs font-display uppercase tracking-wider font-semibold px-3 py-2 rounded-lg"
-                    style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
-                  >
-                    {navigator.share ? 'Share link' : 'Copy link'}
-                  </button>
-                  <button
-                    onClick={() => { setGeneratedInviteLink(null); setInviteNameDraft(''); }}
-                    className="text-xs underline"
-                    style={{ color: COLORS.inkDim }}
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+         <div className="rounded-lg p-5 mb-6" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>
+  <p className="font-display text-sm uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>+ Invite a new employee</p>
+  <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>
+    Invites are now created from the Production Timesheets app, where you can also assign their role and job. Open ☰ → Production Timesheets → Admin → Employees.
+  </p>
+</div> 
 
           <button
             onClick={() => setScreen('pdtTranslations')}
