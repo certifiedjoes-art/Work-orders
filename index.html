@@ -1919,6 +1919,20 @@ function App() {
     });
     return () => unsubscribe();
   }, []);
+     // Auto-skip the login screen if a real, valid session already exists —
+  // e.g. someone arriving here already signed in via Timesheets. Checks
+  // the actual Firebase session against the known crew list, not just a
+  // cached local flag, so this can't be spoofed by clearing localStorage.
+  useEffect(() => {
+    if (firebaseUser && !currentMechanic && mechanics.length > 0 && !loginTokenState && !inviteTokenState) {
+      const matched = mechanics.find((m) => emailForMechanic(m) === firebaseUser.email);
+      if (matched) {
+        localStorage.setItem('deviceMechanic', matched);
+        setCurrentMechanic(matched);
+        setScreen('dashboard');
+      }
+    }
+  }, [firebaseUser, mechanics]);
   const [pinModal, setPinModal] = useState(null); // { mode: 'verify'|'setup', mechanic, stage, firstEntry }
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
