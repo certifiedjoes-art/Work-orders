@@ -1217,10 +1217,10 @@ function SidebarMenu({ show, onClose, mechanic, isAdmin, hasBiometric, onNavigat
           </div>
 
           <div className="space-y-1 mb-4">
-            
+            {isAdmin && item('📊', t('timesheets'), () => onNavigate('timesheets'))}
             {isAdmin && item('⚙️', t('team'), () => onNavigate('team'))}
             {item('🎉', t('shoutouts'), () => onNavigate('shoutouts'))}
-           {item('🚜', 'Production Timesheets', () => { window.location.href = 'https://certifiedjoes-art.github.io/Timesheets/'; })}
+            {item('📋', t('checklists'), () => onNavigate('checklists'))}
             {item('⚙️', 'Settings', () => onNavigate('settings'))}
           </div>
 
@@ -1554,19 +1554,6 @@ async function clearMechanicSchedule(name) {
   await firebase.database().ref('mechanicSchedules/' + slugForMechanic(name)).remove();
 }
 
-// Personal, per-employee "X off my board" — doesn't touch the order's real
-// status, it just stops showing up in that one mechanic's Open Work Orders
-// list on any device they log into. Anyone can still find it via search or
-// by unhiding it from the "Hidden" dropdown.
-async function setOrderHiddenForMechanic(mechanicName, orderId, hidden) {
-  const ref = firebase.database().ref('hiddenOrders/' + slugForMechanic(mechanicName) + '/' + orderId);
-  if (hidden) {
-    await ref.set(true);
-  } else {
-    await ref.remove();
-  }
-}
-
 async function savePushMessages(data) {
   await firebase.database().ref('pushMessages').set(stripUndefined(data));
 }
@@ -1879,10 +1866,9 @@ function App() {
   const [pushTokens, setPushTokens] = useState({});
   const [mechanicSchedules, setMechanicSchedules] = useState({});
   const [pushMessages, setPushMessages] = useState({});
-  const [hiddenOrders, setHiddenOrders] = useState({});
-  const [showHiddenOrders, setShowHiddenOrders] = useState(false);
   const [editingScheduleFor, setEditingScheduleFor] = useState(null);
   const [inviteNameDraft, setInviteNameDraft] = useState('');
+  const [teamViewFilter, setTeamViewFilter] = useState('');
   const [generatedInviteLink, setGeneratedInviteLink] = useState(null);
   const [generatingInvite, setGeneratingInvite] = useState(false);
   const [showEmailPrompt, setShowEmailPrompt] = useState(false);
@@ -1919,20 +1905,6 @@ function App() {
     });
     return () => unsubscribe();
   }, []);
-     // Auto-skip the login screen if a real, valid session already exists —
-  // e.g. someone arriving here already signed in via Timesheets. Checks
-  // the actual Firebase session against the known crew list, not just a
-  // cached local flag, so this can't be spoofed by clearing localStorage.
-  useEffect(() => {
-    if (firebaseUser && !currentMechanic && mechanics.length > 0 && !loginTokenState && !inviteTokenState) {
-      const matched = mechanics.find((m) => emailForMechanic(m) === firebaseUser.email);
-      if (matched) {
-        localStorage.setItem('deviceMechanic', matched);
-        setCurrentMechanic(matched);
-        setScreen('dashboard');
-      }
-    }
-  }, [firebaseUser, mechanics]);
   const [pinModal, setPinModal] = useState(null); // { mode: 'verify'|'setup', mechanic, stage, firstEntry }
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
@@ -1981,7 +1953,6 @@ function App() {
   const [tsWeekOffset, setTsWeekOffset] = useState(0);
   const [showWeekTable, setShowWeekTable] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
-  const [openOrdersUnitFilter, setOpenOrdersUnitFilter] = useState('');
   const [mySummaryStart, setMySummaryStart] = useState('');
   const [mySummaryEnd, setMySummaryEnd] = useState('');
 
@@ -2124,14 +2095,6 @@ function App() {
       setMechanicSchedules(snap.val() || {});
     });
     return () => schedulesRef.off('value', onSchedules);
-  }, []);
-
-  useEffect(() => {
-    const hiddenRef = firebase.database().ref('hiddenOrders');
-    const onHidden = hiddenRef.on('value', (snap) => {
-      setHiddenOrders(snap.val() || {});
-    });
-    return () => hiddenRef.off('value', onHidden);
   }, []);
 
   useEffect(() => {
@@ -3014,7 +2977,7 @@ function App() {
 
   const exportTimesheets = async (entries, filenamePrefix) => {
     const sorted = [...entries].sort((a, b) => (a.mechanic || '').localeCompare(b.mechanic || '') || a.date.localeCompare(b.date));
-    const rows = [['Mechanic', 'Date', 'Clock In', 'Clock Out', 'Break Start', 'Break End', 'Paid Hours', 'Signed', 'Jobs (unit: hours)']];
+    const rows = [['Mechanic', 'Date', 'Clock In', 'Clock Out', 'Break Start', 'Break End', 'Worked Through Break', 'Paid Hours', 'Signed', 'Jobs (unit: hours)']];
     let lastMechanic = null;
     sorted.forEach((e) => {
       if (e.mechanic !== lastMechanic) {
@@ -3030,6 +2993,7 @@ function App() {
         fmtTime(e.clockOut),
         fmtTime(e.lunchStart),
         fmtTime(e.lunchEnd),
+        e.skippedLunch ? 'Yes' : 'No',
         fmtHoursDecimal(entryHours(e)),
         e.signature ? 'Yes' : 'No',
         jobsStr,
@@ -3086,11 +3050,25 @@ function App() {
       status: 'Open',
       notes: [],
       createdBy: currentMechanic,
+      onBoard: true, // new orders show up right away; older/queued ones need to be pulled out deliberately
       media: scanPhotoDataUrl ? [{ id: uid(), dataUrl: scanPhotoDataUrl, author: currentMechanic, ts: new Date().toISOString() }] : [],
     };
     await persistOrders([order, ...orders]);
     setShowAddOrder(false);
     setScanReviewData(null);
+  };
+
+  // Older orders saved before this feature existed have no onBoard field at
+  // all — treated as already on the board so nothing already-visible
+  // suddenly vanishes the moment this ships.
+  const isOnBoard = (order) => order.onBoard !== false;
+
+  const pullOntoBoard = async (orderId) => {
+    await updateOrder(orderId, { onBoard: true });
+  };
+
+  const pullOffBoard = async (orderId) => {
+    await updateOrder(orderId, { onBoard: false });
   };
 
   // Sends a photo of a receipt/invoice to the backend, which asks Claude to
@@ -3483,8 +3461,7 @@ function App() {
           return haystack.includes(q);
         })
       : [];
-    const myHiddenIds = hiddenOrders[slugForMechanic(currentMechanic || '')] || {};
-    const openOrdersAll = orders
+    const openOrders = orders
       .filter((o) => o.status !== 'Done')
       .slice()
       .sort((a, b) => {
@@ -3493,41 +3470,35 @@ function App() {
         if (b.dueDate) return 1;
         return 0;
       });
-    const openOrders = openOrdersAll.filter((o) => !myHiddenIds[o.id]);
-    const myHiddenOpenOrders = openOrdersAll.filter((o) => myHiddenIds[o.id]);
 
-    // Grouped by unit, each unit collapsible — sorted numerically so
-    // "C10" comes after "C2", not before it.
-    const openOrdersByUnit = {};
-    openOrders.forEach((o) => {
+    // Only orders someone has actually pulled onto the board show here —
+    // everything else stays tucked away in the dropdown until picked, so
+    // the board doesn't get cluttered with every open job at once.
+    const visibleOpenOrders = openOrders.filter(isOnBoard);
+    const queuedOrders = openOrders.filter((o) => !isOnBoard(o));
+
+    // Queued orders, grouped by unit for the "pull onto board" dropdown —
+    // sorted numerically so "C10" comes after "C2", not before it.
+    const queuedByUnit = {};
+    queuedOrders.forEach((o) => {
       const key = o.unit || 'No unit';
-      if (!openOrdersByUnit[key]) openOrdersByUnit[key] = [];
-      openOrdersByUnit[key].push(o);
+      if (!queuedByUnit[key]) queuedByUnit[key] = [];
+      queuedByUnit[key].push(o);
     });
-    const unitGroups = Object.keys(openOrdersByUnit).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const queuedUnitGroups = Object.keys(queuedByUnit).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
-    const renderOrderCard = (o, opts) => {
+    const renderOrderCard = (o) => {
       const isDone = o.status === 'Done';
-      const isHiddenView = opts && typeof opts.hidden === 'boolean' ? opts.hidden : !!myHiddenIds[o.id];
       return (
-        <button
+        <div
           key={o.id}
           onClick={() => { setActiveUnit(o.unit); setActiveOrderId(o.id); setScreen('order'); setConfirmDelete(false); }}
+          role="button"
+          tabIndex={0}
           style={{ background: isDone ? COLORS.line : COLORS.manila, color: isDone ? COLORS.inkDim : COLORS.ink2 }}
-          className="relative rounded-lg p-5 pl-8 pr-12 text-left w-full focus:outline-none focus:ring-2 transition-all hover:scale-102 active:scale-98"
+          className="relative rounded-lg p-5 pl-8 text-left w-full focus:outline-none focus:ring-2 transition-all hover:scale-102 active:scale-98 cursor-pointer"
         >
           <PunchHole bg={isDone ? COLORS.line : COLORS.manila} />
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setOrderHiddenForMechanic(currentMechanic, o.id, !isHiddenView);
-            }}
-            title={isHiddenView ? 'Add back to my board' : 'Take off my board'}
-            className="absolute top-3 right-3 w-7 h-7 rounded-full flex items-center justify-center font-bold text-sm transition-all hover:scale-110"
-            style={{ color: isDone ? COLORS.inkDim : '#5B5342', background: 'rgba(0,0,0,0.06)' }}
-          >
-            {isHiddenView ? '+' : '✕'}
-          </button>
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
               <p className="font-mono text-xs mb-1 font-semibold" style={{ color: isDone ? COLORS.line : '#5B5342' }}>{o.unit}</p>
@@ -3537,9 +3508,22 @@ function App() {
                 {o.dueDate && <span>📅 {fmtDate(o.dueDate)}</span>}
               </div>
             </div>
-            <StatusStamp status={o.status} small t={t} />
+            <div className="flex flex-col items-end gap-2">
+              <StatusStamp status={o.status} small t={t} />
+              {!isDone && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); pullOffBoard(o.id); }}
+                  title="Take off the board — waiting on parts, etc."
+                  className="text-xs px-2 py-1 rounded-full focus:outline-none"
+                  style={{ color: '#8A7F5E', background: 'rgba(0,0,0,0.08)' }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
-        </button>
+        </div>
       );
     };
 
@@ -3705,36 +3689,34 @@ function App() {
                   <p className="text-base" style={{ color: COLORS.inkDim }}>{t('noOrdersMatchSearch')}</p>
                 </div>
               ) : (
-                <div className="space-y-3">{searchResults.map((o) => renderOrderCard(o))}</div>
+                <div className="space-y-3">{searchResults.map(renderOrderCard)}</div>
               )}
             </div>
           ) : (
             <React.Fragment>
               <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-                <div className="flex items-center gap-3">
-                  <h2 className="font-display text-lg font-semibold uppercase tracking-wide">{t('openWorkOrders')}</h2>
+                <h2 className="font-display text-lg font-semibold uppercase tracking-wide">{t('openWorkOrders')}</h2>
+                <div className="flex gap-2 flex-wrap">
                   <select
-                    value={openOrdersUnitFilter}
-                    onChange={(e) => setOpenOrdersUnitFilter(e.target.value)}
+                    value=""
+                    onChange={(e) => { if (e.target.value) pullOntoBoard(e.target.value); }}
+                    disabled={queuedOrders.length === 0}
                     className="text-xs font-display uppercase tracking-wider font-semibold px-2 py-1.5 rounded-lg focus:outline-none focus:ring-2"
-                    style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+                    style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}`, opacity: queuedOrders.length === 0 ? 0.5 : 1 }}
                   >
-                    <option value="">All units</option>
-                    {unitGroups.map((u) => (
-                      <option key={u} value={u}>{u} ({openOrdersByUnit[u].length})</option>
+                    <option value="">
+                      {queuedOrders.length === 0 ? 'Nothing queued' : `+ Pull a job onto the board (${queuedOrders.length} queued)`}
+                    </option>
+                    {queuedUnitGroups.map((unit) => (
+                      <optgroup key={unit} label={unit}>
+                        {queuedByUnit[unit].map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {getLocalizedText(o.description, lang) || t('noDescription')}
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
-                  {myHiddenOpenOrders.length > 0 && (
-                    <button
-                      onClick={() => setShowHiddenOrders((s) => !s)}
-                      className="text-xs font-display uppercase tracking-wider font-semibold px-2 py-1.5 rounded-lg focus:outline-none focus:ring-2"
-                      style={{ color: COLORS.inkDim, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
-                    >
-                      {showHiddenOrders ? 'Hide' : 'Hidden'} ({myHiddenOpenOrders.length})
-                    </button>
-                  )}
-                </div>
-                <div className="flex gap-2">
                   <button
                     onClick={() => setScreen('machines')}
                     className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg transition-all hover:scale-105"
@@ -3777,23 +3759,20 @@ function App() {
                 />
               )}
 
-              {showHiddenOrders && myHiddenOpenOrders.length > 0 && (
-                <div className="mb-5">
-                  <p className="font-mono text-xs uppercase tracking-wider mb-2" style={{ color: COLORS.inkDim }}>Taken off your board — tap + to bring back</p>
-                  <div className="space-y-3">
-                    {myHiddenOpenOrders.map((o) => renderOrderCard(o, { hidden: true }))}
-                  </div>
-                </div>
-              )}
-
-              {openOrders.length === 0 ? (
+              {visibleOpenOrders.length === 0 ? (
                 <div className="rounded-lg p-10 text-center" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.line}` }}>
-                  <p className="font-body text-base mb-2" style={{ color: COLORS.inkDim }}>All caught up!</p>
-                  <p className="font-body text-sm" style={{ color: COLORS.line }}>{t('noOpenOrders')}</p>
+                  <p className="font-body text-base mb-2" style={{ color: COLORS.inkDim }}>
+                    {queuedOrders.length > 0 ? 'Board is clear' : 'All caught up!'}
+                  </p>
+                  <p className="font-body text-sm" style={{ color: COLORS.line }}>
+                    {queuedOrders.length > 0
+                      ? `${queuedOrders.length} job${queuedOrders.length !== 1 ? 's' : ''} waiting in the dropdown above — pull one out when you're ready to start it.`
+                      : t('noOpenOrders')}
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {(openOrdersUnitFilter ? (openOrdersByUnit[openOrdersUnitFilter] || []) : openOrders).map((o) => renderOrderCard(o))}
+                  {visibleOpenOrders.map(renderOrderCard)}
                 </div>
               )}
             </React.Fragment>
@@ -4449,12 +4428,72 @@ function App() {
             Manage who can sign in, and who has admin access like you.
           </p>
 
-         <div className="rounded-lg p-5 mb-6" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>
-  <p className="font-display text-sm uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>+ Invite a new employee</p>
-  <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>
-    Invites are now created from the Production Timesheets app, where you can also assign their role and job. Open ☰ → Production Timesheets → Admin → Employees.
-  </p>
-</div> 
+          <div className="rounded-lg p-5 mb-6" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>
+            <p className="font-display text-sm uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>+ Invite a new employee</p>
+            <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>
+              Accounts can only be created via an invite link now — type their name and send them the link this generates.
+            </p>
+            <div className="flex gap-2 mb-3">
+              <input
+                value={inviteNameDraft}
+                onChange={(e) => setInviteNameDraft(e.target.value)}
+                placeholder="Their name"
+                className="flex-1 rounded-lg px-4 py-2 text-base focus:outline-none focus:ring-2"
+                style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+              />
+              <Btn
+                onClick={async () => {
+                  setGeneratingInvite(true);
+                  const link = await generateInvite(inviteNameDraft);
+                  setGeneratedInviteLink(link);
+                  setGeneratingInvite(false);
+                }}
+                disabled={!inviteNameDraft.trim() || generatingInvite}
+              >
+                {generatingInvite ? '…' : 'Generate link'}
+              </Btn>
+            </div>
+            {generatedInviteLink && (
+              <div className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised }}>
+                <p className="text-xs mb-2 break-all font-mono" style={{ color: COLORS.ink }}>{generatedInviteLink}</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      if (navigator.share) {
+                        navigator.share({ title: 'Harder Contracting — join the team', url: generatedInviteLink }).catch(() => {});
+                      } else {
+                        navigator.clipboard.writeText(generatedInviteLink).catch(() => {});
+                      }
+                    }}
+                    className="text-xs font-display uppercase tracking-wider font-semibold px-3 py-2 rounded-lg"
+                    style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+                  >
+                    {navigator.share ? 'Share link' : 'Copy link'}
+                  </button>
+                  <button
+                    onClick={() => { setGeneratedInviteLink(null); setInviteNameDraft(''); }}
+                    className="text-xs underline"
+                    style={{ color: COLORS.inkDim }}
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <label className="block mb-6">
+            <span className="text-xs font-display uppercase tracking-wide block mb-2" style={{ color: COLORS.inkDim }}>View an employee</span>
+            <select
+              value={teamViewFilter}
+              onChange={(e) => setTeamViewFilter(e.target.value)}
+              className="w-full rounded-lg px-4 py-2.5 text-base focus:outline-none focus:ring-2"
+              style={{ background: COLORS.surface, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+            >
+              <option value="">All employees</option>
+              {mechanics.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </label>
 
           <button
             onClick={() => setScreen('pdtTranslations')}
@@ -4463,18 +4502,7 @@ function App() {
           >
             🌐 Plautdietsch Translations
           </button>
-<button
-  onClick={() => setScreen('timesheets')}
-  className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg mb-6 ml-2"
-  style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
->
-  📊 Payroll / Timesheets
-</button>
 
-<div className="rounded-lg p-5 mb-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
-  <p className="text-sm font-semibold mb-3" style={{ color: COLORS.ink }}>🔔 Shift reminder wording</p>
-  <PushMessageEditor pushMessages={pushMessages} onSave={savePushMessages} />
-</div>
           {mechanics.length > 1 && (
             <div className="mb-8">
               {showRemoveAllConfirm ? (
@@ -4501,7 +4529,7 @@ function App() {
           )}
 
           <div className="space-y-3">
-            {mechanics.map((m) => {
+            {(teamViewFilter ? mechanics.filter((m) => m === teamViewFilter) : mechanics).map((m) => {
               const isSelf = m === currentMechanic;
               const mIsAdmin = admins.includes(m);
               return (
@@ -4699,7 +4727,7 @@ function App() {
             </label>
           </div>
 
-          
+          {isAdmin && <PushMessageEditor pushMessages={pushMessages} onSave={savePushMessages} />}
         </div>
       </div>
     );
@@ -5414,6 +5442,7 @@ function WeekReviewTable({ entries }) {
             <th style={th}>In</th>
             <th style={th}>Out</th>
             <th style={th}>Break</th>
+            <th style={th}>Worked thru break</th>
             <th style={th}>Paid hrs</th>
             <th style={th}>Signed</th>
             <th style={th}>Jobs</th>
@@ -5423,7 +5452,7 @@ function WeekReviewTable({ entries }) {
           {groups.map((g) => (
             <React.Fragment key={g.mechanic}>
               <tr>
-                <td colSpan={7} style={{ padding: '8px 12px', fontWeight: 700, color: COLORS.accent, background: COLORS.surface, borderBottom: `1px solid ${COLORS.line}` }}>
+                <td colSpan={8} style={{ padding: '8px 12px', fontWeight: 700, color: COLORS.accent, background: COLORS.surface, borderBottom: `1px solid ${COLORS.line}` }}>
                   {g.mechanic}
                 </td>
               </tr>
@@ -5433,6 +5462,7 @@ function WeekReviewTable({ entries }) {
                   <td style={td}>{fmtTime(e.clockIn)}</td>
                   <td style={td}>{e.clockOut ? fmtTime(e.clockOut) : '—'}</td>
                   <td style={td}>{!e.skippedLunch && e.lunchStart && e.lunchEnd ? `${fmtTime(e.lunchStart)}–${fmtTime(e.lunchEnd)}` : '—'}</td>
+                  <td style={td}>{e.skippedLunch ? 'Yes' : 'No'}</td>
                   <td style={{ ...td, color: COLORS.accent, fontWeight: 700 }}>{fmtHoursDecimal(entryHours(e))}</td>
                   <td style={{ ...td, color: e.signature ? COLORS.done : COLORS.line }}>{e.signature ? '✓' : '—'}</td>
                   <td style={td}>{(e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`).join(' | ') || '—'}</td>
@@ -5519,25 +5549,12 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
     if (!time || !datePart) return null;
     return new Date(`${datePart}T${time}`).toISOString();
   };
-  const addDays = (dateStr, n) => {
-    const d = new Date(`${dateStr}T00:00:00`);
-    d.setDate(d.getDate() + n);
-    const pad = (v) => String(v).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  };
   const clockInDatePart = getLocalDatePart(entry.clockIn) || entry.date;
-  const storedClockOutDatePart = getLocalDatePart(entry.clockOut) || clockInDatePart;
+  const clockOutDatePart = getLocalDatePart(entry.clockOut) || clockInDatePart;
   const [clockInTime, setClockInTime] = useState(toLocalTime(entry.clockIn));
   const [clockOutTime, setClockOutTime] = useState(toLocalTime(entry.clockOut));
   const [lunchStartTime, setLunchStartTime] = useState(toLocalTime(entry.lunchStart));
   const [lunchEndTime, setLunchEndTime] = useState(toLocalTime(entry.lunchEnd));
-  // Whether clock-out is stored as landing on the day AFTER clock-in. This
-  // starts out matching whatever's already saved (so nothing changes unless
-  // you touch it), but — unlike the date itself — it's editable, so a bad
-  // record (clock-out accidentally saved a day ahead) can actually be
-  // corrected here instead of being stuck forever.
-  const [clockOutNextDay, setClockOutNextDay] = useState(storedClockOutDatePart !== clockInDatePart);
-  const clockOutDatePart = clockOutNextDay ? addDays(clockInDatePart, 1) : clockInDatePart;
 
   if (isEditing) {
     return (
@@ -5551,10 +5568,6 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
           <label className="block">
             <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock out</span>
             <input type="time" value={clockOutTime} onChange={(e) => setClockOutTime(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
-            <label className="flex items-center gap-2 mt-1.5 text-xs" style={{ color: COLORS.inkDim }}>
-              <input type="checkbox" checked={clockOutNextDay} onChange={(e) => setClockOutNextDay(e.target.checked)} />
-              Clock-out is the next day
-            </label>
           </label>
           <label className="block">
             <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Break start</span>
@@ -5583,7 +5596,6 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
                   clockOut: combineDateTime(clockOutDatePart, clockOutTime),
                   lunchStart: combineDateTime(clockInDatePart, lunchStartTime),
                   lunchEnd: combineDateTime(clockInDatePart, lunchEndTime),
-                  skippedLunch: !(lunchStartTime && lunchEndTime),
                 })
               }
             >
@@ -5614,7 +5626,8 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
       <div className="flex flex-wrap gap-4 text-xs font-mono mb-1" style={{ color: COLORS.inkDim }}>
         <span>In {fmtTime(entry.clockIn)}</span>
         <span>Out {entry.clockOut ? fmtTime(entry.clockOut) : '—'}</span>
-        {entry.lunchStart && entry.lunchEnd && <span>Break {fmtTime(entry.lunchStart)}–{fmtTime(entry.lunchEnd)}</span>}
+        {!entry.skippedLunch && entry.lunchStart && entry.lunchEnd && <span>Break {fmtTime(entry.lunchStart)}–{fmtTime(entry.lunchEnd)}</span>}
+        {entry.skippedLunch && <span>No break taken</span>}
       </div>
       {entry.clockOut && (
         <p className="text-xs font-mono mb-2" style={{ color: COLORS.accent }}>
