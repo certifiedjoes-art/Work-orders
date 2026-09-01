@@ -1,7 +1,7 @@
 {
-  "name": "Harder Contracting — Work Order Board",
-  "short_name": "Work Orders",
-  "description": "Shared work order board for Harder Contracting mechanics",
+  "name": "⚠️ TEST BUILD — Harder Contracting",
+  "short_name": "⚠️ TEST",
+  "description": "TEST version of the merged Work Order Board + Timesheets app — not for daily use",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#1B1F19",
