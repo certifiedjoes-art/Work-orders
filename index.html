@@ -5920,6 +5920,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // once (if) a connection is available. Only show "loading" on a true first
   // run with nothing cached yet.
   const [loading, setLoading] = useState(() => cacheGet('orders', null) === null);
+  const [loadingTooLong, setLoadingTooLong] = useState(false);
   const [mechanics, setMechanics] = useState(() => cacheGet('mechanics', []));
   const [units, setUnits] = useState(() => cacheGet('units', []));
   const [unitTypes, setUnitTypes] = useState(() => cacheGet('unitTypes', {})); // { [unitName]: 'buncher'|'processor'|...|'truck'|'other' } — tags a real work-order unit for production/mechanic tracking
@@ -6476,6 +6477,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const checkReady = () => {
       if (ready.meta && ready.orders && ready.templates) setLoading(false);
     };
+    // A permission or connection error on any of these three reads used to
+    // fail completely silently — Firebase's .on() success callback just
+    // never fires, "ready" never becomes true, and the app sits on
+    // "Loading board..." forever with no way for anyone to know why. The
+    // error callback here (the second, previously-omitted argument to
+    // .on()) surfaces exactly what went wrong using the same fatal-error
+    // screen the rest of the app falls back to, instead of a silent hang.
+    const onLoadError = (label) => (err) => {
+      if (typeof showFatalError === 'function') {
+        showFatalError(`Couldn't load ${label} — ${err && err.message ? err.message : err}\n\nThis usually means either no signal, or the database rules are blocking a signed-out read.`);
+      }
+    };
 
     const onMeta = metaRef.on('value', (snap) => {
       const meta = snap.val() || { mechanics: [], units: [] };
@@ -6487,7 +6500,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       cacheSet('units', cleanUnits);
       ready.meta = true;
       checkReady();
-    });
+    }, onLoadError('the employee list'));
     let onOrders = null;
     // Self-healing safety net — see selfHealMigration. Guarantees
     // workOrders is populated before it's ever treated as the live
@@ -6500,7 +6513,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         cacheSet('orders', val);
         ready.orders = true;
         checkReady();
-      });
+      }, onLoadError('work orders'));
     })();
     const onTemplates = templatesRef.on('value', (snap) => {
       const t = snap.val();
@@ -6512,7 +6525,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       }
       ready.templates = true;
       checkReady();
-    });
+    }, onLoadError('checklist templates'));
 
     return () => {
       metaRef.off('value', onMeta);
@@ -6520,6 +6533,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       templatesRef.off('value', onTemplates);
     };
   }, []);
+
+  useEffect(() => {
+    if (!loading) { setLoadingTooLong(false); return; }
+    const timer = setTimeout(() => setLoadingTooLong(true), 12000);
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   // ---- Unified Shift screen listeners ----
   useEffect(() => {
@@ -8878,7 +8897,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           }}
           onSkip={() => setOfferBiometric(null)}
         />
-        <span className="text-sm uppercase tracking-widest" style={{ color: COLORS.inkDim }}>Loading board…</span>
+        {loadingTooLong ? (
+          <div className="text-center px-6">
+            <p className="text-sm mb-1" style={{ color: COLORS.inkDim }}>This is taking longer than it should.</p>
+            <p className="text-xs mb-4" style={{ color: COLORS.line }}>Check your signal, or try again below.</p>
+            <button onClick={() => window.location.reload()} className="px-4 py-2 rounded-lg text-sm font-bold" style={{ background: COLORS.accent, color: COLORS.bg }}>Try again</button>
+          </div>
+        ) : (
+          <span className="text-sm uppercase tracking-widest" style={{ color: COLORS.inkDim }}>Loading board…</span>
+        )}
       </div>
     );
   }
