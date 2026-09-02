@@ -6057,6 +6057,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [uploadingSafetyDoc, setUploadingSafetyDoc] = useState(false);
   const [expandedSafetyCategory, setExpandedSafetyCategory] = useState(null);
   const [showAddSafetyDoc, setShowAddSafetyDoc] = useState(null); // category name, or null
+  const [openingSafetyDocId, setOpeningSafetyDocId] = useState(null);
+  const warmedSafetyDocIds = useRef(new Set());
   const [mapPins, setMapPins] = useState(() => cacheGet('mapPins', [])); // [{id, mapId, x, y, type, note, addedBy, isPublic, time}]
   const [inviteRoleDraft, setInviteRoleDraft] = useState('employee');
   const [inviteUnitDraft, setInviteUnitDraft] = useState('');
@@ -6299,6 +6301,27 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     });
     return () => ref.off('value', on);
   }, []);
+
+  // Proactively pulls every safety doc's actual file into the service
+  // worker's cache the moment the list loads (while there's signal), so
+  // crew can open them later with zero bars — the SW's generic fetch
+  // handler caches any successful response, this just makes sure that
+  // happens well before anyone's standing in the bush needing the SDS
+  // sheet. Each doc is only fetched once per app session (warmedSafetyDocIds),
+  // not on every re-render.
+  useEffect(() => {
+    if (!isOnline) return;
+    safetyDocs.forEach((doc) => {
+      if (warmedSafetyDocIds.current.has(doc.id)) return;
+      warmedSafetyDocIds.current.add(doc.id);
+      fetch(doc.url).catch(() => {
+        // No signal after all, or the fetch failed for some other reason —
+        // it'll just get cached the next time someone actually opens it
+        // (or the next time this effect re-runs) instead.
+        warmedSafetyDocIds.current.delete(doc.id);
+      });
+    });
+  }, [safetyDocs, isOnline]);
 
   useEffect(() => {
     const ref = firebase.database().ref('pins');
@@ -7722,6 +7745,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setSafetyDocs(next);
     cacheSet('safetyDocs', next);
     await queueWrite('safetyDocs', { kind: 'delete', entryId: docId });
+  };
+  // Opens a safety doc by fetching it in-app (rather than navigating an <a>
+  // tag straight to the Firebase Storage URL) so the request passes through
+  // the service worker's cache — same file whether there's signal or not,
+  // once it's been warmed at least once. Building a local blob: URL avoids
+  // ever depending on a live connection to actually render the document.
+  const openSafetyDoc = async (doc) => {
+    setOpeningSafetyDocId(doc.id);
+    try {
+      const res = await fetch(doc.url);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, '_blank');
+    } catch (e) {
+      alert("Couldn't open that document — it hasn't been downloaded to this device yet. Connect once with signal, open Safety, then it'll be available offline after that.");
+    }
+    setOpeningSafetyDocId(null);
   };
   const deleteMap = async (mapId) => {
     await deleteOneMap(mapId);
@@ -12728,10 +12768,17 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   <div className="space-y-2 mb-3">
                     {docs.map((doc) => (
                       <div key={doc.id} className="flex items-center justify-between gap-3 rounded-lg px-3 py-3" style={{ background: COLORS.surfaceRaised }}>
-                        <a href={doc.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 min-w-0 flex-1" style={{ color: COLORS.ink }}>
+                        <button
+                          onClick={() => openSafetyDoc(doc)}
+                          disabled={openingSafetyDocId === doc.id}
+                          className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                          style={{ color: COLORS.ink }}
+                        >
                           <span style={{ fontSize: '1.1rem' }}>📄</span>
-                          <span className="text-sm font-semibold truncate">{doc.title}</span>
-                        </a>
+                          <span className="text-sm font-semibold truncate">
+                            {openingSafetyDocId === doc.id ? 'Opening…' : doc.title}
+                          </span>
+                        </button>
                         {isAdmin && (
                           <button
                             onClick={() => { if (confirm(`Remove "${doc.title}"?`)) deleteSafetyDoc(doc.id); }}
