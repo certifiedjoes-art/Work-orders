@@ -1,7 +1,7 @@
 {
-  "name": "⚠️ TEST BUILD — Harder Contracting",
-  "short_name": "⚠️ TEST",
-  "description": "TEST version of the merged Work Order Board + Timesheets app — not for daily use",
+  "name": "Harder Contracting",
+  "short_name": "Harder Contracting",
+  "description": "Work Order Board, Timesheets, Maps, and Safety — all in one app.",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#1B1F19",

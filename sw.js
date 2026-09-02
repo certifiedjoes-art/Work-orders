@@ -1,6 +1,6 @@
 // Bump this version string every time index.html changes, so phones
 // reliably pick up the new version instead of getting stuck on an old one.
-const CACHE_NAME = 'harder-work-orders-v130';
+const CACHE_NAME = 'harder-work-orders-v159';
 
 // Handles push notifications arriving while the app isn't open — separate
 // from the caching logic below, using Firebase Cloud Messaging's own
@@ -46,7 +46,7 @@ const APP_SHELL = [
 ];
 
 const CDN_ASSETS = [
-  'https://cdn.tailwindcss.com',
+  'https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css',
   'https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js',
   'https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js',
   'https://cdn.jsdelivr.net/npm/@babel/standalone@7.25.6/babel.min.js',
