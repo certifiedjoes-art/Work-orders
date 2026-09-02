@@ -724,6 +724,12 @@ const COLORS = {
 
 const STATUSES = ['Open', 'In Progress', 'Done'];
 
+// Safety document library categories, in display order. Everyone (crew
+// included) can view every one of these — monthly equipment inspections
+// and incident/near-miss reports are handled elsewhere and are NOT part
+// of this open library.
+const SAFETY_CATEGORIES = ['Safety Manual', 'OHS Manual', 'SDS Sheets', 'Safety Meeting Minutes', 'Committee Meeting Minutes'];
+
 function OfflineBanner({ isOnline }) {
   if (isOnline) return null;
   return (
@@ -2692,6 +2698,7 @@ function SidebarMenu({ show, onClose, mechanic, isAdmin, isForeman, isProduction
             {item('⏱️', 'Shift', () => onNavigate('shift'))}
             {item('🗺️', 'Maps', () => onNavigate('maps'))}
             {item('🛣️', 'Highway Map', () => onNavigate('highwayMap'))}
+            {item('🦺', 'Safety', () => onNavigate('safety'))}
             {(isAdmin || isForeman) && item('⚙️', 'Admin', () => onNavigate('admin'))}
             {!isProduction && item('🎉', t('shoutouts'), () => onNavigate('shoutouts'))}
             {!isProduction && item('📋', t('checklists'), () => onNavigate('checklists'))}
@@ -3108,6 +3115,17 @@ async function bulkPatchMapRecords(patchesById) {
   });
   await firebase.database().ref().update(stripUndefined(updates));
 }
+// Safety document library — the safety manual, OHS manual, SDS sheets,
+// and safety/committee meeting minutes, organized by category. Visible to
+// everyone (crew included); adding or removing entries is gated to admins
+// in the UI. Files themselves live in Firebase Storage under safetyDocs/,
+// this record just holds the metadata + download URL.
+async function saveSafetyDocRecord(doc) {
+  await firebase.database().ref('safetyDocRecords/' + doc.id).set(stripUndefined(doc));
+}
+async function deleteSafetyDocRecord(docId) {
+  await firebase.database().ref('safetyDocRecords/' + docId).remove();
+}
 async function migrateMapsToPerRecord() {
   return migrateArrayCollectionToPerRecord('maps', 'mapRecords', 'maps');
 }
@@ -3236,6 +3254,7 @@ const OFFLINE_QUEUE_HANDLERS = {
   driverLogs: { save: saveDriverLogRecord, patch: patchDriverLogRecord, delete: deleteDriverLogRecord, bulkSave: bulkSaveDriverLogRecords },
   preTripInspections: { save: saveInspectionRecord, delete: deleteInspectionRecord },
   maps: { save: saveMapRecord, patch: patchMapRecord, delete: deleteMapRecord, bulkPatch: bulkPatchMapRecords },
+  safetyDocs: { save: saveSafetyDocRecord, delete: deleteSafetyDocRecord },
   mapPins: { save: saveMapPinRecord, patch: patchMapPinRecord, delete: deleteMapPinRecord },
   mapLines: { save: saveMapLineRecord, patch: patchMapLineRecord, delete: deleteMapLineRecord },
   machineTracks: { save: saveMachineTrackRecord, patch: patchMachineTrackRecord },
@@ -5037,6 +5056,43 @@ function AdminSection({ icon, title, expanded, onToggle, children }) {
   );
 }
 
+function SafetyDocUploadForm({ uploading, onCancel, onSubmit }) {
+  const [title, setTitle] = useState('');
+  const [file, setFile] = useState(null);
+  return (
+    <div className="rounded-lg p-3 mt-2" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <input
+        type="text"
+        placeholder="Document title (e.g. Safety Manual 2026)"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        disabled={uploading}
+        className="w-full mb-2 px-3 py-2 rounded-lg text-sm"
+        style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+      />
+      <label
+        className="inline-block text-xs font-semibold px-3 py-2 rounded-lg mb-2 cursor-pointer"
+        style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+      >
+        {file ? file.name : 'Choose File'}
+        <input
+          type="file"
+          accept=".pdf,.doc,.docx,image/*"
+          className="hidden"
+          disabled={uploading}
+          onChange={(e) => setFile((e.target.files && e.target.files[0]) || null)}
+        />
+      </label>
+      <div className="flex gap-2 mt-2">
+        <Btn onClick={() => onSubmit(title, file)} disabled={uploading || !title.trim() || !file}>
+          {uploading ? 'Uploading…' : 'Upload'}
+        </Btn>
+        <Btn variant="ghost" onClick={onCancel} disabled={uploading}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
 // Full admin editing for one driver's logged day — always available, even
 // after the week is approved, since this data may need real correction
 // (a missed break added back in, a wrong time fixed) more often than
@@ -5997,6 +6053,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [driverLogApprovals, setDriverLogApprovals] = useState(() => cacheGet('driverLogApprovals', {}));
   const [preTripInspections, setPreTripInspections] = useState(() => cacheGet('preTripInspections', []));
   const [maps, setMaps] = useState(() => cacheGet('maps', [])); // [{id, name, isPublic, isDefault, addedBy}] — real file content comes in a later stage
+  const [safetyDocs, setSafetyDocs] = useState(() => cacheGet('safetyDocs', [])); // [{id, title, category, url, fileName, addedBy, addedAt}]
+  const [uploadingSafetyDoc, setUploadingSafetyDoc] = useState(false);
+  const [expandedSafetyCategory, setExpandedSafetyCategory] = useState(null);
+  const [showAddSafetyDoc, setShowAddSafetyDoc] = useState(null); // category name, or null
   const [mapPins, setMapPins] = useState(() => cacheGet('mapPins', [])); // [{id, mapId, x, y, type, note, addedBy, isPublic, time}]
   const [inviteRoleDraft, setInviteRoleDraft] = useState('employee');
   const [inviteUnitDraft, setInviteUnitDraft] = useState('');
@@ -6228,6 +6288,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       });
     })();
     return () => { if (on) ref.off('value', on); };
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('safetyDocRecords');
+    const on = ref.on('value', (snap) => {
+      const val = Object.values(snap.val() || {});
+      setSafetyDocs(val);
+      cacheSet('safetyDocs', val);
+    });
+    return () => ref.off('value', on);
   }, []);
 
   useEffect(() => {
@@ -7620,6 +7690,38 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const patches = {};
     maps.forEach((m) => { patches[m.id] = { isDefault: m.id === mapId }; });
     await bulkPatchMaps(patches);
+  };
+  const addSafetyDoc = async (category, title, file) => {
+    if (!file || !title.trim()) return;
+    setUploadingSafetyDoc(true);
+    try {
+      const storageRef = firebase.storage().ref(`safetyDocs/${Date.now()}-${file.name}`);
+      await storageRef.put(file);
+      const url = await storageRef.getDownloadURL();
+      const doc = {
+        id: uid(),
+        category,
+        title: title.trim(),
+        fileName: file.name,
+        url,
+        addedBy: currentMechanic,
+        addedAt: Date.now(),
+      };
+      const next = [...safetyDocs, doc];
+      setSafetyDocs(next);
+      cacheSet('safetyDocs', next);
+      await queueWrite('safetyDocs', { kind: 'save', entry: doc });
+      setShowAddSafetyDoc(null);
+    } catch (e) {
+      alert("Couldn't upload that document — " + (e.message || 'check your signal and try again.'));
+    }
+    setUploadingSafetyDoc(false);
+  };
+  const deleteSafetyDoc = async (docId) => {
+    const next = safetyDocs.filter((d) => d.id !== docId);
+    setSafetyDocs(next);
+    cacheSet('safetyDocs', next);
+    await queueWrite('safetyDocs', { kind: 'delete', entryId: docId });
   };
   const deleteMap = async (mapId) => {
     await deleteOneMap(mapId);
@@ -12593,6 +12695,79 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         onBack={() => setScreen(landingScreenFor(currentMechanic))}
         t={t}
       />
+    );
+  }
+
+  if (screen === 'safety') {
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
+        {FONT_STYLE}
+        <OfflineBanner isOnline={isOnline} />
+        <div className="max-w-3xl mx-auto">
+          <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
+            {t('backToBoard')}
+          </button>
+          <div className="mb-8">
+            <h1 className="font-display text-3xl font-bold">Safety</h1>
+            <p className="text-sm mt-1" style={{ color: COLORS.inkDim }}>Safety manuals, SDS sheets, and meeting minutes</p>
+          </div>
+
+          {SAFETY_CATEGORIES.map((category) => {
+            const docs = safetyDocs.filter((d) => d.category === category);
+            return (
+              <AdminSection
+                key={category}
+                icon="📄"
+                title={`${category} (${docs.length})`}
+                expanded={expandedSafetyCategory === category}
+                onToggle={() => setExpandedSafetyCategory((c) => (c === category ? null : category))}
+              >
+                {docs.length === 0 ? (
+                  <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>No documents yet.</p>
+                ) : (
+                  <div className="space-y-2 mb-3">
+                    {docs.map((doc) => (
+                      <div key={doc.id} className="flex items-center justify-between gap-3 rounded-lg px-3 py-3" style={{ background: COLORS.surfaceRaised }}>
+                        <a href={doc.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 min-w-0 flex-1" style={{ color: COLORS.ink }}>
+                          <span style={{ fontSize: '1.1rem' }}>📄</span>
+                          <span className="text-sm font-semibold truncate">{doc.title}</span>
+                        </a>
+                        {isAdmin && (
+                          <button
+                            onClick={() => { if (confirm(`Remove "${doc.title}"?`)) deleteSafetyDoc(doc.id); }}
+                            className="text-xs flex-shrink-0"
+                            style={{ color: '#E07A5F' }}
+                          >
+                            🗑️
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {isAdmin && (
+                  showAddSafetyDoc === category ? (
+                    <SafetyDocUploadForm
+                      uploading={uploadingSafetyDoc}
+                      onCancel={() => setShowAddSafetyDoc(null)}
+                      onSubmit={(title, file) => addSafetyDoc(category, title, file)}
+                    />
+                  ) : (
+                    <button
+                      onClick={() => setShowAddSafetyDoc(category)}
+                      className="text-xs font-semibold px-3 py-2 rounded-lg"
+                      style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                    >
+                      + Add Document
+                    </button>
+                  )
+                )}
+              </AdminSection>
+            );
+          })}
+        </div>
+      </div>
     );
   }
 
