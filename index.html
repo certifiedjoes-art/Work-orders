@@ -11117,7 +11117,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </button>
           )}
           <h1 className="font-display text-3xl font-bold mb-2">Admin</h1>
-          <p className="text-sm mb-6" style={{ color: COLORS.inkDim }}>Everything admin-related lives here now — tap a section below to open it.</p>
+
+          {isAdmin && (
+          <button
+            onClick={() => setScreen('pdtTranslations')}
+            className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg mb-6"
+            style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+          >
+            🌐 Plautdietsch Translations
+          </button>
+          )}
 
           {isAdmin && (
           <button
@@ -11149,16 +11158,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           >
             <span>🛣️ Highway Map</span>
             <span style={{ color: COLORS.inkDim }}>→</span>
-          </button>
-          )}
-
-          {isAdmin && (
-          <button
-            onClick={() => setScreen('pdtTranslations')}
-            className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg mb-6"
-            style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
-          >
-            🌐 Plautdietsch Translations
           </button>
           )}
 
