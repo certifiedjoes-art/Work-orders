@@ -1530,6 +1530,60 @@ async function renderPdfFirstPageToBlob(file) {
   return { blob, width: canvas.width, height: canvas.height, geoData };
 }
 
+// Resolves whatever a given map's on-screen image src should be right now.
+// Three cases:
+//  - local-only map (loaded straight from a file on this device, never
+//    touched Firebase): read its blob out of IndexedDB, always.
+//  - Firebase-backed map that's already been cached on this device from a
+//    past visit: use that cached blob, so it opens with zero signal.
+//  - Firebase-backed map with no local cache yet: show the live network
+//    URL now, and quietly cache it in the background for next time.
+function useMapImageSrc(map) {
+  const [src, setSrc] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    let createdUrl = null;
+    setSrc(null);
+    if (!map) return undefined;
+    (async () => {
+      if (map.localOnly) {
+        const blob = await idbGetMapImageBlob(map.id);
+        if (!cancelled && blob) {
+          createdUrl = URL.createObjectURL(blob);
+          setSrc(createdUrl);
+        }
+        return;
+      }
+      if (!map.imageUrl) return;
+      const cached = await idbGetMapImageBlob(map.id);
+      if (cached && !cancelled) {
+        createdUrl = URL.createObjectURL(cached);
+        setSrc(createdUrl);
+      } else if (!cancelled) {
+        setSrc(map.imageUrl); // no offline copy yet — show it live for now
+      }
+      if (navigator.onLine) {
+        try {
+          const resp = await fetch(map.imageUrl);
+          const blob = await resp.blob();
+          await idbSetMapImageBlob(map.id, blob);
+          if (!cancelled && !cached) {
+            createdUrl = URL.createObjectURL(blob);
+            setSrc(createdUrl);
+          }
+        } catch (e) {
+          // offline, or blocked — the cached/live fallback above still stands
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [map && map.id, map && map.imageUrl, map && map.localOnly]);
+  return src;
+}
+
 // Cumulative straight-line distance through every point of a drawn line, in
 // the map's own coordinate units. There's no real-world scale yet since the
 // terrain itself is still a placeholder (see PlaceholderTerrainContent) —
@@ -2600,9 +2654,10 @@ function MachineMarkerDetail({ position, onClose }) {
   );
 }
 
-function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete, onUploadPdf, uploadingMapId, onClose }) {
+function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete, onUploadPdf, uploadingMapId, localMaps, onAddLocalMap, onDeleteLocalMap, addingLocalMap, onClose }) {
   const [newMapName, setNewMapName] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [confirmDeleteLocalId, setConfirmDeleteLocalId] = useState(null);
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-end' }}>
@@ -2653,10 +2708,57 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
           ))}
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 mb-6">
           <TextInput value={newMapName} onChange={(e) => setNewMapName(e.target.value)} placeholder="New map name" className="flex-1" />
           <Btn onClick={() => { onAdd(newMapName); setNewMapName(''); }} disabled={!newMapName.trim()}>Add</Btn>
         </div>
+
+        <div className="h-px my-4" style={{ background: COLORS.line }} />
+
+        <h3 className="font-display text-sm font-bold mb-1">📁 Maps loaded from Files</h3>
+        <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>
+          AirDropped or emailed (saved to Files) straight onto this iPad — no internet needed, ever. These only exist on this device, not shared with the rest of the crew.
+        </p>
+
+        {localMaps.length > 0 && (
+          <div className="space-y-2 mb-4">
+            {localMaps.map((m) => (
+              <div key={m.id} className="rounded-lg p-3" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-semibold">{m.name}</span>
+                  <span className="text-xs" style={{ color: COLORS.accent }}>This device only</span>
+                </div>
+                <p className="text-xs mb-2" style={{ color: COLORS.accent }}>
+                  {m.geoCorners ? '🛰️ Georeferenced automatically from the PDF' : '🗺️ Not georeferenced yet — use "📍 Calibrate" on the map screen'}
+                </p>
+                <div className="flex gap-2 flex-wrap items-center">
+                  {confirmDeleteLocalId === m.id ? (
+                    <React.Fragment>
+                      <Btn variant="danger" onClick={() => { onDeleteLocalMap(m.id); setConfirmDeleteLocalId(null); }}>Confirm delete</Btn>
+                      <Btn variant="ghost" onClick={() => setConfirmDeleteLocalId(null)}>Cancel</Btn>
+                    </React.Fragment>
+                  ) : (
+                    <button onClick={() => setConfirmDeleteLocalId(m.id)} className="text-xs underline" style={{ color: '#E07A5F' }}>Delete</button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <label
+          className="block text-center rounded-lg py-3 cursor-pointer font-display font-semibold uppercase tracking-wide text-sm"
+          style={{ background: COLORS.surfaceRaised, border: `2px dashed ${COLORS.line}`, color: COLORS.accent }}
+        >
+          {addingLocalMap ? 'Processing…' : '📁 Add map from Files'}
+          <input
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            disabled={addingLocalMap}
+            onChange={(e) => { if (e.target.files[0]) onAddLocalMap(e.target.files[0]); e.target.value = ''; }}
+          />
+        </label>
       </div>
     </div>
   );
@@ -2764,6 +2866,62 @@ function cacheSet(key, value) {
     localStorage.setItem('cache_' + key, JSON.stringify(value));
   } catch (e) {
     // storage full or unavailable — offline viewing just won't have this data
+  }
+}
+
+// Map image storage (IndexedDB, not localStorage): map PNGs can be several
+// MB each, which localStorage can't hold. This is what lets a map opened
+// once keep working with zero signal from then on, and what a map loaded
+// straight from an AirDropped/emailed PDF (never touching Firebase) is
+// backed by entirely — see addLocalMapFromFile / uploadMapPdf.
+function idbOpenMapDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('harderMapImages', 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains('images')) req.result.createObjectStore('images');
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbSetMapImageBlob(mapId, blob) {
+  try {
+    const db = await idbOpenMapDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('images', 'readwrite');
+      tx.objectStore('images').put(blob, mapId);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    // IndexedDB unavailable — the map still works over the network while
+    // signal holds, it just won't be available fully offline
+  }
+}
+async function idbGetMapImageBlob(mapId) {
+  try {
+    const db = await idbOpenMapDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction('images', 'readonly');
+      const req = tx.objectStore('images').get(mapId);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    return null;
+  }
+}
+async function idbDeleteMapImageBlob(mapId) {
+  try {
+    const db = await idbOpenMapDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('images', 'readwrite');
+      tx.objectStore('images').delete(mapId);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    // nothing to clean up if it was never stored
   }
 }
 
@@ -6053,6 +6211,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [driverLogApprovals, setDriverLogApprovals] = useState(() => cacheGet('driverLogApprovals', {}));
   const [preTripInspections, setPreTripInspections] = useState(() => cacheGet('preTripInspections', []));
   const [maps, setMaps] = useState(() => cacheGet('maps', [])); // [{id, name, isPublic, isDefault, addedBy}] — real file content comes in a later stage
+  // Maps loaded straight from a file on this device (AirDrop/email → Files),
+  // never touch Firebase, and only ever exist on this one iPad — see
+  // addLocalMapFromFile. Kept separate from `maps` so admin actions that
+  // write to Firebase (delete, publish, set default) can't accidentally
+  // target one of these.
+  const [localMaps, setLocalMaps] = useState(() => cacheGet('localMaps', []));
+  const [addingLocalMap, setAddingLocalMap] = useState(false);
   const [safetyDocs, setSafetyDocs] = useState(() => cacheGet('safetyDocs', [])); // [{id, title, category, url, fileName, addedBy, addedAt}]
   const [uploadingSafetyDoc, setUploadingSafetyDoc] = useState(false);
   const [expandedSafetyCategory, setExpandedSafetyCategory] = useState(null);
@@ -6080,6 +6245,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [expandedDriverFolder, setExpandedDriverFolder] = useState(null);
   const [expandedPreTripUnitFolder, setExpandedPreTripUnitFolder] = useState(null);
   const [selectedMapId, setSelectedMapId] = useState(null);
+  // Same "which public map is currently showing" logic used down in the
+  // Maps screen itself, kept here too (hooks can't be called conditionally)
+  // purely to feed the image-resolving hook below.
+  const publicMapsForImage = [...maps, ...localMaps].filter((m) => m.isPublic);
+  const currentMapForImage = (selectedMapId && publicMapsForImage.find((m) => m.id === selectedMapId)) || publicMapsForImage.find((m) => m.isDefault) || publicMapsForImage[0] || null;
+  const currentMapImageSrc = useMapImageSrc(currentMapForImage);
   const [showManageMaps, setShowManageMaps] = useState(false);
   const [placingPin, setPlacingPin] = useState(false);
   const [pendingPinPosition, setPendingPinPosition] = useState(null); // {x, y} in map viewBox coordinates, set once they tap a spot
@@ -7683,6 +7854,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await queueWrite('maps', { kind: 'save', entry: map });
   };
   const patchOneMap = async (mapId, patch) => {
+    // A local-only map (loaded from Files, this device only) has no
+    // Firebase record to patch — e.g. calibrating it just updates its
+    // entry in localMaps/localStorage instead.
+    if (localMaps.some((m) => m.id === mapId)) {
+      const next = localMaps.map((m) => (m.id === mapId ? { ...m, ...patch } : m));
+      setLocalMaps(next);
+      cacheSet('localMaps', next);
+      return;
+    }
     const next = maps.map((m) => (m.id === mapId ? { ...m, ...patch } : m));
     setMaps(next);
     cacheSet('maps', next);
@@ -7815,6 +7995,47 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       alert("Couldn't process that PDF — " + (e.message || 'try again or try a different file.'));
     }
     setUploadingMapPdf(null);
+  };
+  // Loads a PDF straight from this device's Files app — no Firebase, no
+  // internet, at any point. Covers both AirDrop and "Save to Files" from an
+  // emailed map: by the time either lands in Files, they're identical to
+  // this function. GeoPDF metadata is still auto-detected exactly the same
+  // way as the admin upload path.
+  const addLocalMapFromFile = async (file) => {
+    setAddingLocalMap(true);
+    try {
+      const { blob, width, height, geoData } = await renderPdfFirstPageToBlob(file);
+      const id = 'local-' + uid();
+      await idbSetMapImageBlob(id, blob);
+      const record = {
+        id,
+        name: file.name.replace(/\.pdf$/i, ''),
+        isPublic: true,
+        isDefault: false,
+        localOnly: true,
+        imageUrl: 'local://' + id, // marker only — the real image comes from IndexedDB via useMapImageSrc
+        imageWidth: width,
+        imageHeight: height,
+        geoCorners: geoData ? geoData.corners : undefined,
+        geoBBoxFraction: geoData ? geoData.bboxFraction : undefined,
+        refPoints: [],
+        addedBy: currentMechanic,
+        addedAt: new Date().toISOString(),
+      };
+      const next = [...localMaps, record];
+      setLocalMaps(next);
+      cacheSet('localMaps', next);
+    } catch (e) {
+      alert("Couldn't load that PDF — " + (e.message || 'try a different file.'));
+    }
+    setAddingLocalMap(false);
+  };
+  const deleteLocalMap = async (mapId) => {
+    await idbDeleteMapImageBlob(mapId);
+    const next = localMaps.filter((m) => m.id !== mapId);
+    setLocalMaps(next);
+    cacheSet('localMaps', next);
+    if (selectedMapId === mapId) setSelectedMapId(null);
   };
   const setMapRefPoint = async (mapId, index, point) => {
     const map = maps.find((m) => m.id === mapId);
@@ -11947,7 +12168,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
   // ---------- MAPS ----------
   if (screen === 'maps') {
-    const publicMaps = maps.filter((m) => m.isPublic);
+    const publicMaps = [...maps, ...localMaps].filter((m) => m.isPublic);
     const defaultMap = publicMaps.find((m) => m.isDefault) || publicMaps[0] || null;
     const currentMap = (selectedMapId && publicMaps.find((m) => m.id === selectedMapId)) || defaultMap;
 
@@ -12202,7 +12423,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   <MapCanvas
                     viewBoxWidth={currentMap.imageWidth}
                     viewBoxHeight={currentMap.imageHeight}
-                    backgroundImageUrl={currentMap.imageUrl}
+                    backgroundImageUrl={currentMapImageSrc}
                     pinsToShow={mapPins.filter((p) => p.mapId === currentMap.id && canSeePin(p))}
                     linesToShow={mapLines.filter((l) => l.mapId === currentMap.id && canSeeLine(l))}
                     placingPin={placingPin}
@@ -12319,6 +12540,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             onDelete={deleteMap}
             onUploadPdf={uploadMapPdf}
             uploadingMapId={uploadingMapPdf}
+            localMaps={localMaps}
+            onAddLocalMap={addLocalMapFromFile}
+            onDeleteLocalMap={deleteLocalMap}
+            addingLocalMap={addingLocalMap}
             onClose={() => setShowManageMaps(false)}
           />
         )}
