@@ -6204,6 +6204,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [inviteConsumed, setInviteConsumed] = useState(false);
   const [customPdtJokes, setCustomPdtJokes] = useState([]);
   const t = (key) => {
+    // Admins get a bare arrow everywhere, since "back" always means "back
+    // to Admin" for them now (see landingScreenFor) — full "Back to board"
+    // wording only makes sense for the crew, who land on their actual
+    // work screen (shift/dashboard) instead.
+    if (key === 'backToBoard' && isAdmin) return '←';
     if (lang === 'pdt' && customPdtStrings[key]) return customPdtStrings[key];
     return (translations[lang] && translations[lang][key]) || translations.en[key] || key;
   };
@@ -7712,9 +7717,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   };
 
   // Where someone lands immediately after signing in. Production employees
-  // go straight to their Shift screen; everyone else (mechanics, admin)
-  // lands on the work order dashboard, since that's their daily tool.
-  const landingScreenFor = (name) => (jobTypeFor(name) === 'production' ? 'shift' : 'dashboard');
+  // go straight to their Shift screen; admins land on the Admin screen
+  // itself, since that's effectively their home base now; everyone else
+  // (mechanics) lands on the work order dashboard, their daily tool.
+  const landingScreenFor = (name) => {
+    if (admins.includes(name)) return 'admin';
+    return jobTypeFor(name) === 'production' ? 'shift' : 'dashboard';
+  };
 
   // Groups the crew by job/machine type for any dropdown that needs to show
   // everyone together but organized — Mechanics first, then one group per
@@ -11068,11 +11077,24 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} />
         <div className="max-w-3xl mx-auto">
-          <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            {t('backToBoard')}
-          </button>
+          {!isAdmin && (
+            <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
+              {t('backToBoard')}
+            </button>
+          )}
           <h1 className="font-display text-3xl font-bold mb-2">Admin</h1>
           <p className="text-sm mb-6" style={{ color: COLORS.inkDim }}>Everything admin-related lives here now — tap a section below to open it.</p>
+
+          {isAdmin && (
+          <button
+            onClick={() => setScreen('dashboard')}
+            className="w-full flex items-center justify-between rounded-lg px-4 py-3.5 mb-3 font-display font-semibold text-sm uppercase tracking-wide"
+            style={{ color: COLORS.ink, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+          >
+            <span>📋 Work Order Board</span>
+            <span style={{ color: COLORS.inkDim }}>→</span>
+          </button>
+          )}
 
           {isAdmin && (
           <button
@@ -12385,79 +12407,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 'none' on this outer wrapper lets pan/zoom gestures pass
                 straight through in any gap between controls, while 'auto' on
                 the inner content makes the actual buttons/text tappable. */}
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, paddingTop: 'env(safe-area-inset-top)', pointerEvents: 'none' }}>
-              <div className="px-4 pt-3 pb-2" style={{ pointerEvents: 'auto' }}>
-                <div className="flex items-center justify-between mb-2">
-                  <button
-                    onClick={() => setScreen(landingScreenFor(currentMechanic))}
-                    className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-1.5 rounded-lg focus:outline-none"
-                    style={{ color: COLORS.ink, background: 'rgba(27,31,25,0.85)', border: `1px solid ${COLORS.line}` }}
-                  >
-                    {t('backToBoard')}
-                  </button>
-                </div>
-
+            <div style={{ position: 'absolute', top: 0, left: 0, zIndex: 10, paddingTop: 'env(safe-area-inset-top)', pointerEvents: 'none' }}>
+              <div className="px-4 pt-3" style={{ pointerEvents: 'auto' }}>
                 <button
-                  onClick={() => setShowMapPicker(true)}
-                  className="flex items-center gap-2 rounded-lg px-3 py-2 mb-2 max-w-full"
-                  style={{ background: 'rgba(27,31,25,0.85)', border: `1px solid ${COLORS.line}` }}
+                  onClick={() => setScreen(landingScreenFor(currentMechanic))}
+                  className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-1.5 rounded-lg focus:outline-none"
+                  style={{ color: COLORS.ink, background: 'rgba(27,31,25,0.85)', border: `1px solid ${COLORS.line}` }}
                 >
-                  <span className="font-display font-bold text-base truncate">🗺️ {currentMap.name}</span>
-                  {publicMaps.length > 1 && <span style={{ color: COLORS.inkDim }}>▾</span>}
+                  {t('backToBoard')}
                 </button>
+              </div>
+            </div>
 
-                <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-                  <p className="text-xs flex-1 px-2 py-1 rounded" style={{ color: currentMap.imageUrl ? COLORS.accent : COLORS.inkDim, background: 'rgba(27,31,25,0.85)' }}>
-                    {currentMap.imageUrl
-                      ? (currentMapGeoreferenced ? '🗺️ real map, georeferenced' : '🗺️ real map, not georeferenced yet')
-                      : 'placeholder terrain until a real map is uploaded'}
-                    {myPositionStatus && myPositionStatus !== 'ok' && (
-                      <span style={{ color: COLORS.warn || '#c17a2f' }}> — {myPositionStatus}</span>
-                    )}
-                  </p>
-                </div>
-                <div className="flex gap-2 mb-2">
-                  {/* Single pin button — tap arms placement using the currently
-                      selected type; a long-press (500ms) opens the type picker
-                      instead of arming placement, so switching types doesn't
-                      require dropping a pin of the wrong kind first. */}
-                  <button
-                    onPointerDown={() => {
-                      pinLongPressFiredRef.current = false;
-                      pinLongPressTimerRef.current = setTimeout(() => {
-                        pinLongPressFiredRef.current = true;
-                        setShowPinTypePicker(true);
-                      }, 500);
-                    }}
-                    onPointerUp={() => {
-                      if (pinLongPressTimerRef.current) clearTimeout(pinLongPressTimerRef.current);
-                      if (pinLongPressFiredRef.current) return; // long-press already handled it
-                      setMeasureMode(false);
-                      setPencilMode(false);
-                      setLinePoints([]);
-                      setPlacingPin((v) => !v);
-                    }}
-                    onPointerLeave={() => { if (pinLongPressTimerRef.current) clearTimeout(pinLongPressTimerRef.current); }}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap flex items-center gap-1.5"
-                    style={{ background: placingPin ? COLORS.accent : 'rgba(27,31,25,0.85)', color: placingPin ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
-                  >
-                    {placingPin ? (
-                      'Cancel'
-                    ) : (
-                      <React.Fragment>
-                        <span>{PIN_TYPES[selectedPinType].icon}</span>
-                        Drop a pin
-                      </React.Fragment>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setShowMapToolsMenu(true)}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
-                    style={{ background: 'rgba(27,31,25,0.85)', color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
-                  >
-                    ⋯ Tools
-                  </button>
-                </div>
+            {/* Everything else lives down here now, out of the way of the
+                map itself — left side, so it doesn't collide with the
+                compass/center-on-me/track-me buttons on the bottom right. */}
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, paddingBottom: 'env(safe-area-inset-bottom)', pointerEvents: 'none' }}>
+              <div className="px-4 pb-3" style={{ pointerEvents: 'auto' }}>
                 {placingPin && (
                   <p className="text-xs mb-2 text-center rounded-lg py-1.5 px-2" style={{ color: COLORS.accent, background: 'rgba(27,31,25,0.85)' }}>Tap anywhere on the map to place your pin</p>
                 )}
@@ -12500,8 +12466,64 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     {linePoints.length === 0 ? 'Press and drag to draw' : `Drawing… ${formatLineLength(linePoints)}`}
                   </p>
                 )}
+                {myPositionStatus && myPositionStatus !== 'ok' && (
+                  <p className="text-xs mb-2 rounded-lg py-1.5 px-2" style={{ color: COLORS.warn || '#c17a2f', background: 'rgba(27,31,25,0.85)' }}>{myPositionStatus}</p>
+                )}
+
+                <button
+                  onClick={() => setShowMapPicker(true)}
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 mb-2 max-w-full"
+                  style={{ background: 'rgba(27,31,25,0.85)', border: `1px solid ${COLORS.line}` }}
+                >
+                  <span className="font-display font-bold text-base truncate">🗺️ {currentMap.name}</span>
+                  {publicMaps.length > 1 && <span style={{ color: COLORS.inkDim }}>▾</span>}
+                </button>
+
+                <div className="flex gap-2">
+                  {/* Single pin button — tap arms placement using the currently
+                      selected type; a long-press (500ms) opens the type picker
+                      instead of arming placement, so switching types doesn't
+                      require dropping a pin of the wrong kind first. */}
+                  <button
+                    onPointerDown={() => {
+                      pinLongPressFiredRef.current = false;
+                      pinLongPressTimerRef.current = setTimeout(() => {
+                        pinLongPressFiredRef.current = true;
+                        setShowPinTypePicker(true);
+                      }, 500);
+                    }}
+                    onPointerUp={() => {
+                      if (pinLongPressTimerRef.current) clearTimeout(pinLongPressTimerRef.current);
+                      if (pinLongPressFiredRef.current) return; // long-press already handled it
+                      setMeasureMode(false);
+                      setPencilMode(false);
+                      setLinePoints([]);
+                      setPlacingPin((v) => !v);
+                    }}
+                    onPointerLeave={() => { if (pinLongPressTimerRef.current) clearTimeout(pinLongPressTimerRef.current); }}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap flex items-center gap-1.5"
+                    style={{ background: placingPin ? COLORS.accent : 'rgba(27,31,25,0.85)', color: placingPin ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                  >
+                    {placingPin ? (
+                      'Cancel'
+                    ) : (
+                      <React.Fragment>
+                        <span>{PIN_TYPES[selectedPinType].icon}</span>
+                        Drop a pin
+                      </React.Fragment>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setShowMapToolsMenu(true)}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
+                    style={{ background: 'rgba(27,31,25,0.85)', color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                  >
+                    ⋯ Tools
+                  </button>
+                </div>
               </div>
             </div>
+
 
             {showMapPicker && (
               <div style={{ position: 'fixed', inset: 0, zIndex: 150, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-end' }} onClick={() => setShowMapPicker(false)}>
