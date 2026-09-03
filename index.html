@@ -1668,13 +1668,18 @@ function PlaceholderTerrain() {
 // position via getScreenCTM, which accounts for CSS transforms
 // automatically. Pins, lines, and calibration are all completely
 // unaffected by rotating or zooming the view.
-const GestureMapViewport = React.forwardRef(function GestureMapViewport({ children, disablePan, onCenterOnMe, personalTracking, onTogglePersonalTracking }, ref) {
+const GestureMapViewport = React.forwardRef(function GestureMapViewport({ children, disablePan, tapPriorityMode, onCenterOnMe, personalTracking, onTogglePersonalTracking }, ref) {
   const [scale, setScale] = useState(1);
   const [rotation, setRotation] = useState(0); // degrees
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const pointers = useRef(new Map()); // pointerId -> {x, y}
   const gestureStart = useRef(null); // {dist, angle, scale, rotation} when a 2-finger gesture began
   const panStart = useRef(null); // {x, y, panX, panY} when a 1-finger pan began
+  // In tapPriorityMode, a 1-finger touch might be a precise tap (place a
+  // pin/calibration point/measure vertex) or might be someone trying to
+  // navigate to a spot that's off-screen — this tracks whether the
+  // current touch has moved enough to count as the latter yet.
+  const dragEngaged = useRef(false);
   const containerRef = useRef(null);
 
   const pointerArray = () => Array.from(pointers.current.values());
@@ -1690,6 +1695,7 @@ const GestureMapViewport = React.forwardRef(function GestureMapViewport({ childr
     } else if (pointers.current.size === 1 && !disablePan) {
       const p = pointerArray()[0];
       panStart.current = { x: p.x, y: p.y, panX: pan.x, panY: pan.y };
+      dragEngaged.current = !tapPriorityMode;
     }
   };
   const handlePointerMove = (e) => {
@@ -1705,6 +1711,11 @@ const GestureMapViewport = React.forwardRef(function GestureMapViewport({ childr
       setRotation(gestureStart.current.rotation + (angle - gestureStart.current.angle));
     } else if (pointers.current.size === 1 && panStart.current && !disablePan) {
       const p = pointerArray()[0];
+      if (!dragEngaged.current) {
+        const moved = Math.hypot(p.x - panStart.current.x, p.y - panStart.current.y);
+        if (moved < 10) return; // still within tap tolerance — a real tap handler elsewhere gets this on release
+        dragEngaged.current = true;
+      }
       setPan({ x: panStart.current.panX + (p.x - panStart.current.x), y: panStart.current.panY + (p.y - panStart.current.y) });
     }
   };
@@ -1714,8 +1725,10 @@ const GestureMapViewport = React.forwardRef(function GestureMapViewport({ childr
     if (pointers.current.size === 1 && !disablePan) {
       const p = pointerArray()[0];
       panStart.current = { x: p.x, y: p.y, panX: pan.x, panY: pan.y }; // fresh baseline so dropping to 1 finger doesn't jump
+      dragEngaged.current = !tapPriorityMode;
     } else if (pointers.current.size === 0) {
       panStart.current = null;
+      dragEngaged.current = false;
     }
   };
 
@@ -12504,7 +12517,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               <GestureMapViewport
                 ref={gestureMapViewportRef}
                 key={currentMap.id}
-                disablePan={placingPin || measureMode || pencilMode || calibratingMap}
+                disablePan={pencilMode}
+                tapPriorityMode={placingPin || measureMode || calibratingMap}
                 onCenterOnMe={currentMapMyPosition ? () => gestureMapViewportRef.current && gestureMapViewportRef.current.centerOnPoint(currentMapMyPosition.px, currentMapMyPosition.py) : null}
                 personalTracking={personalTrackingOn}
                 onTogglePersonalTracking={() => (personalTrackingOn ? stopPersonalTrackingAndSave() : setPersonalTrackingOn(true))}
