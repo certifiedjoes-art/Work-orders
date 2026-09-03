@@ -6361,6 +6361,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [timesheetSettings, setTimesheetSettings] = useState({ email: '', autoEmail: false });
   const [mapUnit, setMapUnit] = useState(() => cacheGet('mapUnit', 'feet'));
   const [showMapSettings, setShowMapSettings] = useState(false);
+  const [showMapPicker, setShowMapPicker] = useState(false);
   const [showTimesheetMigration, setShowTimesheetMigration] = useState(false);
   const [lunchPrompt, setLunchPrompt] = useState(false);
   const [showAddMissedDay, setShowAddMissedDay] = useState(false);
@@ -12282,34 +12283,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     };
 
     return (
-      <div
-        style={{
-          position: 'fixed', inset: 0, background: COLORS.bg, color: COLORS.ink,
-          display: 'flex', flexDirection: 'column',
-          paddingTop: 'env(safe-area-inset-top)',
-        }}
-        className="font-body"
-      >
+      <div style={{ position: 'fixed', inset: 0, background: COLORS.bg, color: COLORS.ink }} className="font-body">
         {FONT_STYLE}
-        <div className="px-4 pt-3 pb-2 flex-shrink-0">
-          <div className="flex items-center justify-between mb-2">
-            <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-              {t('backToBoard')}
-            </button>
-            {(isAdmin || isForeman) && (
-              <div className="flex items-center gap-3">
-                {machineTracks.length > 0 && (
-                  <button onClick={() => setShowMachineTracksPanel(true)} className="text-xs underline" style={{ color: COLORS.accent }}>🛰️ Tracks</button>
-                )}
-                <button onClick={() => setShowManageMaps(true)} className="text-xs underline" style={{ color: COLORS.accent }}>Manage maps</button>
-              </div>
-            )}
-          </div>
-          <h1 className="font-display text-xl font-bold mb-2">🗺️ Maps</h1>
-        </div>
 
         {publicMaps.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center px-5">
+          <div className="h-full flex items-center justify-center px-5" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
             <div className="rounded-lg p-8 text-center max-w-sm" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
               <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>No public maps yet.</p>
               {(isAdmin || isForeman) ? (
@@ -12321,28 +12299,109 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </div>
         ) : (
           <React.Fragment>
-            <div className="px-4 flex-shrink-0">
-              {publicMaps.length > 1 && (
-                <select
-                  value={currentMap ? currentMap.id : ''}
-                  onChange={(e) => setSelectedMapId(e.target.value)}
-                  className="w-full rounded-lg px-4 py-2.5 text-base mb-4 focus:outline-none focus:ring-2"
-                  style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
-                >
-                  {publicMaps.map((m) => <option key={m.id} value={m.id}>{m.name}{m.isDefault ? ' (default)' : ''}</option>)}
-                </select>
-              )}
+            {/* Full-screen map, filling the entire area behind the overlaid controls below */}
+            <div style={{ position: 'absolute', inset: 0 }}>
+              <GestureMapViewport
+                ref={gestureMapViewportRef}
+                key={currentMap.id}
+                disablePan={placingPin || measureMode || pencilMode || calibratingMap}
+                onCenterOnMe={currentMapMyPosition ? () => gestureMapViewportRef.current && gestureMapViewportRef.current.centerOnPoint(currentMapMyPosition.px, currentMapMyPosition.py) : null}
+                personalTracking={personalTrackingOn}
+                onTogglePersonalTracking={() => (personalTrackingOn ? stopPersonalTrackingAndSave() : setPersonalTrackingOn(true))}
+              >
+                <MapCanvas
+                  viewBoxWidth={currentMap.imageWidth}
+                  viewBoxHeight={currentMap.imageHeight}
+                  backgroundImageUrl={currentMapImageSrc}
+                  pinsToShow={mapPins.filter((p) => p.mapId === currentMap.id && canSeePin(p))}
+                  linesToShow={mapLines.filter((l) => l.mapId === currentMap.id && canSeeLine(l))}
+                  placingPin={placingPin}
+                  measureMode={measureMode}
+                  pencilMode={pencilMode}
+                  drawingPoints={personalTrackingOn ? personalTrackPreviewPoints : linePoints}
+                  calibrating={calibratingMap}
+                  refPoints={currentMap.refPoints}
+                  livePositions={currentMapLivePositions}
+                  liveTrails={currentMapLiveTrails}
+                  myPosition={currentMapMyPosition}
+                  onMapTap={(x, y) => {
+                    if (calibratingMap) {
+                      setPendingCalibrationPixel({ px: x, py: y });
+                    } else if (measureMode) {
+                      setLinePoints((pts) => [...pts, { x, y }]);
+                    } else {
+                      setPendingPinPosition({ x, y });
+                      setPlacingPin(false);
+                    }
+                  }}
+                  onFreehandPoint={(x, y) => {
+                    setLinePoints((pts) => {
+                      const last = pts[pts.length - 1];
+                      // Skip points that are too close to the last one kept —
+                      // pointermove fires far more often than needed for a
+                      // smooth line, and keeping every event would balloon
+                      // a single stroke into hundreds of stored points.
+                      if (last && Math.hypot(x - last.x, y - last.y) < 4) return pts;
+                      return [...pts, { x, y }];
+                    });
+                  }}
+                  onFreehandEnd={() => {
+                    setLinePoints((pts) => {
+                      if (pts.length >= 2) setPendingLineSubmit(true);
+                      return pts;
+                    });
+                  }}
+                  onPinTap={(pinId) => setViewingPinId(pinId)}
+                  onLineTap={(lineId) => setViewingLineId(lineId)}
+                  onLiveTap={(name) => setViewingMachineName(name)}
+                />
+              </GestureMapViewport>
+            </div>
 
-              <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-                <p className="text-xs flex-1" style={{ color: currentMap.imageUrl ? COLORS.accent : COLORS.inkDim }}>
-                  {currentMap.name} — {currentMap.imageUrl
-                    ? (currentMapGeoreferenced ? '🗺️ real map, georeferenced' : '🗺️ real map, not georeferenced yet')
-                    : 'placeholder terrain until a real map is uploaded'}
-                  {myPositionStatus && myPositionStatus !== 'ok' && (
-                    <span style={{ color: COLORS.warn || '#c17a2f' }}> — {myPositionStatus}</span>
+            {/* Overlaid controls, floating on top of the map — pointerEvents
+                'none' on this outer wrapper lets pan/zoom gestures pass
+                straight through in any gap between controls, while 'auto' on
+                the inner content makes the actual buttons/text tappable. */}
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, paddingTop: 'env(safe-area-inset-top)', pointerEvents: 'none' }}>
+              <div className="px-4 pt-3 pb-2" style={{ pointerEvents: 'auto' }}>
+                <div className="flex items-center justify-between mb-2">
+                  <button
+                    onClick={() => setScreen(landingScreenFor(currentMechanic))}
+                    className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-1.5 rounded-lg focus:outline-none"
+                    style={{ color: COLORS.ink, background: 'rgba(27,31,25,0.85)', border: `1px solid ${COLORS.line}` }}
+                  >
+                    {t('backToBoard')}
+                  </button>
+                  {(isAdmin || isForeman) && (
+                    <div className="flex items-center gap-2">
+                      {machineTracks.length > 0 && (
+                        <button onClick={() => setShowMachineTracksPanel(true)} className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap" style={{ color: COLORS.accent, background: 'rgba(27,31,25,0.85)', border: `1px solid ${COLORS.line}` }}>🛰️ Tracks</button>
+                      )}
+                      <button onClick={() => setShowManageMaps(true)} className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap" style={{ color: COLORS.accent, background: 'rgba(27,31,25,0.85)', border: `1px solid ${COLORS.line}` }}>Manage maps</button>
+                    </div>
                   )}
-                </p>
-                <div className="flex gap-2 flex-wrap justify-end">
+                </div>
+
+                <button
+                  onClick={() => setShowMapPicker(true)}
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 mb-2 max-w-full"
+                  style={{ background: 'rgba(27,31,25,0.85)', border: `1px solid ${COLORS.line}` }}
+                >
+                  <span className="font-display font-bold text-base truncate">🗺️ {currentMap.name}</span>
+                  {publicMaps.length > 1 && <span style={{ color: COLORS.inkDim }}>▾</span>}
+                </button>
+
+                <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                  <p className="text-xs flex-1 px-2 py-1 rounded" style={{ color: currentMap.imageUrl ? COLORS.accent : COLORS.inkDim, background: 'rgba(27,31,25,0.85)' }}>
+                    {currentMap.imageUrl
+                      ? (currentMapGeoreferenced ? '🗺️ real map, georeferenced' : '🗺️ real map, not georeferenced yet')
+                      : 'placeholder terrain until a real map is uploaded'}
+                    {myPositionStatus && myPositionStatus !== 'ok' && (
+                      <span style={{ color: COLORS.warn || '#c17a2f' }}> — {myPositionStatus}</span>
+                    )}
+                  </p>
+                </div>
+                <div className="flex gap-2 flex-wrap mb-2">
                   <button
                     onClick={() => {
                       setMeasureMode(false);
@@ -12351,7 +12410,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       setPlacingPin(!placingPin);
                     }}
                     className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
-                    style={{ background: placingPin ? COLORS.accent : COLORS.surfaceRaised, color: placingPin ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                    style={{ background: placingPin ? COLORS.accent : 'rgba(27,31,25,0.85)', color: placingPin ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
                   >
                     {placingPin ? 'Cancel' : '📍 Drop a pin'}
                   </button>
@@ -12363,7 +12422,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       setMeasureMode(!measureMode);
                     }}
                     className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
-                    style={{ background: measureMode ? COLORS.accent : COLORS.surfaceRaised, color: measureMode ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                    style={{ background: measureMode ? COLORS.accent : 'rgba(27,31,25,0.85)', color: measureMode ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
                   >
                     {measureMode ? 'Cancel' : '📏 Draw & Measure'}
                   </button>
@@ -12375,7 +12434,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       setPencilMode(!pencilMode);
                     }}
                     className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
-                    style={{ background: pencilMode ? COLORS.accent : COLORS.surfaceRaised, color: pencilMode ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                    style={{ background: pencilMode ? COLORS.accent : 'rgba(27,31,25,0.85)', color: pencilMode ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
                   >
                     {pencilMode ? 'Cancel' : '✏️ Pencil'}
                   </button>
@@ -12396,7 +12455,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         }
                       }}
                       className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
-                      style={{ background: calibratingMap ? COLORS.accent : COLORS.surfaceRaised, color: calibratingMap ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                      style={{ background: calibratingMap ? COLORS.accent : 'rgba(27,31,25,0.85)', color: calibratingMap ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
                     >
                       {calibratingMap ? 'Cancel' : '📍 Calibrate'}
                     </button>
@@ -12404,115 +12463,87 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   <button
                     onClick={() => setShowMapSettings(true)}
                     className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
-                    style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                    style={{ background: 'rgba(27,31,25,0.85)', color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
                   >
                     ⚙️
                   </button>
                 </div>
-              </div>
-              {placingPin && (
-                <p className="text-xs mb-2 text-center" style={{ color: COLORS.accent }}>Tap anywhere on the map to place your pin</p>
-              )}
-              {calibratingMap && (
-                <p className="text-xs mb-2 text-center" style={{ color: COLORS.accent }}>
-                  Tap a spot you know the real coordinates of — point {calibrationPointIndex + 1} of 2. Pick two points far apart for the best accuracy.
-                </p>
-              )}
-              {measureMode && (
-                <div className="flex items-center justify-between mb-2 gap-2">
-                  <p className="text-xs" style={{ color: COLORS.accent }}>
-                    {linePoints.length === 0
-                      ? 'Tap the map to start the line'
-                      : `${linePoints.length} point${linePoints.length === 1 ? '' : 's'} · ${formatLineLength(linePoints)}`}
+                {placingPin && (
+                  <p className="text-xs mb-2 text-center rounded-lg py-1.5 px-2" style={{ color: COLORS.accent, background: 'rgba(27,31,25,0.85)' }}>Tap anywhere on the map to place your pin</p>
+                )}
+                {calibratingMap && (
+                  <p className="text-xs mb-2 text-center rounded-lg py-1.5 px-2" style={{ color: COLORS.accent, background: 'rgba(27,31,25,0.85)' }}>
+                    Tap a spot you know the real coordinates of — point {calibrationPointIndex + 1} of 2. Pick two points far apart for the best accuracy.
                   </p>
-                  <div className="flex gap-2">
-                    {linePoints.length > 0 && (
-                      <button
-                        onClick={() => setLinePoints((pts) => pts.slice(0, -1))}
-                        className="text-xs underline"
-                        style={{ color: COLORS.inkDim }}
-                      >
-                        Undo point
-                      </button>
-                    )}
-                    {linePoints.length >= 2 && (
-                      <button
-                        onClick={() => setPendingLineSubmit(true)}
-                        className="text-xs font-semibold underline"
-                        style={{ color: COLORS.accent }}
-                      >
-                        Done
-                      </button>
-                    )}
+                )}
+                {measureMode && (
+                  <div className="flex items-center justify-between mb-2 gap-2 rounded-lg py-1.5 px-2" style={{ background: 'rgba(27,31,25,0.85)' }}>
+                    <p className="text-xs" style={{ color: COLORS.accent }}>
+                      {linePoints.length === 0
+                        ? 'Tap the map to start the line'
+                        : `${linePoints.length} point${linePoints.length === 1 ? '' : 's'} · ${formatLineLength(linePoints)}`}
+                    </p>
+                    <div className="flex gap-2">
+                      {linePoints.length > 0 && (
+                        <button
+                          onClick={() => setLinePoints((pts) => pts.slice(0, -1))}
+                          className="text-xs underline"
+                          style={{ color: COLORS.inkDim }}
+                        >
+                          Undo point
+                        </button>
+                      )}
+                      {linePoints.length >= 2 && (
+                        <button
+                          onClick={() => setPendingLineSubmit(true)}
+                          className="text-xs font-semibold underline"
+                          style={{ color: COLORS.accent }}
+                        >
+                          Done
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-              {pencilMode && (
-                <p className="text-xs mb-2 text-center" style={{ color: COLORS.accent }}>
-                  {linePoints.length === 0 ? 'Press and drag to draw' : `Drawing… ${formatLineLength(linePoints)}`}
-                </p>
-              )}
+                )}
+                {pencilMode && (
+                  <p className="text-xs mb-2 text-center rounded-lg py-1.5 px-2" style={{ color: COLORS.accent, background: 'rgba(27,31,25,0.85)' }}>
+                    {linePoints.length === 0 ? 'Press and drag to draw' : `Drawing… ${formatLineLength(linePoints)}`}
+                  </p>
+                )}
+              </div>
             </div>
 
-            <div className="flex-1 px-4 pb-2 min-h-0">
-              <div className="rounded-lg overflow-hidden h-full" style={{ border: `2px solid ${COLORS.line}` }}>
-                <GestureMapViewport
-                  ref={gestureMapViewportRef}
-                  key={currentMap.id}
-                  disablePan={placingPin || measureMode || pencilMode || calibratingMap}
-                  onCenterOnMe={currentMapMyPosition ? () => gestureMapViewportRef.current && gestureMapViewportRef.current.centerOnPoint(currentMapMyPosition.px, currentMapMyPosition.py) : null}
-                  personalTracking={personalTrackingOn}
-                  onTogglePersonalTracking={() => (personalTrackingOn ? stopPersonalTrackingAndSave() : setPersonalTrackingOn(true))}
+            {showMapPicker && (
+              <div style={{ position: 'fixed', inset: 0, zIndex: 150, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-end' }} onClick={() => setShowMapPicker(false)}>
+                <div
+                  className="w-full p-5"
+                  style={{ background: COLORS.bg, borderRadius: '16px 16px 0 0', maxHeight: '75vh', overflowY: 'auto', border: `2px solid ${COLORS.line}`, borderBottom: 'none' }}
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <MapCanvas
-                    viewBoxWidth={currentMap.imageWidth}
-                    viewBoxHeight={currentMap.imageHeight}
-                    backgroundImageUrl={currentMapImageSrc}
-                    pinsToShow={mapPins.filter((p) => p.mapId === currentMap.id && canSeePin(p))}
-                    linesToShow={mapLines.filter((l) => l.mapId === currentMap.id && canSeeLine(l))}
-                    placingPin={placingPin}
-                    measureMode={measureMode}
-                    pencilMode={pencilMode}
-                    drawingPoints={personalTrackingOn ? personalTrackPreviewPoints : linePoints}
-                    calibrating={calibratingMap}
-                    refPoints={currentMap.refPoints}
-                    livePositions={currentMapLivePositions}
-                    liveTrails={currentMapLiveTrails}
-                    myPosition={currentMapMyPosition}
-                    onMapTap={(x, y) => {
-                      if (calibratingMap) {
-                        setPendingCalibrationPixel({ px: x, py: y });
-                      } else if (measureMode) {
-                        setLinePoints((pts) => [...pts, { x, y }]);
-                      } else {
-                        setPendingPinPosition({ x, y });
-                        setPlacingPin(false);
-                      }
-                    }}
-                    onFreehandPoint={(x, y) => {
-                      setLinePoints((pts) => {
-                        const last = pts[pts.length - 1];
-                        // Skip points that are too close to the last one kept —
-                        // pointermove fires far more often than needed for a
-                        // smooth line, and keeping every event would balloon
-                        // a single stroke into hundreds of stored points.
-                        if (last && Math.hypot(x - last.x, y - last.y) < 4) return pts;
-                        return [...pts, { x, y }];
-                      });
-                    }}
-                    onFreehandEnd={() => {
-                      setLinePoints((pts) => {
-                        if (pts.length >= 2) setPendingLineSubmit(true);
-                        return pts;
-                      });
-                    }}
-                    onPinTap={(pinId) => setViewingPinId(pinId)}
-                    onLineTap={(lineId) => setViewingLineId(lineId)}
-                    onLiveTap={(name) => setViewingMachineName(name)}
-                  />
-                </GestureMapViewport>
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="font-display text-lg font-bold">Choose a map</h2>
+                    <button onClick={() => setShowMapPicker(false)} className="text-2xl" style={{ color: COLORS.inkDim }}>✕</button>
+                  </div>
+                  <div className="space-y-2">
+                    {publicMaps.map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => { setSelectedMapId(m.id); setShowMapPicker(false); }}
+                        className="w-full text-left rounded-lg p-3 flex items-center justify-between"
+                        style={{
+                          background: currentMap.id === m.id ? COLORS.accent : COLORS.surfaceRaised,
+                          color: currentMap.id === m.id ? COLORS.ink2 : COLORS.ink,
+                          border: `1px solid ${COLORS.line}`,
+                        }}
+                      >
+                        <span className="font-display font-semibold">{m.name}</span>
+                        {m.isDefault && <span className="text-xs">default</span>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </React.Fragment>
         )}
 
