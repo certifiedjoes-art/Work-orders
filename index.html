@@ -13,7 +13,41 @@
      intercept and serve those requests from cache before they fail. -->
 <script>
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    const hadControllerAlready = !!navigator.serviceWorker.controller;
+
+    navigator.serviceWorker.register('sw.js').then((registration) => {
+      // Check for a new version right away, then periodically while the
+      // app stays open, and again any time it comes back to the
+      // foreground — reopening from a home screen icon after being
+      // backgrounded doesn't reliably trigger the browser's own update
+      // check on its own.
+      registration.update().catch(() => {});
+      setInterval(() => registration.update().catch(() => {}), 60000);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') registration.update().catch(() => {});
+      });
+    }).catch(() => {});
+
+    // sw.js already calls skipWaiting()/clients.claim() unconditionally,
+    // so a new version activates and takes over as controller on its own
+    // — no postMessage handshake needed here. controllerchange also fires
+    // on someone's very first-ever visit (no controller yet -> one just
+    // got assigned), which isn't a real update, so only react to it when
+    // this device already had a controller from a previous visit.
+    let updateBannerShown = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadControllerAlready || updateBannerShown) return;
+      updateBannerShown = true;
+      const banner = document.createElement('div');
+      banner.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;padding-bottom:calc(14px + env(safe-area-inset-bottom));background:#7FA37E;color:#1B1F19;font-family:sans-serif;font-weight:600;font-size:0.9rem;box-shadow:0 -2px 10px rgba(0,0,0,0.3);';
+      banner.innerHTML = '<span>A new version is ready.</span>';
+      const btn = document.createElement('button');
+      btn.textContent = 'Tap to refresh';
+      btn.style.cssText = 'background:#1B1F19;color:#ECE8DF;border:none;border-radius:8px;padding:10px 16px;font-weight:bold;font-size:0.9rem;cursor:pointer;white-space:nowrap;';
+      btn.onclick = () => window.location.reload();
+      banner.appendChild(btn);
+      document.body.appendChild(banner);
+    });
   }
 </script>
 
@@ -11092,6 +11126,28 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             style={{ color: COLORS.ink, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
           >
             <span>📋 Work Order Board</span>
+            <span style={{ color: COLORS.inkDim }}>→</span>
+          </button>
+          )}
+
+          {isAdmin && (
+          <button
+            onClick={() => setScreen('maps')}
+            className="w-full flex items-center justify-between rounded-lg px-4 py-3.5 mb-3 font-display font-semibold text-sm uppercase tracking-wide"
+            style={{ color: COLORS.ink, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+          >
+            <span>🗺️ Maps</span>
+            <span style={{ color: COLORS.inkDim }}>→</span>
+          </button>
+          )}
+
+          {isAdmin && (
+          <button
+            onClick={() => setScreen('highwayMap')}
+            className="w-full flex items-center justify-between rounded-lg px-4 py-3.5 mb-3 font-display font-semibold text-sm uppercase tracking-wide"
+            style={{ color: COLORS.ink, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+          >
+            <span>🛣️ Highway Map</span>
             <span style={{ color: COLORS.inkDim }}>→</span>
           </button>
           )}
