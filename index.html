@@ -12734,20 +12734,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   <div className="space-y-2">
                     {currentMap.imageUrl && (
                       <button
-                        onClick={() => { setShowMapToolsMenu(false); shareCurrentMapImage(currentMap); }}
+                        onClick={() => {
+                          setShowMapToolsMenu(false);
+                          if (currentMapGeoreferenced) {
+                            shareGeoreferencedMap(currentMap);
+                          } else {
+                            shareCurrentMapImage(currentMap);
+                          }
+                        }}
                         className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
                         style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
                       >
                         📤 Share this map
-                      </button>
-                    )}
-                    {currentMapGeoreferenced && (
-                      <button
-                        onClick={() => { setShowMapToolsMenu(false); shareGeoreferencedMap(currentMap); }}
-                        className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
-                        style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
-                      >
-                        📤 Share georeferenced map
                       </button>
                     )}
                     <button
