@@ -7679,6 +7679,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return 'employee';
   };
   const isForeman = !!currentMechanic && roleFor(currentMechanic) === 'foreman';
+  const isSafety = !!currentMechanic && roleFor(currentMechanic) === 'safety';
   const setRoleFor = async (name, role) => {
     await firebase.database().ref('roles/' + slugForMechanic(name)).set(role);
     // /admins is the actual access-control source of truth everywhere else
@@ -10742,7 +10743,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
   // ---------- TIMESHEETS (admin only) ----------
   if (screen === 'timesheets') {
-    if (!isAdmin) {
+    if (!isAdmin && !isSafety) {
       return (
         <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8 flex items-center justify-center">
           {FONT_STYLE}
@@ -11067,7 +11068,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
   // ---------- ADMIN (consolidated: team, payroll, production, billing) ----------
   if (screen === 'admin') {
-    if (!isAdmin && !isForeman) {
+    if (!isAdmin && !isForeman && !isSafety) {
       return (
         <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8 flex items-center justify-center">
           {FONT_STYLE}
@@ -11281,7 +11282,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             onToggle={() => setExpandedAdmin(expandedAdmin === 'employees' ? null : 'employees')}
           >
           {/* ---- Invite ---- */}
-          {isAdmin && (
+          {(isAdmin || isSafety) && (
           <div className="rounded-lg p-5 mb-6" style={{ background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>
             <p className="font-display text-sm uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>+ Invite a new employee</p>
             <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>
@@ -11316,6 +11317,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 <option value="employee">Employee</option>
                 <option value="foreman">Foreman</option>
                 <option value="admin">Admin</option>
+                <option value="safety">Safety Coordinator</option>
               </select>
             </div>
             <div className="mb-3">
@@ -11462,9 +11464,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         <option value="employee">Employee</option>
                         <option value="foreman">Foreman</option>
                         <option value="admin">Admin</option>
+                        <option value="safety">Safety Coordinator</option>
                       </select>
                     ) : (
-                      <span className="text-xs uppercase tracking-wide px-2 py-1.5" style={{ color: COLORS.accent }}>{roleFor(m)}</span>
+                      <span className="text-xs uppercase tracking-wide px-2 py-1.5" style={{ color: COLORS.accent }}>{roleFor(m) === 'safety' ? 'Safety Coordinator' : roleFor(m)}</span>
                     )}
                     <span className="text-xs px-2 py-1.5" style={{ color: COLORS.inkDim }}>{jobTypeFor(m) === 'mechanic' ? '🔧 Mechanic' : '⏱️ Operator'}</span>
                   </div>
@@ -11638,7 +11641,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </div>
           </AdminSection>
 
-          {isAdmin && (
+          {(isAdmin || isSafety) && (
           <AdminSection
             icon="💰"
             title="Timesheets"
@@ -11962,7 +11965,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </AdminSection>
           )}
 
-          {isAdmin && (
+          {(isAdmin || isSafety) && (
           <AdminSection
             icon="📋"
             title="Log Book"
@@ -12060,7 +12063,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </AdminSection>
           )}
 
-          {isAdmin && (
+          {(isAdmin || isSafety) && (
           <AdminSection
             icon="🔧"
             title="Pre-Trips"
@@ -12438,7 +12441,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           };
         }).filter(Boolean)
       : [];
-    const currentMapLiveTrails = (currentMap && currentMapGeoreferenced)
+    const currentMapLiveTrails = (currentMap && currentMapGeoreferenced && isAdmin)
       ? machineTracks
           .filter((tr) => !tr.endedAt && tr.points && tr.points.length > 1)
           .map((tr) => {
@@ -12838,7 +12841,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     >
                       ⚙️ Map settings
                     </button>
-                    {(isAdmin || isForeman) && machineTracks.length > 0 && (
+                    {isAdmin && machineTracks.length > 0 && (
                       <button
                         onClick={() => { setShowMapToolsMenu(false); setShowMachineTracksPanel(true); }}
                         className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
@@ -12863,7 +12866,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </React.Fragment>
         )}
 
-        {showMachineTracksPanel && (isAdmin || isForeman) && (
+        {showMachineTracksPanel && isAdmin && (
           <div style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-end' }} onClick={() => setShowMachineTracksPanel(false)}>
             <div
               className="w-full p-5"
@@ -13397,7 +13400,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                             {openingSafetyDocId === doc.id ? 'Opening…' : doc.title}
                           </span>
                         </button>
-                        {isAdmin && (
+                        {(isAdmin || isSafety) && (
                           <button
                             onClick={() => { if (confirm(`Remove "${doc.title}"?`)) deleteSafetyDoc(doc.id); }}
                             className="text-xs flex-shrink-0"
@@ -13411,7 +13414,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   </div>
                 )}
 
-                {isAdmin && (
+                {(isAdmin || isSafety) && (
                   showAddSafetyDoc === category ? (
                     <SafetyDocUploadForm
                       uploading={uploadingSafetyDoc}
