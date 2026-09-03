@@ -3057,6 +3057,11 @@ function fmtTime(iso) {
 
 // Total paid hours for a shift: clock-in to clock-out, minus any unpaid break.
 function entryHours(entry) {
+  // Winch truck drivers: paid hours come from the HOS log book, not raw
+  // clock-in/out — see syncTimesheetToLogBook. This keeps the timesheet
+  // honest against the legally-binding on-duty record instead of two
+  // independent numbers that could quietly drift apart.
+  if (typeof entry.logBookHours === 'number') return entry.logBookHours;
   if (!entry.clockIn || !entry.clockOut) return 0;
   let ms = new Date(entry.clockOut) - new Date(entry.clockIn);
   if (entry.lunchStart && entry.lunchEnd) {
@@ -5368,7 +5373,7 @@ function computeDayGrids(log) {
     days.push({ dayStart, dayEnd, points, startCumDriving: cumDriving, startCumOnDuty: cumOnDuty });
 
     // Advance the running totals across this day's real segments before moving on.
-    const drawEnd = new Date(Math.min(dayEnd.getTime(), Date.now()));
+    const drawEnd = new Date(Math.min(dayEnd.getTime(), log.end ? Infinity : Date.now()));
     for (let i = 0; i < points.length; i++) {
       const segStart = new Date(points[i].time);
       const segEnd = i + 1 < points.length ? new Date(points[i + 1].time) : drawEnd;
@@ -5384,7 +5389,7 @@ function computeDayGrids(log) {
 // One full 24-hour (midnight-to-midnight) day's grid. Drag support is only
 // active when onUpdateChangeTime is provided — the compact preview passes
 // none, since it's just a glance, not meant to be edited directly.
-function DriverLogDayGrid({ dayStart, dayEnd, points, startCumDriving, startCumOnDuty, onUpdateChangeTime, compact }) {
+function DriverLogDayGrid({ dayStart, dayEnd, points, startCumDriving, startCumOnDuty, onUpdateChangeTime, compact, logEnded }) {
   const svgRef = useRef(null);
   const [dragging, setDragging] = useState(null);
   const [draftTime, setDraftTime] = useState(null);
@@ -5414,7 +5419,7 @@ function DriverLogDayGrid({ dayStart, dayEnd, points, startCumDriving, startCumO
   const effective = sorted.map((c) => (dragging === c.id && draftTime ? { ...c, time: draftTime } : c))
     .sort((a, b) => new Date(a.time) - new Date(b.time));
 
-  const drawEnd = new Date(Math.min(dayEnd.getTime(), Date.now()));
+  const drawEnd = logEnded ? dayEnd : new Date(Math.min(dayEnd.getTime(), Date.now()));
   const segments = [];
   let cumDriving = startCumDriving;
   let cumOnDuty = startCumOnDuty;
@@ -5611,6 +5616,7 @@ function DriverLogGrid({ log, onUpdateChangeTime }) {
           dayStart={previewDay.dayStart} dayEnd={previewDay.dayEnd} points={previewDay.points}
           startCumDriving={previewDay.startCumDriving} startCumOnDuty={previewDay.startCumOnDuty}
           compact
+          logEnded={!!log.end}
         />
         <p className="text-xs mt-1 text-center" style={{ color: COLORS.accent }}>Tap to expand{dayGrids.length > 1 ? ' — spans multiple days' : ''}</p>
       </button>
@@ -5643,6 +5649,7 @@ function DriverLogGrid({ log, onUpdateChangeTime }) {
               dayStart={dayGrids[dayIndex].dayStart} dayEnd={dayGrids[dayIndex].dayEnd} points={dayGrids[dayIndex].points}
               startCumDriving={dayGrids[dayIndex].startCumDriving} startCumOnDuty={dayGrids[dayIndex].startCumOnDuty}
               onUpdateChangeTime={onUpdateChangeTime}
+              logEnded={!!log.end}
             />
           </div>
           <p className="text-xs text-center p-2" style={{ color: '#666', flexShrink: 0 }}>Scroll sideways to see the full day. Drag a duty change line left or right to correct when it happened.</p>
@@ -5687,6 +5694,7 @@ function PrintableDriverLog({ log, driverName }) {
             <DriverLogDayGrid
               dayStart={d.dayStart} dayEnd={d.dayEnd} points={d.points}
               startCumDriving={d.startCumDriving} startCumOnDuty={d.startCumOnDuty}
+              logEnded={!!log.end}
             />
           </div>
         ))
@@ -8625,6 +8633,25 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
   const openDriverLog = driverLogs.find((l) => l.driver === currentMechanic && !l.end);
 
+  // Keeps a winch truck driver's timesheet in sync with their HOS log book
+  // — the legally-binding on-duty record, not raw clock-in/out, is what
+  // should determine their paid hours for that day, so the two can't
+  // quietly drift apart. Called after every driver log mutation below.
+  // Passing null for logForDay clears the override (used when a log is
+  // deleted or a status change removed leaves nothing to sync), reverting
+  // that day's entry back to normal clock-in/out math.
+  const syncTimesheetToLogBook = async (driverName, dateStr, logForDay) => {
+    const entry = timesheets.find((t) => t.mechanic === driverName && t.date === dateStr);
+    if (!entry) return; // nothing to sync to yet — no timesheet entry for this day
+    if (!logForDay) {
+      await patchOneTimesheetEntry(entry.id, { logBookHours: null });
+      return;
+    }
+    const totals = computeDutyDurations(logForDay.statusChanges, logForDay.end);
+    const onDutyHours = totals.driving + totals.onDuty;
+    await patchOneTimesheetEntry(entry.id, { logBookHours: Math.round(onDutyHours * 2) / 2 });
+  };
+
   const startDriverLog = async (odometerStart, unit) => {
     const now = new Date().toISOString();
     const entry = {
@@ -8640,25 +8667,30 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       signedAt: null,
     };
     await saveOneDriverLog(entry);
+    await syncTimesheetToLogBook(currentMechanic, localDateStr(new Date(now)), entry);
   };
 
   const addDriverStatusChange = async (status, note) => {
     if (!openDriverLog) return;
     const change = { id: uid(), status, time: new Date().toISOString(), note: note || '' };
-    await patchOneDriverLog(openDriverLog.id, { statusChanges: [...(openDriverLog.statusChanges || []), change] });
+    const nextChanges = [...(openDriverLog.statusChanges || []), change];
+    await patchOneDriverLog(openDriverLog.id, { statusChanges: nextChanges });
+    await syncTimesheetToLogBook(currentMechanic, localDateStr(new Date(openDriverLog.start)), { ...openDriverLog, statusChanges: nextChanges });
   };
 
   const endDriverLog = async (odometerEnd, signature) => {
     if (!openDriverLog) return;
     const now = new Date().toISOString();
     const finalStatus = { id: uid(), status: 'off', time: now, note: 'Ending shift' };
+    const nextChanges = [...(openDriverLog.statusChanges || []), finalStatus];
     await patchOneDriverLog(openDriverLog.id, {
       end: now,
       odometerEnd: odometerEnd || '',
       signature,
       signedAt: now,
-      statusChanges: [...(openDriverLog.statusChanges || []), finalStatus],
+      statusChanges: nextChanges,
     });
+    await syncTimesheetToLogBook(currentMechanic, localDateStr(new Date(openDriverLog.start)), { ...openDriverLog, end: now, statusChanges: nextChanges });
   };
 
   // Fills in any of the last 14 calendar days that have no log at all, as a
@@ -8682,6 +8714,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       };
     });
     await bulkSaveDriverLogs(entries);
+    await Promise.all(entries.map((e) => syncTimesheetToLogBook(currentMechanic, localDateStr(new Date(e.start)), e)));
   };
 
   // Admin-side editing — always available, even on an approved log, per
@@ -8689,10 +8722,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // is closer to a soft lock).
   const updateDriverLog = async (logId, patch) => {
     await patchOneDriverLog(logId, patch);
+    const log = driverLogs.find((l) => l.id === logId);
+    if (log) await syncTimesheetToLogBook(log.driver, localDateStr(new Date(log.start)), { ...log, ...patch });
   };
   const deleteDriverLog = async (logId) => {
+    const log = driverLogs.find((l) => l.id === logId);
     await deleteOneDriverLog(logId);
     setEditingDriverLogId(null);
+    if (log) await syncTimesheetToLogBook(log.driver, localDateStr(new Date(log.start)), null);
   };
   // For a status change that was genuinely missed in the moment — a real
   // break he took but forgot to log — admin needs to backfill it with
@@ -8703,6 +8740,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (!log) return;
     const nextChanges = [...(log.statusChanges || []), change].sort((a, b) => new Date(a.time) - new Date(b.time));
     await patchOneDriverLog(logId, { statusChanges: nextChanges });
+    await syncTimesheetToLogBook(log.driver, localDateStr(new Date(log.start)), { ...log, statusChanges: nextChanges });
   };
   const updateDriverStatusChange = async (logId, changeId, patch) => {
     const log = driverLogs.find((l) => l.id === logId);
@@ -8711,11 +8749,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       .map((c) => (c.id === changeId ? { ...c, ...patch } : c))
       .sort((a, b) => new Date(a.time) - new Date(b.time));
     await patchOneDriverLog(logId, { statusChanges: nextChanges });
+    await syncTimesheetToLogBook(log.driver, localDateStr(new Date(log.start)), { ...log, statusChanges: nextChanges });
   };
   const removeDriverStatusChange = async (logId, changeId) => {
     const log = driverLogs.find((l) => l.id === logId);
     if (!log) return;
-    await patchOneDriverLog(logId, { statusChanges: (log.statusChanges || []).filter((c) => c.id !== changeId) });
+    const nextChanges = (log.statusChanges || []).filter((c) => c.id !== changeId);
+    await patchOneDriverLog(logId, { statusChanges: nextChanges });
+    await syncTimesheetToLogBook(log.driver, localDateStr(new Date(log.start)), { ...log, statusChanges: nextChanges });
   };
 
   const isDriverLogWeekApproved = (weekStart) => !!driverLogApprovals[weekStart];
