@@ -2654,7 +2654,7 @@ function MachineMarkerDetail({ position, onClose }) {
   );
 }
 
-function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete, onUploadPdf, uploadingMapId, localMaps, onAddLocalMap, onDeleteLocalMap, addingLocalMap, onClose }) {
+function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete, onUploadPdf, uploadingMapId, onSharePdf, localMaps, onAddLocalMap, onDeleteLocalMap, addingLocalMap, onClose }) {
   const [newMapName, setNewMapName] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [confirmDeleteLocalId, setConfirmDeleteLocalId] = useState(null);
@@ -2695,6 +2695,11 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
                     onChange={(e) => { if (e.target.files[0]) onUploadPdf(m.id, e.target.files[0]); e.target.value = ''; }}
                   />
                 </label>
+                {m.imageUrl && (
+                  <button onClick={() => onSharePdf(m.id, m.name)} className="text-xs underline" style={{ color: COLORS.accent }}>
+                    📤 Share PDF (to Field Map app)
+                  </button>
+                )}
                 {confirmDeleteId === m.id ? (
                   <React.Fragment>
                     <Btn variant="danger" onClick={() => { onDelete(m.id); setConfirmDeleteId(null); }}>Confirm delete</Btn>
@@ -7971,7 +7976,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const uploadMachineIcon = async (type, file) => {
     setUploadingMachineIconType(type);
     try {
-      const storageRef = firebase.storage().ref(`mapImages/machine-icons/${type}-${Date.now()}.png`);
+      const storageRef = firebase.storage().ref(`mapImages/machine-icon-${type}-${Date.now()}.png`);
       await storageRef.put(file);
       const url = await storageRef.getDownloadURL();
       await saveMachineIconOverride(type, url);
@@ -7991,10 +7996,41 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       await storageRef.put(blob);
       const url = await storageRef.getDownloadURL();
       await setMapImage(mapId, url, width, height, geoData);
+      // Keep the original PDF too (on this device only) — this is what
+      // lets "Share PDF" hand the exact same georeferenced file straight
+      // to the Field Map app later, instead of just the rendered image.
+      await idbSetMapImageBlob('pdf:' + mapId, file);
     } catch (e) {
       alert("Couldn't process that PDF — " + (e.message || 'try again or try a different file.'));
     }
     setUploadingMapPdf(null);
+  };
+  // Hands the original georeferenced PDF back out via the iPhone/iPad share
+  // sheet — AirDrop it to a machine's iPad, save it to Files, or email it —
+  // so the same file that was uploaded here can be added on the Field Map
+  // app's "Add map from Files" button.
+  const shareMapPdf = async (mapId, mapName) => {
+    const blob = await idbGetMapImageBlob('pdf:' + mapId);
+    if (!blob) {
+      alert("The original PDF for this map isn't saved on this device — it needs to be shared from whichever phone or computer it was uploaded from. If that's this device, try re-uploading the PDF here first.");
+      return;
+    }
+    const fileName = (mapName || 'map').replace(/[^\w\- ]/g, '') + '.pdf';
+    const file = new File([blob], fileName, { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: fileName });
+        return;
+      } catch (e) {
+        if (e && e.name === 'AbortError') return; // user cancelled the share sheet
+        // fall through to the download fallback below
+      }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
   // Loads a PDF straight from this device's Files app — no Firebase, no
   // internet, at any point. Covers both AirDrop and "Save to Files" from an
@@ -12540,6 +12576,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             onDelete={deleteMap}
             onUploadPdf={uploadMapPdf}
             uploadingMapId={uploadingMapPdf}
+            onSharePdf={shareMapPdf}
             localMaps={localMaps}
             onAddLocalMap={addLocalMapFromFile}
             onDeleteLocalMap={deleteLocalMap}
