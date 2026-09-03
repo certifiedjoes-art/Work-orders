@@ -12671,14 +12671,34 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                             setMeasureMode(false);
                             setPencilMode(false);
                             setLinePoints([]);
-                            setCalibrationPointIndex(0);
+                            // Resume at whichever point isn't set yet, so
+                            // returning later to place the second point
+                            // (after actually walking/driving to that
+                            // spot) doesn't overwrite the first one.
+                            const existingPoints = currentMap.refPoints || [];
+                            const firstMissingIndex = existingPoints[0] ? 1 : 0;
+                            setCalibrationPointIndex(firstMissingIndex);
                             setCalibratingMap(true);
                           }
                         }}
                         className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
                         style={{ background: calibratingMap ? COLORS.accent : COLORS.surfaceRaised, color: calibratingMap ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
                       >
-                        📍 {calibratingMap ? 'Stop calibrating' : 'Calibrate this map'}
+                        {calibratingMap ? 'Stop calibrating' : ((currentMap.refPoints || [])[0] ? '📍 Set second calibration point' : '📍 Calibrate this map')}
+                      </button>
+                    )}
+                    {(isAdmin || isForeman) && (currentMap.refPoints || []).some(Boolean) && !calibratingMap && (
+                      <button
+                        onClick={() => {
+                          if (confirm(`Reset calibration on "${currentMap.name}"? Both reference points will be cleared, and pins/lines will stop showing real-world positions until it's calibrated again.`)) {
+                            setShowMapToolsMenu(false);
+                            clearMapRefPoints(currentMap.id);
+                          }
+                        }}
+                        className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
+                        style={{ background: COLORS.surfaceRaised, color: '#E07A5F', border: `1px solid ${COLORS.line}` }}
+                      >
+                        ↺ Reset calibration
                       </button>
                     )}
                     <button
