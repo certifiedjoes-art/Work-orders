@@ -8080,6 +8080,95 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // sheet — AirDrop it to a machine's iPad, save it to Files, or email it —
   // so the same file that was uploaded here can be added on the Field Map
   // app's "Add map from Files" button.
+  // Shares BOTH the image and a JSON sidecar containing this map's actual
+  // calibration data (refPoints from manual 2-point calibration, or
+  // geoCorners/geoBBoxFraction from an auto-georeferenced PDF upload) —
+  // for getting a fully georeferenced map onto a separate app/device that
+  // has no access to this app's own Firebase data. Uses the exact same
+  // field names/structure this app stores internally, on the theory that
+  // a receiving app built by referencing this one has the best shot at
+  // recognizing it — but there's no way to guarantee that from this side,
+  // since that app's import logic isn't visible here.
+  const shareGeoreferencedMap = async (map) => {
+    if (!map.imageUrl) {
+      alert("This map doesn't have an image uploaded yet — nothing to share.");
+      return;
+    }
+    if (!isMapGeoreferenced(map)) {
+      alert("This map isn't calibrated yet — calibrate it first so there's real georeferencing data to include.");
+      return;
+    }
+    const baseName = (map.name || 'map').replace(/[^\w\- ]/g, '');
+    try {
+      const res = await fetch(map.imageUrl);
+      const blob = await res.blob();
+      const imageFile = new File([blob], baseName + '.png', { type: blob.type || 'image/png' });
+      const geoData = {
+        name: map.name,
+        imageWidth: map.imageWidth,
+        imageHeight: map.imageHeight,
+        refPoints: map.refPoints || null,
+        geoCorners: map.geoCorners || null,
+        geoBBoxFraction: map.geoBBoxFraction || null,
+      };
+      const jsonFile = new File([JSON.stringify(geoData, null, 2)], baseName + '.json', { type: 'application/json' });
+      if (navigator.canShare && navigator.canShare({ files: [imageFile, jsonFile] })) {
+        try {
+          await navigator.share({ files: [imageFile, jsonFile], title: baseName });
+          return;
+        } catch (e) {
+          if (e && e.name === 'AbortError') return; // user cancelled the share sheet
+          // fall through to the download fallback below
+        }
+      }
+      // Either multi-file share isn't supported on this device, or it was
+      // cancelled/failed — fall back to downloading both files
+      // separately so they're at least available to move over manually.
+      [imageFile, jsonFile].forEach((file) => {
+        const url = URL.createObjectURL(file);
+        const a = document.createElement('a');
+        a.href = url; a.download = file.name;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+      });
+    } catch (e) {
+      alert("Couldn't share this map — check your signal and try again.");
+    }
+  };
+  // Shares the map's actual displayed image via the native share sheet —
+  // unlike shareMapPdf below (which only works on whichever device the
+  // original PDF was uploaded from), this works from any device, since
+  // the image itself is a normal public URL already loading fine for
+  // everyone who opens this map. This is what "share this map with
+  // another device" should actually mean for most people.
+  const shareCurrentMapImage = async (map) => {
+    if (!map.imageUrl) {
+      alert("This map doesn't have an image uploaded yet — nothing to share.");
+      return;
+    }
+    const fileName = (map.name || 'map').replace(/[^\w\- ]/g, '') + '.png';
+    try {
+      const res = await fetch(map.imageUrl);
+      const blob = await res.blob();
+      const file = new File([blob], fileName, { type: blob.type || 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: fileName });
+          return;
+        } catch (e) {
+          if (e && e.name === 'AbortError') return; // user cancelled the share sheet
+          // fall through to the download fallback below
+        }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (e) {
+      alert("Couldn't share this map — check your signal and try again.");
+    }
+  };
   const shareMapPdf = async (mapId, mapName) => {
     const blob = await idbGetMapImageBlob('pdf:' + mapId);
     if (!blob) {
@@ -11161,6 +11250,17 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </button>
           )}
 
+          {isAdmin && (
+          <button
+            onClick={() => setScreen('safety')}
+            className="w-full flex items-center justify-between rounded-lg px-4 py-3.5 mb-3 font-display font-semibold text-sm uppercase tracking-wide"
+            style={{ color: COLORS.ink, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+          >
+            <span>🦺 Safety</span>
+            <span style={{ color: COLORS.inkDim }}>→</span>
+          </button>
+          )}
+
           <AdminSection
             icon="👥"
             title="Employees & Invites"
@@ -12632,6 +12732,24 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     <button onClick={() => setShowMapToolsMenu(false)} className="text-2xl" style={{ color: COLORS.inkDim }}>✕</button>
                   </div>
                   <div className="space-y-2">
+                    {currentMap.imageUrl && (
+                      <button
+                        onClick={() => { setShowMapToolsMenu(false); shareCurrentMapImage(currentMap); }}
+                        className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
+                        style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                      >
+                        📤 Share this map
+                      </button>
+                    )}
+                    {currentMapGeoreferenced && (
+                      <button
+                        onClick={() => { setShowMapToolsMenu(false); shareGeoreferencedMap(currentMap); }}
+                        className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
+                        style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                      >
+                        📤 Share georeferenced map
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         setShowMapToolsMenu(false);
