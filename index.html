@@ -6222,6 +6222,45 @@ function BillingEmailEditor({ value, onSave }) {
 }
 
 
+// --- PNG metadata embedding — lets a map's georeferencing data travel
+// inside the image file itself (a standard tEXt chunk, invisible to any
+// image viewer), instead of needing a separate JSON file alongside it.
+// Verified against a real PNG round-trip before relying on it here.
+const PNG_CRC_TABLE = (() => {
+  const table = [];
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    table[n] = c;
+  }
+  return table;
+})();
+function png_crc32(bytes) {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) crc = PNG_CRC_TABLE[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function embedJsonInPng(arrayBuffer, jsonString) {
+  const bytes = new Uint8Array(arrayBuffer);
+  const ihdrEnd = 8 + 4 + 4 + 13 + 4; // signature + IHDR's own length+type+data+crc — IHDR is always first
+  const textData = new TextEncoder().encode('georef\0' + jsonString);
+  const typeBytes = new TextEncoder().encode('tEXt');
+  const chunkBody = new Uint8Array(typeBytes.length + textData.length);
+  chunkBody.set(typeBytes, 0);
+  chunkBody.set(textData, typeBytes.length);
+  const crc = png_crc32(chunkBody);
+  const newChunk = new Uint8Array(4 + 4 + textData.length + 4);
+  new DataView(newChunk.buffer).setUint32(0, textData.length, false);
+  newChunk.set(typeBytes, 4);
+  newChunk.set(textData, 8);
+  new DataView(newChunk.buffer).setUint32(8 + textData.length, crc, false);
+  const result = new Uint8Array(bytes.length + newChunk.length);
+  result.set(bytes.slice(0, ihdrEnd), 0);
+  result.set(newChunk, ihdrEnd);
+  result.set(bytes.slice(ihdrEnd), ihdrEnd + newChunk.length);
+  return result;
+}
+
 function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // If we already have cached data from a previous session, skip the loading
   // screen entirely — show it immediately, then let Firebase update it live
@@ -8098,19 +8137,19 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     }
     setUploadingMapPdf(null);
   };
+
   // Hands the original georeferenced PDF back out via the iPhone/iPad share
   // sheet — AirDrop it to a machine's iPad, save it to Files, or email it —
   // so the same file that was uploaded here can be added on the Field Map
   // app's "Add map from Files" button.
-  // Shares BOTH the image and a JSON sidecar containing this map's actual
-  // calibration data (refPoints from manual 2-point calibration, or
-  // geoCorners/geoBBoxFraction from an auto-georeferenced PDF upload) —
-  // for getting a fully georeferenced map onto a separate app/device that
-  // has no access to this app's own Firebase data. Uses the exact same
-  // field names/structure this app stores internally, on the theory that
-  // a receiving app built by referencing this one has the best shot at
-  // recognizing it — but there's no way to guarantee that from this side,
-  // since that app's import logic isn't visible here.
+  // Shares a single PNG with this map's calibration data (refPoints from
+  // manual 2-point calibration, or geoCorners/geoBBoxFraction from an
+  // auto-georeferenced PDF upload) embedded directly inside the file
+  // itself as a tEXt chunk — no separate JSON file needed, and the image
+  // still opens and looks completely normal anywhere else it's used.
+  // Uses the exact same field names this app stores internally, on the
+  // theory that a receiving app built by referencing this one has the
+  // best shot at recognizing it.
   const shareGeoreferencedMap = async (map) => {
     if (!map.imageUrl) {
       alert("This map doesn't have an image uploaded yet — nothing to share.");
@@ -8123,8 +8162,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const baseName = (map.name || 'map').replace(/[^\w\- ]/g, '');
     try {
       const res = await fetch(map.imageUrl);
-      const blob = await res.blob();
-      const imageFile = new File([blob], baseName + '.png', { type: blob.type || 'image/png' });
+      const arrayBuffer = await res.arrayBuffer();
       const geoData = {
         name: map.name,
         imageWidth: map.imageWidth,
@@ -8133,26 +8171,22 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         geoCorners: map.geoCorners || null,
         geoBBoxFraction: map.geoBBoxFraction || null,
       };
-      const jsonFile = new File([JSON.stringify(geoData, null, 2)], baseName + '.json', { type: 'application/json' });
-      if (navigator.canShare && navigator.canShare({ files: [imageFile, jsonFile] })) {
+      const embeddedBytes = embedJsonInPng(arrayBuffer, JSON.stringify(geoData));
+      const imageFile = new File([embeddedBytes], baseName + '.png', { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [imageFile] })) {
         try {
-          await navigator.share({ files: [imageFile, jsonFile], title: baseName });
+          await navigator.share({ files: [imageFile], title: baseName });
           return;
         } catch (e) {
           if (e && e.name === 'AbortError') return; // user cancelled the share sheet
           // fall through to the download fallback below
         }
       }
-      // Either multi-file share isn't supported on this device, or it was
-      // cancelled/failed — fall back to downloading both files
-      // separately so they're at least available to move over manually.
-      [imageFile, jsonFile].forEach((file) => {
-        const url = URL.createObjectURL(file);
-        const a = document.createElement('a');
-        a.href = url; a.download = file.name;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
-      });
+      const url = URL.createObjectURL(imageFile);
+      const a = document.createElement('a');
+      a.href = url; a.download = imageFile.name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (e) {
       alert("Couldn't share this map — check your signal and try again.");
     }
