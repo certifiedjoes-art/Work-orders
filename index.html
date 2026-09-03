@@ -1958,32 +1958,24 @@ function MapCanvas({
 // Shown right after tapping a spot on the map in placement mode — pick a
 // type, add an optional note, and (only for Other, only for admin/foreman)
 // choose whether to make it public immediately.
-function MapPinForm({ canChoosePublic, onSubmit, onCancel }) {
-  const [type, setType] = useState('hazard');
+function MapPinForm({ type, canChoosePublic, onSubmit, onCancel }) {
   const [note, setNote] = useState('');
   const [isPublicChoice, setIsPublicChoice] = useState(false);
+  const def = PIN_TYPES[type];
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 150, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-end' }}>
       <div className="w-full p-5" style={{ background: COLORS.bg, borderRadius: '16px 16px 0 0', border: `2px solid ${COLORS.line}`, borderBottom: 'none' }}>
-        <h2 className="font-display text-lg font-bold mb-3">Drop a pin</h2>
-        <div className="grid grid-cols-2 gap-2 mb-3">
-          {Object.entries(PIN_TYPES).map(([key, def]) => (
-            <button
-              key={key}
-              onClick={() => setType(key)}
-              className="rounded-lg px-3 py-3 text-sm font-semibold flex items-center justify-center gap-2"
-              style={{ background: type === key ? def.color : COLORS.surfaceRaised, color: type === key ? '#fff' : COLORS.ink, border: `1px solid ${COLORS.line}` }}
-            >
-              <span>{def.icon}</span>{def.label}
-            </button>
-          ))}
-        </div>
-        {!PIN_TYPES[type].alwaysPublic && (
+        <h2 className="font-display text-lg font-bold mb-3 flex items-center gap-2">
+          <span className="rounded-lg px-3 py-1.5 text-sm flex items-center gap-2" style={{ background: def.color, color: '#fff' }}>
+            <span>{def.icon}</span>{def.label}
+          </span>
+        </h2>
+        {!def.alwaysPublic && (
           <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Only you will see this pin{canChoosePublic ? ' unless you make it public below.' : '.'}</p>
         )}
         <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className="w-full mb-3" />
-        {!PIN_TYPES[type].alwaysPublic && canChoosePublic && (
+        {!def.alwaysPublic && canChoosePublic && (
           <label className="flex items-center gap-2 text-sm mb-3">
             <input type="checkbox" checked={isPublicChoice} onChange={(e) => setIsPublicChoice(e.target.checked)} />
             Make this pin public — everyone will see it
@@ -1992,6 +1984,32 @@ function MapPinForm({ canChoosePublic, onSubmit, onCancel }) {
         <div className="flex gap-2">
           <Btn onClick={() => onSubmit(type, note, isPublicChoice)}>Drop pin</Btn>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Shown on a long-press of the pin button — pick which type the NEXT pin
+// dropped will use, without arming placement mode. Reusing this same grid
+// pattern rather than the old inline one inside MapPinForm, since the type
+// choice now happens ahead of time instead of at drop time.
+function PinTypePicker({ selected, onChoose, onClose }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 150, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-end' }} onClick={onClose}>
+      <div className="w-full p-5" style={{ background: COLORS.bg, borderRadius: '16px 16px 0 0', border: `2px solid ${COLORS.line}`, borderBottom: 'none' }} onClick={(e) => e.stopPropagation()}>
+        <h2 className="font-display text-lg font-bold mb-3">Pin type</h2>
+        <div className="grid grid-cols-2 gap-2">
+          {Object.entries(PIN_TYPES).map(([key, def]) => (
+            <button
+              key={key}
+              onClick={() => { onChoose(key); onClose(); }}
+              className="rounded-lg px-3 py-3 text-sm font-semibold flex items-center justify-center gap-2"
+              style={{ background: selected === key ? def.color : COLORS.surfaceRaised, color: selected === key ? '#fff' : COLORS.ink, border: `1px solid ${COLORS.line}` }}
+            >
+              <span>{def.icon}</span>{def.label}
+            </button>
+          ))}
         </div>
       </div>
     </div>
@@ -6296,6 +6314,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [personalTrackPoints, setPersonalTrackPoints] = useState(() => cacheGet('personalTrackPoints', [])); // raw {lat,lng} points while tracking — converted to one map's pixel space only once tracking stops. Persisted continuously as it grows, not just on save, so a walk in progress survives the app being closed or killed mid-walk.
   const highwayMapRef = useRef(null);
   const gestureMapViewportRef = useRef(null);
+  const pinLongPressTimerRef = useRef(null);
+  const pinLongPressFiredRef = useRef(false);
 
   const machinePositions = useMemo(() => liveFleetPositions.map((p) => {
     const typeSlug = machineType(p.name, unitTypes);
@@ -6362,6 +6382,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [mapUnit, setMapUnit] = useState(() => cacheGet('mapUnit', 'feet'));
   const [showMapSettings, setShowMapSettings] = useState(false);
   const [showMapPicker, setShowMapPicker] = useState(false);
+  const [selectedPinType, setSelectedPinType] = useState(() => cacheGet('selectedPinType', 'hazard'));
+  const [showPinTypePicker, setShowPinTypePicker] = useState(false);
+  const [showMapToolsMenu, setShowMapToolsMenu] = useState(false);
   const [showTimesheetMigration, setShowTimesheetMigration] = useState(false);
   const [lunchPrompt, setLunchPrompt] = useState(false);
   const [showAddMissedDay, setShowAddMissedDay] = useState(false);
@@ -12372,14 +12395,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   >
                     {t('backToBoard')}
                   </button>
-                  {(isAdmin || isForeman) && (
-                    <div className="flex items-center gap-2">
-                      {machineTracks.length > 0 && (
-                        <button onClick={() => setShowMachineTracksPanel(true)} className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap" style={{ color: COLORS.accent, background: 'rgba(27,31,25,0.85)', border: `1px solid ${COLORS.line}` }}>🛰️ Tracks</button>
-                      )}
-                      <button onClick={() => setShowManageMaps(true)} className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap" style={{ color: COLORS.accent, background: 'rgba(27,31,25,0.85)', border: `1px solid ${COLORS.line}` }}>Manage maps</button>
-                    </div>
-                  )}
                 </div>
 
                 <button
@@ -12401,71 +12416,46 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     )}
                   </p>
                 </div>
-                <div className="flex gap-2 flex-wrap mb-2">
+                <div className="flex gap-2 mb-2">
+                  {/* Single pin button — tap arms placement using the currently
+                      selected type; a long-press (500ms) opens the type picker
+                      instead of arming placement, so switching types doesn't
+                      require dropping a pin of the wrong kind first. */}
                   <button
-                    onClick={() => {
+                    onPointerDown={() => {
+                      pinLongPressFiredRef.current = false;
+                      pinLongPressTimerRef.current = setTimeout(() => {
+                        pinLongPressFiredRef.current = true;
+                        setShowPinTypePicker(true);
+                      }, 500);
+                    }}
+                    onPointerUp={() => {
+                      if (pinLongPressTimerRef.current) clearTimeout(pinLongPressTimerRef.current);
+                      if (pinLongPressFiredRef.current) return; // long-press already handled it
                       setMeasureMode(false);
                       setPencilMode(false);
                       setLinePoints([]);
-                      setPlacingPin(!placingPin);
+                      setPlacingPin((v) => !v);
                     }}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
+                    onPointerLeave={() => { if (pinLongPressTimerRef.current) clearTimeout(pinLongPressTimerRef.current); }}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap flex items-center gap-1.5"
                     style={{ background: placingPin ? COLORS.accent : 'rgba(27,31,25,0.85)', color: placingPin ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
                   >
-                    {placingPin ? 'Cancel' : '📍 Drop a pin'}
+                    {placingPin ? (
+                      'Cancel'
+                    ) : (
+                      <React.Fragment>
+                        <span>{PIN_TYPES[selectedPinType].icon}</span>
+                        Drop a pin
+                      </React.Fragment>
+                    )}
                   </button>
                   <button
-                    onClick={() => {
-                      setPlacingPin(false);
-                      setPencilMode(false);
-                      setLinePoints([]);
-                      setMeasureMode(!measureMode);
-                    }}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
-                    style={{ background: measureMode ? COLORS.accent : 'rgba(27,31,25,0.85)', color: measureMode ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
-                  >
-                    {measureMode ? 'Cancel' : '📏 Draw & Measure'}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setPlacingPin(false);
-                      setMeasureMode(false);
-                      setLinePoints([]);
-                      setPencilMode(!pencilMode);
-                    }}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
-                    style={{ background: pencilMode ? COLORS.accent : 'rgba(27,31,25,0.85)', color: pencilMode ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
-                  >
-                    {pencilMode ? 'Cancel' : '✏️ Pencil'}
-                  </button>
-                  {(isAdmin || isForeman) && currentMap.imageUrl && (
-                    <button
-                      onClick={() => {
-                        if (calibratingMap) {
-                          setCalibratingMap(false);
-                          setCalibrationPointIndex(0);
-                          setPendingCalibrationPixel(null);
-                        } else {
-                          setPlacingPin(false);
-                          setMeasureMode(false);
-                          setPencilMode(false);
-                          setLinePoints([]);
-                          setCalibrationPointIndex(0);
-                          setCalibratingMap(true);
-                        }
-                      }}
-                      className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
-                      style={{ background: calibratingMap ? COLORS.accent : 'rgba(27,31,25,0.85)', color: calibratingMap ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
-                    >
-                      {calibratingMap ? 'Cancel' : '📍 Calibrate'}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setShowMapSettings(true)}
+                    onClick={() => setShowMapToolsMenu(true)}
                     className="text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
                     style={{ background: 'rgba(27,31,25,0.85)', color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
                   >
-                    ⚙️
+                    ⋯ Tools
                   </button>
                 </div>
                 {placingPin && (
@@ -12540,6 +12530,105 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         {m.isDefault && <span className="text-xs">default</span>}
                       </button>
                     ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showPinTypePicker && (
+              <PinTypePicker
+                selected={selectedPinType}
+                onChoose={(key) => { setSelectedPinType(key); cacheSet('selectedPinType', key); }}
+                onClose={() => setShowPinTypePicker(false)}
+              />
+            )}
+
+            {showMapToolsMenu && (
+              <div style={{ position: 'fixed', inset: 0, zIndex: 150, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-end' }} onClick={() => setShowMapToolsMenu(false)}>
+                <div
+                  className="w-full p-5"
+                  style={{ background: COLORS.bg, borderRadius: '16px 16px 0 0', border: `2px solid ${COLORS.line}`, borderBottom: 'none' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="font-display text-lg font-bold">Tools</h2>
+                    <button onClick={() => setShowMapToolsMenu(false)} className="text-2xl" style={{ color: COLORS.inkDim }}>✕</button>
+                  </div>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => {
+                        setShowMapToolsMenu(false);
+                        setPlacingPin(false);
+                        setPencilMode(false);
+                        setLinePoints([]);
+                        setMeasureMode(!measureMode);
+                      }}
+                      className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
+                      style={{ background: measureMode ? COLORS.accent : COLORS.surfaceRaised, color: measureMode ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                    >
+                      📏 {measureMode ? 'Stop measuring' : 'Draw & Measure'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowMapToolsMenu(false);
+                        setPlacingPin(false);
+                        setMeasureMode(false);
+                        setLinePoints([]);
+                        setPencilMode(!pencilMode);
+                      }}
+                      className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
+                      style={{ background: pencilMode ? COLORS.accent : COLORS.surfaceRaised, color: pencilMode ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                    >
+                      ✏️ {pencilMode ? 'Stop drawing' : 'Pencil'}
+                    </button>
+                    {(isAdmin || isForeman) && currentMap.imageUrl && (
+                      <button
+                        onClick={() => {
+                          setShowMapToolsMenu(false);
+                          if (calibratingMap) {
+                            setCalibratingMap(false);
+                            setCalibrationPointIndex(0);
+                            setPendingCalibrationPixel(null);
+                          } else {
+                            setPlacingPin(false);
+                            setMeasureMode(false);
+                            setPencilMode(false);
+                            setLinePoints([]);
+                            setCalibrationPointIndex(0);
+                            setCalibratingMap(true);
+                          }
+                        }}
+                        className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
+                        style={{ background: calibratingMap ? COLORS.accent : COLORS.surfaceRaised, color: calibratingMap ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                      >
+                        📍 {calibratingMap ? 'Stop calibrating' : 'Calibrate this map'}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { setShowMapToolsMenu(false); setShowMapSettings(true); }}
+                      className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
+                      style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                    >
+                      ⚙️ Map settings
+                    </button>
+                    {(isAdmin || isForeman) && machineTracks.length > 0 && (
+                      <button
+                        onClick={() => { setShowMapToolsMenu(false); setShowMachineTracksPanel(true); }}
+                        className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
+                        style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                      >
+                        🛰️ Machine tracks
+                      </button>
+                    )}
+                    {(isAdmin || isForeman) && (
+                      <button
+                        onClick={() => { setShowMapToolsMenu(false); setShowManageMaps(true); }}
+                        className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
+                        style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                      >
+                        🗂️ Manage maps
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -12655,6 +12744,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
         {pendingPinPosition && currentMap && (
           <MapPinForm
+            type={selectedPinType}
             canChoosePublic={isAdmin || isForeman}
             onCancel={() => setPendingPinPosition(null)}
             onSubmit={async (type, note, isPublicChoice) => {
