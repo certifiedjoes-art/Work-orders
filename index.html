@@ -3332,6 +3332,17 @@ async function deleteMachineIconOverride(type) {
   await firebase.database().ref('machineIconOverrides/' + type).remove();
 }
 
+// --- Per-unit icon overrides — more specific than the per-type ones
+// above: lets B1 and B2 (both bunchers) have two different photos, not
+// just one shared photo for every buncher. Keyed by unit slug the same
+// way unitTypes is, so it stays consistent if a unit ever gets renamed.
+async function saveUnitIconOverride(unitSlug, url) {
+  await firebase.database().ref('unitIconOverrides/' + unitSlug).set(url);
+}
+async function deleteUnitIconOverride(unitSlug) {
+  await firebase.database().ref('unitIconOverrides/' + unitSlug).remove();
+}
+
 async function saveMapRecord(map) {
   await firebase.database().ref('mapRecords/' + map.id).set(stripUndefined(map));
 }
@@ -6272,6 +6283,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [units, setUnits] = useState(() => cacheGet('units', []));
   const [unitTypes, setUnitTypes] = useState(() => cacheGet('unitTypes', {})); // { [unitName]: 'buncher'|'processor'|...|'truck'|'other' } — tags a real work-order unit for production/mechanic tracking
   const [machineIconOverrides, setMachineIconOverrides] = useState(() => cacheGet('machineIconOverrides', {})); // { [type]: imageUrl } — admin-uploaded custom icon, takes priority over MACHINE_ICON_IMAGES/SVGS/emoji
+  const [unitIconOverrides, setUnitIconOverrides] = useState(() => cacheGet('unitIconOverrides', {})); // { [unitSlug]: imageUrl } — more specific than machineIconOverrides, takes top priority
+  const [uploadingUnitIconSlug, setUploadingUnitIconSlug] = useState(null);
   const [uploadingMachineIconType, setUploadingMachineIconType] = useState(null);
   const [orders, setOrders] = useState(() => cacheGet('orders', []));
   const [currentMechanic, setCurrentMechanic] = useState(null);
@@ -6420,11 +6433,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const typeSlug = machineType(p.name, unitTypes);
     return {
       ...p,
-      iconImage: machineIconOverrides[typeSlug] || MACHINE_ICON_IMAGES[typeSlug] || null,
+      iconImage: unitIconOverrides[slugForUnit(p.name)] || machineIconOverrides[typeSlug] || MACHINE_ICON_IMAGES[typeSlug] || null,
       iconSvg: MACHINE_ICON_SVGS[typeSlug] || null,
       icon: MACHINE_ICONS[typeSlug] || '📍',
     };
-  }), [liveFleetPositions, unitTypes, machineIconOverrides]);
+  }), [liveFleetPositions, unitTypes, machineIconOverrides, unitIconOverrides]);
   const openTracks = useMemo(() => machineTracks.filter((t) => !t.endedAt), [machineTracks]);
   const [expandedPreTripId, setExpandedPreTripId] = useState(null);
   const [editingDriverLogId, setEditingDriverLogId] = useState(null);
@@ -7012,6 +7025,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = snap.val() || {};
       setMachineIconOverrides(val);
       cacheSet('machineIconOverrides', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('unitIconOverrides');
+    const on = ref.on('value', (snap) => {
+      const val = snap.val() || {};
+      setUnitIconOverrides(val);
+      cacheSet('unitIconOverrides', val);
     });
     return () => ref.off('value', on);
   }, []);
@@ -8120,6 +8143,21 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const resetMachineIcon = async (type) => {
     await deleteMachineIconOverride(type);
   };
+  const uploadUnitIcon = async (unitSlug, file) => {
+    setUploadingUnitIconSlug(unitSlug);
+    try {
+      const storageRef = firebase.storage().ref(`mapImages/unit-icon-${unitSlug}-${Date.now()}.png`);
+      await storageRef.put(file);
+      const url = await storageRef.getDownloadURL();
+      await saveUnitIconOverride(unitSlug, url);
+    } catch (e) {
+      alert("Couldn't upload that image — " + (e.message || 'check your signal and try again.'));
+    }
+    setUploadingUnitIconSlug(null);
+  };
+  const resetUnitIcon = async (unitSlug) => {
+    await deleteUnitIconOverride(unitSlug);
+  };
   const uploadMapPdf = async (mapId, file) => {
     setUploadingMapPdf(mapId);
     try {
@@ -8172,7 +8210,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         geoBBoxFraction: map.geoBBoxFraction || null,
       };
       const embeddedBytes = embedJsonInPng(arrayBuffer, JSON.stringify(geoData));
-      const imageFile = new File([embeddedBytes], baseName + '.png', { type: 'image/png' });
+      // .hcmap instead of .png, and a generic MIME type instead of
+      // image/png — this is still exactly a valid PNG underneath, but a
+      // non-image extension/type keeps iOS's share sheet from treating it
+      // as a Photo, which would route it into the Photos library rather
+      // than Files, and Photos' picker isn't reliable about preserving
+      // custom metadata chunks like this one when it's picked back up.
+      const imageFile = new File([embeddedBytes], baseName + '.hcmap', { type: 'application/octet-stream' });
       if (navigator.canShare && navigator.canShare({ files: [imageFile] })) {
         try {
           await navigator.share({ files: [imageFile], title: baseName });
@@ -12320,6 +12364,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         </button>
                       </div>
                     ) : (
+                      <div>
                       <div className="flex items-center justify-between gap-2">
                         <button
                           onClick={() => { setEditingUnitName(u); setRenamedUnitText(u); }}
@@ -12343,6 +12388,50 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                             <option key={type} value={type}>{label}</option>
                           ))}
                         </select>
+                      </div>
+                      {unitTypes[slugForUnit(u)] && (() => {
+                        const uSlug = slugForUnit(u);
+                        const uType = unitTypes[uSlug];
+                        const customUrl = unitIconOverrides[uSlug];
+                        const fallbackImage = machineIconOverrides[uType] || MACHINE_ICON_IMAGES[uType];
+                        const isUploading = uploadingUnitIconSlug === uSlug;
+                        return (
+                          <div className="flex items-center gap-2 mt-2 pt-2" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+                            <div className="flex items-center justify-center flex-shrink-0" style={{ width: 32, height: 32, background: COLORS.surface, borderRadius: 6, border: `1px solid ${COLORS.line}` }}>
+                              {customUrl || fallbackImage ? (
+                                <img src={customUrl || fallbackImage} alt={u} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                              ) : (
+                                <span style={{ fontSize: '1rem' }}>{MACHINE_ICONS[uType] || '📍'}</span>
+                              )}
+                            </div>
+                            <span className="text-xs flex-1" style={{ color: COLORS.inkDim }}>
+                              {customUrl ? `Custom icon for ${u}` : 'Using the type default'}
+                            </span>
+                            <label
+                              className="text-xs font-semibold px-2 py-1.5 rounded-lg whitespace-nowrap cursor-pointer flex-shrink-0"
+                              style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                            >
+                              {isUploading ? 'Uploading…' : 'Upload'}
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                disabled={isUploading}
+                                onChange={(e) => {
+                                  const file = e.target.files && e.target.files[0];
+                                  if (file) uploadUnitIcon(uSlug, file);
+                                  e.target.value = '';
+                                }}
+                              />
+                            </label>
+                            {customUrl && (
+                              <button onClick={() => resetUnitIcon(uSlug)} className="text-xs underline flex-shrink-0" style={{ color: COLORS.line }}>
+                                Reset
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
                       </div>
                     )}
                   </div>
@@ -12512,7 +12601,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           return {
             name: p.name, px: px.px, py: px.py, time: p.time,
             icon: MACHINE_ICONS[machineType(p.name, unitTypes)] || '📍',
-            iconImage: machineIconOverrides[machineType(p.name, unitTypes)] || MACHINE_ICON_IMAGES[machineType(p.name, unitTypes)] || null,
+            iconImage: unitIconOverrides[slugForUnit(p.name)] || machineIconOverrides[machineType(p.name, unitTypes)] || MACHINE_ICON_IMAGES[machineType(p.name, unitTypes)] || null,
           };
         }).filter(Boolean)
       : [];
