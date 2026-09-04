@@ -9429,9 +9429,27 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       return;
     }
     await persistMeta(mechanics, units.map((u) => (u === oldName ? trimmed : u)));
-    const oldType = unitTypes[slugForUnit(oldName)];
+    // Read the current type straight from Firebase rather than trusting
+    // local state, which could be a moment stale right at rename time —
+    // and fall back to a case-insensitive search in case the old unit's
+    // exact-case slug doesn't match what's actually stored (this is
+    // exactly what silently lost the type tag before: slugForUnit is
+    // case-sensitive, so "Hb1" and "HB1" are different keys).
+    let oldType = null;
+    try {
+      const snap = await firebase.database().ref('unitTypes').once('value');
+      const allTypes = snap.val() || {};
+      const exactSlug = slugForUnit(oldName);
+      oldType = allTypes[exactSlug] || null;
+      if (!oldType) {
+        const matchKey = Object.keys(allTypes).find((k) => k.toLowerCase() === exactSlug.toLowerCase());
+        if (matchKey) oldType = allTypes[matchKey];
+      }
+    } catch (e) {
+      oldType = unitTypes[slugForUnit(oldName)]; // fall back to local state if Firebase read itself fails
+    }
     if (oldType) {
-      await firebase.database().ref('unitTypes/' + slugForUnit(trimmed)).set(oldType).catch(() => {});
+      await firebase.database().ref('unitTypes/' + slugForUnit(trimmed)).set(oldType).catch(() => alert("Renamed the unit, but couldn't carry over its type tag — set it again from the dropdown."));
       await firebase.database().ref('unitTypes/' + slugForUnit(oldName)).remove().catch(() => {});
     }
     // Anyone currently assigned to this unit should follow the rename,
