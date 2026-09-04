@@ -12245,69 +12245,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
           {isAdmin && (
           <AdminSection
-            icon="🖼️"
-            title="Machine Icons"
-            expanded={expandedAdmin === 'machineIcons'}
-            onToggle={() => setExpandedAdmin(expandedAdmin === 'machineIcons' ? null : 'machineIcons')}
-          >
-          <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>
-            Upload a real photo to replace a machine type's icon on the Highway Map. Background should already be removed (transparent PNG) before uploading — ask in chat and one can be prepared from a reference photo.
-          </p>
-          <div className="space-y-3">
-            {Object.keys(MACHINE_ICONS).map((type) => {
-              const customUrl = machineIconOverrides[type];
-              const fallbackImage = MACHINE_ICON_IMAGES[type];
-              const isUploading = uploadingMachineIconType === type;
-              return (
-                <div key={type} className="flex items-center justify-between gap-3 rounded-lg p-3" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex items-center justify-center flex-shrink-0" style={{ width: 44, height: 44, background: COLORS.surface, borderRadius: 8, border: `1px solid ${COLORS.line}` }}>
-                      {customUrl || fallbackImage ? (
-                        <img src={customUrl || fallbackImage} alt={type} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
-                      ) : (
-                        <span style={{ fontSize: '1.5rem' }}>{MACHINE_ICONS[type]}</span>
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-display font-semibold text-sm capitalize truncate">{type}</p>
-                      <p className="text-xs truncate" style={{ color: COLORS.inkDim }}>
-                        {customUrl ? 'Custom photo' : fallbackImage ? 'Built-in photo' : 'Default icon'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <label
-                      className="text-xs font-semibold px-3 py-2 rounded-lg whitespace-nowrap cursor-pointer"
-                      style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-                    >
-                      {isUploading ? 'Uploading…' : 'Upload'}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        disabled={isUploading}
-                        onChange={(e) => {
-                          const file = e.target.files && e.target.files[0];
-                          if (file) uploadMachineIcon(type, file);
-                          e.target.value = '';
-                        }}
-                      />
-                    </label>
-                    {customUrl && (
-                      <button onClick={() => resetMachineIcon(type)} className="text-xs underline whitespace-nowrap" style={{ color: COLORS.line }}>
-                        Reset
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          </AdminSection>
-          )}
-
-          {isAdmin && (
-          <AdminSection
             icon="💵"
             title="Extra-Task Billing"
             expanded={expandedAdmin === 'billing'}
