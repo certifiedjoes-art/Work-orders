@@ -1282,7 +1282,7 @@ function ClockOutReviewOverlay({ show, openEntry, skippedLunch, mechanic, onConf
   );
 }
 
-function ProductionClockOutReviewOverlay({ show, shift, mechanic, unitTypes, onConfirm, onCancel }) {
+function ProductionClockOutReviewOverlay({ show, shift, mechanic, unitTypes, onConfirm, onCancel, isSwitch }) {
   const savedSignature = mechanic ? localStorage.getItem('savedSignature_' + mechanic) : null;
   const [signature, setSignature] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -1294,7 +1294,7 @@ function ProductionClockOutReviewOverlay({ show, shift, mechanic, unitTypes, onC
   return (
     <div className="fixed inset-0 z-50 p-6" style={{ background: 'rgba(0,0,0,0.85)', minHeight: '100vh' }}>
       <div className="w-full max-w-sm mx-auto my-8 rounded-2xl p-6 overflow-y-auto" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}`, maxHeight: '90vh' }}>
-        <p className="font-display text-lg font-bold text-center mb-1">Review & sign off</p>
+        <p className="font-display text-lg font-bold text-center mb-1">{isSwitch ? "Finish up on this machine" : 'Review & sign off'}</p>
         <p className="text-sm text-center mb-5" style={{ color: COLORS.inkDim }}>{mechanic} — {shift.machine}</p>
         <div className="rounded-lg p-4 mb-5 space-y-2" style={{ background: COLORS.surfaceRaised }}>
           <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Start</span><span>{fmtTime(shift.start)}</span></div>
@@ -1330,7 +1330,7 @@ function ProductionClockOutReviewOverlay({ show, shift, mechanic, unitTypes, onC
             }}
             disabled={!signature || submitting}
           >
-            {submitting ? '…' : 'Confirm & clock out'}
+            {submitting ? '…' : (isSwitch ? 'Confirm & switch' : 'Confirm & clock out')}
           </Btn>
           <Btn variant="ghost" onClick={onCancel} disabled={submitting}>Go back</Btn>
         </div>
@@ -6484,6 +6484,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [showPreTripForm, setShowPreTripForm] = useState(false);
   const [showInspectionMode, setShowInspectionMode] = useState(false);
   const [showProductionClockOutReview, setShowProductionClockOutReview] = useState(false);
+  const [showSwitchMachine, setShowSwitchMachine] = useState(false);
+  const [pendingSwitchMachine, setPendingSwitchMachine] = useState(null);
   const [showLostAccess, setShowLostAccess] = useState(false);
   const [lostAccessEmail, setLostAccessEmail] = useState('');
   const [lostAccessSubmitting, setLostAccessSubmitting] = useState(false);
@@ -8914,6 +8916,45 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setTodaysJobChoice(null);
   };
 
+  // Switching to a unit of the same machine type (e.g. one buncher to
+  // another) just relabels the current shift — same kind of work, no
+  // reason to split the numbers. A genuinely different kind of machine
+  // finalizes the current shift (through the normal review/signature
+  // step, so nothing about that machine's numbers gets skipped) and opens
+  // a fresh one, so each machine's production stays cleanly separated
+  // instead of one shift's tallies mixing work from two different jobs.
+  const requestMachineSwitch = (newMachine) => {
+    if (!openProductionShift || !newMachine || newMachine === openProductionShift.machine) {
+      setShowSwitchMachine(false);
+      return;
+    }
+    const currentType = machineType(openProductionShift.machine, unitTypes);
+    const newType = machineType(newMachine, unitTypes);
+    setShowSwitchMachine(false);
+    if (currentType === newType) {
+      patchOpenProductionShift({ machine: newMachine });
+      return;
+    }
+    const shiftType = currentType;
+    if (shiftType !== 'fuel' && shiftType !== 'winch' && !openProductionShift.block) {
+      alert('Select or add a block number for the current machine before switching — that finalizes its numbers first.');
+      return;
+    }
+    setPendingSwitchMachine(newMachine);
+    setShowProductionClockOutReview(true);
+  };
+  const confirmMachineSwitch = async (signatureDataUrl) => {
+    const newMachine = pendingSwitchMachine;
+    await patchOpenProductionShift({ end: new Date().toISOString(), signature: signatureDataUrl, signedAt: new Date().toISOString() });
+    if (openProductionShift && TRACK_ELIGIBLE_TYPES.includes(machineType(openProductionShift.machine, unitTypes))) {
+      await endMachineTrack('productionShift', openProductionShift.id);
+    }
+    setShowProductionClockOutReview(false);
+    setPendingSwitchMachine(null);
+    setTodaysJobChoice(newMachine);
+    await startProductionShift(newMachine);
+  };
+
   const addExtraTask = async (desc, hours) => {
     if (!openProductionShift || !desc.trim() || !parseFloat(hours)) return;
     const next = [...(openProductionShift.extraTasks || []), { id: uid(), desc: desc.trim(), hours: parseFloat(hours) }];
@@ -9297,7 +9338,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         rows.push(['Mechanic', 'Date', 'Clock In', 'Clock Out', 'Break Start', 'Break End', 'Worked Through Break', 'Paid Hours', 'Jobs']);
 
         const entriesByDate = {};
-        byMechanic[name].forEach((e) => { entriesByDate[e.date] = e; });
+        byMechanic[name].forEach((e) => {
+          if (!entriesByDate[e.date]) entriesByDate[e.date] = [];
+          entriesByDate[e.date].push(e);
+        });
+        // A day with more than one clock-in/out (e.g. left and came back
+        // later) sorts oldest-first so the pairs read in the order they
+        // actually happened, not whatever order they were saved in.
+        Object.values(entriesByDate).forEach((list) => list.sort((a, b) => new Date(a.clockIn || 0) - new Date(b.clockIn || 0)));
 
         // Only fill in every day when an explicit range was actually
         // requested (the weekly export, or Export & Share with From/To
@@ -9320,12 +9368,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         let regularTotal = 0;
         let overtimeTotal = 0;
         dates.forEach((dateStr) => {
-          const e = entriesByDate[dateStr];
-          if (!e) {
+          const dayEntries = entriesByDate[dateStr];
+          if (!dayEntries || dayEntries.length === 0) {
             rows.push([name, dateStr, '', '', '', '', '', '', '']);
             return;
           }
-          const hours = entryHours(e);
+          // Combined total for the day across every clock-in/out pair —
+          // this is what the 10-hour overtime threshold applies to, not
+          // any single pair on its own, so someone who left and came
+          // back later the same day is measured against their whole day.
+          const hours = dayEntries.reduce((sum, e) => sum + entryHours(e), 0);
           // Overtime is anything worked beyond 10 hours in that one day —
           // the only rule used here, confirmed directly against real
           // payroll totals rather than assumed.
@@ -9333,15 +9385,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           const dailyRegular = hours - dailyOvertime;
           regularTotal += dailyRegular;
           overtimeTotal += dailyOvertime;
-          const jobsStr = (e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`).join(' | ');
+          const jobsStr = dayEntries.flatMap((e) => (e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`)).join(' | ');
+          const workedThroughBreak = dayEntries.some((e) => e.skippedLunch) ? 'Yes' : 'No';
           rows.push([
-            e.mechanic,
-            e.date,
-            fmtTimeWithSeconds(e.clockIn),
-            fmtTimeWithSeconds(e.clockOut),
-            fmtTimeWithSeconds(e.lunchStart),
-            fmtTimeWithSeconds(e.lunchEnd),
-            e.skippedLunch ? 'Yes' : 'No',
+            name,
+            dateStr,
+            dayEntries.map((e) => fmtTimeWithSeconds(e.clockIn)).join(' / '),
+            dayEntries.map((e) => fmtTimeWithSeconds(e.clockOut)).join(' / '),
+            dayEntries.map((e) => fmtTimeWithSeconds(e.lunchStart)).filter(Boolean).join(' / '),
+            dayEntries.map((e) => fmtTimeWithSeconds(e.lunchEnd)).filter(Boolean).join(' / '),
+            workedThroughBreak,
             fmtHoursFixed2(hours),
             jobsStr,
           ]);
@@ -10621,9 +10674,35 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
               <DowntimeButton onLog={logDowntime} />
 
-              <div className="mt-6">
-                <Btn onClick={attemptProductionClockOut} className="w-full">Clock Out</Btn>
+              <div className="mt-6 flex gap-2">
+                {altOptionsFor(currentMechanic).length > 1 && (
+                  <Btn variant="ghost" onClick={() => setShowSwitchMachine(true)} className="flex-1">🔄 Switch Machine</Btn>
+                )}
+                <Btn onClick={attemptProductionClockOut} className="flex-1">Clock Out</Btn>
               </div>
+              {showSwitchMachine && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 150, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-end' }} onClick={() => setShowSwitchMachine(false)}>
+                  <div className="w-full p-5" style={{ background: COLORS.bg, borderRadius: '16px 16px 0 0', border: `2px solid ${COLORS.line}`, borderBottom: 'none' }} onClick={(e) => e.stopPropagation()}>
+                    <h2 className="font-display text-lg font-bold mb-1">Switch machine</h2>
+                    <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>
+                      Moving to a different kind of machine finalizes today's numbers on this one first, then opens a fresh shift — keeping each machine's production separate. Switching between two units of the same type just relabels this shift.
+                    </p>
+                    <div className="space-y-2">
+                      {altOptionsFor(currentMechanic).filter((opt) => opt.value !== '__mechanic__' && opt.value !== openProductionShift.machine).map((opt) => (
+                        <button
+                          key={opt.value}
+                          onClick={() => requestMachineSwitch(opt.value)}
+                          className="w-full text-left rounded-lg p-3 font-display font-semibold"
+                          style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    <button onClick={() => setShowSwitchMachine(false)} className="text-xs underline mt-3 block" style={{ color: COLORS.inkDim }}>Cancel</button>
+                  </div>
+                </div>
+              )}
             </React.Fragment>
           )}
 
@@ -10662,8 +10741,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             shift={openProductionShift}
             mechanic={currentMechanic}
             unitTypes={unitTypes}
-            onConfirm={confirmProductionClockOut}
-            onCancel={() => setShowProductionClockOutReview(false)}
+            isSwitch={!!pendingSwitchMachine}
+            onConfirm={pendingSwitchMachine ? confirmMachineSwitch : confirmProductionClockOut}
+            onCancel={() => { setShowProductionClockOutReview(false); setPendingSwitchMachine(null); }}
           />
 
           <ProductionShiftHistory
