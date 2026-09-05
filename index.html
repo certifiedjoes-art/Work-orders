@@ -11528,7 +11528,22 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             {generatedInviteLink && (
               <div className="rounded-lg p-3 mt-3" style={{ background: COLORS.surfaceRaised }}>
                 <p className="text-xs mb-2 break-all font-mono" style={{ color: COLORS.ink }}>{generatedInviteLink}</p>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => {
+                      const body = encodeURIComponent(`Harder Contracting — join the team: ${generatedInviteLink}`);
+                      // iOS wants "sms:&body=", Android wants "sms:?body=" — the
+                      // wrong separator silently fails to prefill the message on
+                      // some phones, so this picks the one that matches the
+                      // device actually being used to tap the button.
+                      const isAndroid = /Android/i.test(navigator.userAgent);
+                      window.location.href = `sms:${isAndroid ? '?' : '&'}body=${body}`;
+                    }}
+                    className="text-xs font-display uppercase tracking-wider font-semibold px-3 py-2 rounded-lg"
+                    style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+                  >
+                    📱 Text this link
+                  </button>
                   <button
                     onClick={async () => {
                       if (navigator.share) {
