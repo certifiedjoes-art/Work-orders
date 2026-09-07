@@ -762,7 +762,80 @@ const STATUSES = ['Open', 'In Progress', 'Done'];
 // included) can view every one of these — monthly equipment inspections
 // and incident/near-miss reports are handled elsewhere and are NOT part
 // of this open library.
-const SAFETY_CATEGORIES = ['Safety Manual', 'OHS Manual', 'SDS Sheets', 'Safety Meeting Minutes', 'Committee Meeting Minutes'];
+const SAFETY_CATEGORIES = ['Safety Manual', 'OHS Manual', 'SDS Sheets', 'Safety Meeting Minutes', 'Committee Meeting Minutes', 'SFI Booklet'];
+
+// Inspection types living in the Safety > Inspections dropdown. Only 'yard'
+// has a real digitized form so far — the rest show a "coming soon" state
+// until those forms are provided, so the menu itself doesn't need to change
+// shape as each one gets built.
+const SAFETY_INSPECTION_TYPES = [
+  { key: 'yard', label: 'Yard Inspections', bySite: true },
+  { key: 'vehicle', label: 'Vehicle Inspections', bySite: false },
+  { key: 'equipment', label: 'Equipment Inspections', bySite: false },
+  { key: 'fuelTank', label: 'Fuel Tank Ledgers', bySite: false },
+];
+// Matches Harder Contracting's paper "Work Site Inspection Form" exactly —
+// same section order, same item wording, so a filled-out digital copy reads
+// the same as the paper one it replaces. Every item gets an OK / Req. Att.
+// choice; a note box only appears once something's flagged as needing
+// attention, same as how the paper form leaves that column blank otherwise.
+const YARD_INSPECTION_SECTIONS = [
+  { name: 'Administration', items: [
+    'Manuals, Information, & Regulations Accessible',
+    'Policies Posted',
+    'Camp/Site ERP Posted',
+    'Training Up to Date & Posted',
+  ]},
+  { name: 'Camp Building', items: [
+    'Exits – Marked, Adequate Lighting, No Obstructions',
+    'Lights & Outlets',
+    'Domestic Garbage Disposal',
+    'Storage of Supplies',
+    'General Camp Housekeeping',
+    'Fire Alarm System/Suppression/Smoke Detectors',
+    'Fire Extinguishers',
+    'Evacuation Plan',
+  ]},
+  { name: 'First Aid Supplies & ETV Unit', items: [
+    'Kit Size/Equipment as per legislation',
+    'Eyewash',
+    'First Aid Records (Confidential)',
+    'ETV Parked in Strategic Location/Started Regularly',
+    'Clean and Orderly',
+  ]},
+  { name: 'Parts/Tool Vans', items: [
+    'Entry/Exit/Lighting/Ventilation',
+    'Fire Extinguishers (Charged/Certified)',
+    'Power Cords/Tools Condition',
+    'Emergency Phone Numbers/ERP',
+    'MSDS',
+    'Signage',
+    'General Housekeeping (slip, trip, fall hazards, surfaces, etc.)',
+    'Guards on Bench Grinders',
+    'Properly Secured Oxygen/Acetylene Bottles',
+    'Safety Glasses/Goggles/Face Shield Readily Available',
+  ]},
+  { name: 'Yards/Grounds', items: [
+    'Lighting',
+    'Overhead Hazards Marked',
+    'Generator System Operable (Hearing Protection)',
+    'Blocking of Camp, Sleeper Units',
+    'Hazards are Marked (Tanks, Waste Water Pit, etc.)',
+  ]},
+  { name: 'Hazardous Materials Storage', items: [
+    '45 Gallon Spill Kit on Site – Maintained and Accessible',
+    'MSDS Up to Date and Accessible',
+    'Fire Extinguishers Charged and Certified',
+    'No Smoking Signs Posted at Appropriate Locations',
+    'Used Spill Pads Proper Disposal',
+    'Used Oil/Filters/Containers (Labeling & Containment)',
+    'Tanks Stored 100 meters+ from Water Sources',
+    'Fuel Nozzles & Valves in Good Working Condition',
+    'All Valves Shut Off When Not in Use',
+    'Secondary Containment Where Required',
+    'All Controlled Products Labeled or Placarded',
+  ]},
+];
 
 function OfflineBanner({ isOnline }) {
   if (isOnline) return null;
@@ -3142,8 +3215,165 @@ function compressImage(file, maxDim = 1280, quality = 0.7) {
   });
 }
 
+// Matches Harder Contracting's "Fuel Tank - Mobile Tanks - Contractor
+// Trucks" ledger. Unit/plate # is never typed here — it comes from the
+// app's own unit list (plus any ledger-only extras), so this only covers
+// the columns that actually get filled in by hand each month.
+const FUEL_TANK_YN_FIELDS = [
+  { key: 'spillKitWhitePads', label: 'Spill Kit — White Pads (min. 10)' },
+  { key: 'spillKitGreyPads', label: 'Spill Kit — Grey Pads (min. 5)' },
+  { key: 'fireExtinguisher', label: 'Fire Extinguisher (charged & inspected this year)' },
+  { key: 'nozzleContainment', label: 'Nozzle Containment' },
+  { key: 'shovel', label: 'Shovel' },
+  { key: 'firstAidKit', label: 'First Aid Kit' },
+];
+
+function YNField({ label, value, onChange, readOnly }) {
+  if (readOnly) {
+    return (
+      <div className="flex items-center justify-between gap-3 py-1.5">
+        <span className="text-sm flex-1">{label}</span>
+        <span className="text-xs font-bold" style={{ color: value === 'Y' ? COLORS.accent : value === 'N' ? '#E07A5F' : COLORS.inkDim }}>
+          {value || '—'}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center justify-between gap-3 py-1.5">
+      <span className="text-sm flex-1">{label}</span>
+      <div className="flex gap-1 flex-shrink-0">
+        {['Y', 'N', 'N/A'].map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => onChange(opt)}
+            className="text-xs font-bold px-2 py-1 rounded"
+            style={value === opt
+              ? (opt === 'N' ? { background: '#E07A5F', color: '#1B1F19' } : opt === 'N/A' ? { background: COLORS.inkDim, color: COLORS.bg } : { background: COLORS.accent, color: COLORS.bg })
+              : { background: COLORS.surface, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// One unit's row for one month — pre-fills the mostly-static columns
+// (construction standard, manufacture date, retest info) from that unit's
+// most recent prior entry, since those rarely change month to month; the
+// actual monthly checks always start blank.
+function FuelTankUnitForm({ unit, month, priorRecord, existingRecord, defaultInitials, submitting, onCancel, onSubmit }) {
+  const base = existingRecord || {};
+  const staticSource = existingRecord || priorRecord || {};
+  const [slipTank, setSlipTank] = useState(staticSource.slipTank || 'Y');
+  const [slipTankSize, setSlipTankSize] = useState(staticSource.slipTankSize || '');
+  const [constructionStandard, setConstructionStandard] = useState(staticSource.constructionStandard || '');
+  const [dateOfManufacture, setDateOfManufacture] = useState(staticSource.dateOfManufacture || '');
+  const [dateOf5YearRetest, setDateOf5YearRetest] = useState(staticSource.dateOf5YearRetest || '');
+  const [transportCanadaRetestNum, setTransportCanadaRetestNum] = useState(staticSource.transportCanadaRetestNum || '');
+  const [ynValues, setYnValues] = useState(() => {
+    const initial = {};
+    FUEL_TANK_YN_FIELDS.forEach((f) => { if (base[f.key]) initial[f.key] = base[f.key]; });
+    return initial;
+  });
+  const [dateOfInspection, setDateOfInspection] = useState(base.dateOfInspection || new Date().toISOString().slice(0, 10));
+  const [inspectorInitials, setInspectorInitials] = useState(base.inspectorInitials || defaultInitials);
+  const [comments, setComments] = useState(base.comments || '');
+
+  const allYnAnswered = FUEL_TANK_YN_FIELDS.every((f) => ynValues[f.key]);
+  const canSubmit = allYnAnswered && inspectorInitials.trim() && !submitting;
+
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <p className="font-display text-lg font-bold mb-1">{unit}</p>
+      <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>{month}</p>
+
+      <YNField label="Slip Tank (Y/N)" value={slipTank} onChange={setSlipTank} />
+
+      {slipTank === 'Y' && (
+        <>
+          <div className="flex items-center justify-between gap-3 py-1.5">
+            <span className="text-sm flex-1">Slip Tank Size</span>
+            <div className="flex gap-1 flex-shrink-0">
+              {['<450L', '>450L'].map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => setSlipTankSize(opt)}
+                  className="text-xs font-bold px-2 py-1 rounded"
+                  style={slipTankSize === opt ? { background: COLORS.accent, color: COLORS.bg } : { background: COLORS.bg, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </div>
+          <input type="text" placeholder="Construction Standard" value={constructionStandard} onChange={(e) => setConstructionStandard(e.target.value)}
+            className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <div>
+              <label className="block text-xs mb-1" style={{ color: COLORS.inkDim }}>Date of Manufacture</label>
+              <input type="text" placeholder="e.g. Feb-24" value={dateOfManufacture} onChange={(e) => setDateOfManufacture(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            </div>
+            <div>
+              <label className="block text-xs mb-1" style={{ color: COLORS.inkDim }}>Date of 5 Yr Re-test</label>
+              <input type="text" placeholder="e.g. 2029" value={dateOf5YearRetest} onChange={(e) => setDateOf5YearRetest(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            </div>
+          </div>
+          <input type="text" placeholder="Transport Canada Re-test #" value={transportCanadaRetestNum} onChange={(e) => setTransportCanadaRetestNum(e.target.value)}
+            className="w-full mb-3 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+        </>
+      )}
+
+      <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+        {FUEL_TANK_YN_FIELDS.map((f) => (
+          <YNField key={f.key} label={f.label} value={ynValues[f.key]} onChange={(v) => setYnValues((prev) => ({ ...prev, [f.key]: v }))} />
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 my-3">
+        <div>
+          <label className="block text-xs mb-1" style={{ color: COLORS.inkDim }}>Date of Inspection</label>
+          <input type="date" value={dateOfInspection} onChange={(e) => setDateOfInspection(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+        </div>
+        <div>
+          <label className="block text-xs mb-1" style={{ color: COLORS.inkDim }}>Inspector Initials</label>
+          <input type="text" value={inspectorInitials} onChange={(e) => setInspectorInitials(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+        </div>
+      </div>
+      <textarea placeholder="Comments (optional)" value={comments} onChange={(e) => setComments(e.target.value)} rows={2}
+        className="w-full mb-3 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+
+      <div className="flex gap-2">
+        <Btn
+          onClick={() => onSubmit({
+            slipTank, slipTankSize, constructionStandard, dateOfManufacture, dateOf5YearRetest, transportCanadaRetestNum,
+            ...ynValues, dateOfInspection, inspectorInitials: inspectorInitials.trim(), comments: comments.trim(),
+          })}
+          disabled={!canSubmit}
+        >
+          {submitting ? 'Saving…' : 'Save'}
+        </Btn>
+        <Btn variant="ghost" onClick={onCancel} disabled={submitting}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
 async function saveMeta(meta) {
   await firebase.database().ref('meta').set(meta);
+}
+// Extra units for the Fuel Tank Ledger only — for any plate-numbered tank
+// or truck that isn't in the app's main unit list. Always appended, never
+// reordered, so the ledger's row order stays stable month to month.
+async function saveFuelTankExtraUnits(list) {
+  await firebase.database().ref('fuelTankExtraUnits').set(list);
 }
 // Firebase Realtime Database rejects an entire write if ANY value anywhere
 // in it is undefined (not null — undefined specifically), even deeply
@@ -3363,6 +3593,44 @@ async function bulkPatchMapRecords(patchesById) {
   });
   await firebase.database().ref().update(stripUndefined(updates));
 }
+// Matches Harder Contracting's paper "Monthly Vehicle Inspection Report"
+// exactly — same item wording, same OK / N/A / Not OK columns, same
+// Action Required/Comments column (kept always available per item, since
+// the paper form has comments written next to OK'd items too, not just
+// flagged ones).
+const VEHICLE_INSPECTION_ITEMS = [
+  'Check Oil Level',
+  'Check Fire Extinguisher Level',
+  'Inspect First Aid Kit',
+  'Portable Spill Kit',
+  'Emergency Response Phone List',
+  'Is Phone, 2-way, etc. Operational?',
+  'Is Vehicle Clean and Organized?',
+  'Are all Lights in Working Order? Head Lights, Brake Lights, Back Up Lights, etc.',
+  'Check for Road Side Flare Kit',
+  'Check for WHMIS Labelling',
+  'Check for Axe and Shovel (prior to Nov.1)',
+  'Check insurance/registration/CVIP',
+];
+// Matches Harder Contracting's paper "Machine Inspection Report" — OK vs
+// Action Required per item, same two-way shape as the yard form, so this
+// reuses InspectionItemRow rather than a new component.
+const EQUIPMENT_INSPECTION_ITEMS = [
+  'Inspect for oil leaks',
+  'Inspect hoses for wear and possible bursting points',
+  'Check first aid kit',
+  'Check fire extinguisher levels',
+  'Inspect screens and guards',
+  'Inspect for clean walkways on machine',
+  'Make sure all lights are operational',
+  'Check operator is wearing proper PPE',
+  'Inspect for clean cab',
+  'Inspect for damaged, cracked, or dirty glass and windows',
+  'Check communication equipment is functional',
+  'Check for emergency response phone list',
+  'Observe machine is operating safely',
+  'Check for spill kit/spill bag',
+];
 // Safety document library — the safety manual, OHS manual, SDS sheets,
 // and safety/committee meeting minutes, organized by category. Visible to
 // everyone (crew included); adding or removing entries is gated to admins
@@ -3373,6 +3641,16 @@ async function saveSafetyDocRecord(doc) {
 }
 async function deleteSafetyDocRecord(docId) {
   await firebase.database().ref('safetyDocRecords/' + docId).remove();
+}
+// Safety inspections (yard, and eventually vehicle/equipment/fuel tank) —
+// each submission is a standalone dated record, never edited in place after
+// the fact (only a review sign-off gets added later), so these are simple
+// save/delete per-record functions, same shape as safety docs above.
+async function saveSafetyInspectionRecord(record) {
+  await firebase.database().ref('safetyInspectionRecords/' + record.id).set(stripUndefined(record));
+}
+async function deleteSafetyInspectionRecord(recordId) {
+  await firebase.database().ref('safetyInspectionRecords/' + recordId).remove();
 }
 async function migrateMapsToPerRecord() {
   return migrateArrayCollectionToPerRecord('maps', 'mapRecords', 'maps');
@@ -3503,12 +3781,14 @@ const OFFLINE_QUEUE_HANDLERS = {
   preTripInspections: { save: saveInspectionRecord, delete: deleteInspectionRecord },
   maps: { save: saveMapRecord, patch: patchMapRecord, delete: deleteMapRecord, bulkPatch: bulkPatchMapRecords },
   safetyDocs: { save: saveSafetyDocRecord, delete: deleteSafetyDocRecord },
+  safetyInspections: { save: saveSafetyInspectionRecord, delete: deleteSafetyInspectionRecord },
   mapPins: { save: saveMapPinRecord, patch: patchMapPinRecord, delete: deleteMapPinRecord },
   mapLines: { save: saveMapLineRecord, patch: patchMapLineRecord, delete: deleteMapLineRecord },
   machineTracks: { save: saveMachineTrackRecord, patch: patchMachineTrackRecord },
   highwayLocations: { save: saveHighwayLocationRecord, delete: deleteHighwayLocationRecord },
   highwayLines: { save: saveHighwayLineRecord, patch: patchHighwayLineRecord, delete: deleteHighwayLineRecord },
   meta: { setWhole: saveMeta },
+  fuelTankExtraUnits: { setWhole: saveFuelTankExtraUnits },
   templates: { setWhole: saveTemplates },
   pins: { setWhole: savePins },
   blocks: { setWhole: saveBlocksList },
@@ -5341,6 +5621,721 @@ function SafetyDocUploadForm({ uploading, onCancel, onSubmit }) {
   );
 }
 
+// One item row on a digitized inspection form — mirrors the paper form's
+// OK / Req. Att. columns as two toggle buttons. A note box only appears
+// once "Req. Att." is picked, same as how the paper form leaves that space
+// blank until something's actually flagged.
+function InspectionItemRow({ label, value, onChange, readOnly }) {
+  const status = value && value.status;
+  const note = (value && value.note) || '';
+  if (readOnly) {
+    return (
+      <div className="py-2 border-b" style={{ borderColor: COLORS.line }}>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm flex-1">{label}</span>
+          <span
+            className="text-xs font-bold px-2 py-1 rounded flex-shrink-0"
+            style={status === 'reqAtt'
+              ? { background: '#E07A5F33', color: '#E07A5F' }
+              : { background: COLORS.accent + '33', color: COLORS.accent }}
+          >
+            {status === 'reqAtt' ? 'Req. Att.' : status === 'ok' ? 'OK' : '—'}
+          </span>
+        </div>
+        {status === 'reqAtt' && note && (
+          <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>{note}</p>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="py-2 border-b" style={{ borderColor: COLORS.line }}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm flex-1">{label}</span>
+        <div className="flex gap-1 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => onChange({ status: 'ok', note: '' })}
+            className="text-xs font-bold px-2 py-1 rounded"
+            style={status === 'ok' ? { background: COLORS.accent, color: COLORS.bg } : { background: COLORS.surface, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
+          >
+            OK
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange({ status: 'reqAtt', note })}
+            className="text-xs font-bold px-2 py-1 rounded"
+            style={status === 'reqAtt' ? { background: '#E07A5F', color: '#1B1F19' } : { background: COLORS.surface, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
+          >
+            Req. Att.
+          </button>
+        </div>
+      </div>
+      {status === 'reqAtt' && (
+        <textarea
+          placeholder="What needs attention?"
+          value={note}
+          onChange={(e) => onChange({ status: 'reqAtt', note: e.target.value })}
+          rows={2}
+          className="w-full mt-2 px-3 py-2 rounded-lg text-sm"
+          style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+        />
+      )}
+    </div>
+  );
+}
+
+// New Yard Inspection form — the digitized version of the paper "Work Site
+// Inspection Form". A blank items object means every item defaults to
+// unanswered; submission is blocked until every item has a status, so an
+// inspection can't accidentally go in half-filled.
+function NewYardInspectionForm({ knownSites, defaultInspector, submitting, onCancel, onSubmit }) {
+  const [site, setSite] = useState(knownSites[0] || '');
+  const [addingNewSite, setAddingNewSite] = useState(knownSites.length === 0);
+  const [newSiteName, setNewSiteName] = useState('');
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [inspectedBy, setInspectedBy] = useState(defaultInspector);
+  const [items, setItems] = useState({});
+  const [signed, setSigned] = useState(false);
+
+  const effectiveSite = addingNewSite ? newSiteName.trim() : site;
+  const totalItems = YARD_INSPECTION_SECTIONS.reduce((n, s) => n + s.items.length, 0);
+  const answeredItems = Object.values(items).filter((v) => v && v.status).length;
+  const canSubmit = effectiveSite && inspectedBy.trim() && signed && answeredItems === totalItems && !submitting;
+
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <p className="font-display text-lg font-bold mb-3">New Yard Inspection</p>
+
+      <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Site</label>
+      {!addingNewSite ? (
+        <div className="flex gap-2 mb-3">
+          <select
+            value={site}
+            onChange={(e) => setSite(e.target.value)}
+            className="flex-1 px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          >
+            {knownSites.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <button
+            type="button"
+            onClick={() => { setAddingNewSite(true); setNewSiteName(''); }}
+            className="text-xs font-semibold px-3 py-2 rounded-lg flex-shrink-0"
+            style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+          >
+            + New Site
+          </button>
+        </div>
+      ) : (
+        <div className="flex gap-2 mb-3">
+          <input
+            type="text"
+            placeholder="Site name (e.g. Camp 1, Shop Yard)"
+            value={newSiteName}
+            onChange={(e) => setNewSiteName(e.target.value)}
+            className="flex-1 px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+          {knownSites.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setAddingNewSite(false)}
+              className="text-xs font-semibold px-3 py-2 rounded-lg flex-shrink-0"
+              style={{ background: COLORS.surfaceRaised, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
+            >
+              Pick Existing
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2 mb-4">
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Date</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Inspected By</label>
+          <input
+            type="text"
+            value={inspectedBy}
+            onChange={(e) => setInspectedBy(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+        </div>
+      </div>
+
+      {YARD_INSPECTION_SECTIONS.map((section, sIdx) => (
+        <div key={section.name} className="mb-4">
+          <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>{section.name}</p>
+          {section.items.map((label, iIdx) => {
+            const key = `${sIdx}-${iIdx}`;
+            return (
+              <InspectionItemRow
+                key={key}
+                label={label}
+                value={items[key]}
+                onChange={(v) => setItems((prev) => ({ ...prev, [key]: v }))}
+              />
+            );
+          })}
+        </div>
+      ))}
+
+      <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>{answeredItems} / {totalItems} items answered</p>
+
+      <label className="flex items-start gap-2 mb-4 text-sm cursor-pointer">
+        <input type="checkbox" checked={signed} onChange={(e) => setSigned(e.target.checked)} className="mt-1" />
+        <span>I, {inspectedBy || '(name)'}, confirm this inspection was completed as recorded. This stands in as my inspector signature.</span>
+      </label>
+
+      <div className="flex gap-2">
+        <Btn
+          onClick={() => onSubmit({ site: effectiveSite, date, inspectedBy: inspectedBy.trim(), items, signedAt: Date.now() })}
+          disabled={!canSubmit}
+        >
+          {submitting ? 'Submitting…' : 'Submit Inspection'}
+        </Btn>
+        <Btn variant="ghost" onClick={onCancel} disabled={submitting}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
+// Read-only detail view of one past inspection — plus the Management Review
+// sign-off step from the bottom of the paper form, which happens later and
+// by someone other than whoever did the walk-through.
+function YardInspectionDetail({ record, isAdmin, onReview, onDelete, onBack }) {
+  const [reviewerName, setReviewerName] = useState('');
+  const [reviewing, setReviewing] = useState(false);
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <button onClick={onBack} className="text-xs uppercase tracking-wide mb-3" style={{ color: COLORS.inkDim }}>← Back to list</button>
+      <p className="font-display text-lg font-bold">{record.site}</p>
+      <p className="text-sm mb-1" style={{ color: COLORS.inkDim }}>{record.date} · Inspected by {record.inspectedBy}</p>
+      <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>
+        {record.reviewedBy ? `Reviewed by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}` : 'Not yet reviewed'}
+      </p>
+
+      {YARD_INSPECTION_SECTIONS.map((section, sIdx) => (
+        <div key={section.name} className="mb-4">
+          <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>{section.name}</p>
+          {section.items.map((label, iIdx) => {
+            const key = `${sIdx}-${iIdx}`;
+            return <InspectionItemRow key={key} label={label} value={record.items && record.items[key]} readOnly />;
+          })}
+        </div>
+      ))}
+
+      {isAdmin && !record.reviewedBy && (
+        <div className="mt-2 pt-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+          <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Management Review</p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Reviewer name"
+              value={reviewerName}
+              onChange={(e) => setReviewerName(e.target.value)}
+              className="flex-1 px-3 py-2 rounded-lg text-sm"
+              style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+            />
+            <Btn
+              onClick={async () => { setReviewing(true); await onReview(reviewerName.trim()); setReviewing(false); }}
+              disabled={!reviewerName.trim() || reviewing}
+            >
+              {reviewing ? '…' : 'Mark Reviewed'}
+            </Btn>
+          </div>
+        </div>
+      )}
+
+      {isAdmin && (
+        <button
+          onClick={() => { if (confirm('Delete this inspection record? This cannot be undone.')) onDelete(); }}
+          className="text-xs mt-4"
+          style={{ color: '#E07A5F' }}
+        >
+          🗑️ Delete Record
+        </button>
+      )}
+    </div>
+  );
+}
+
+// One item row on the Vehicle Inspection form — three-way OK / N/A / Not OK
+// instead of the yard form's two-way, and the comment box stays available
+// regardless of status, matching how the paper form has notes written next
+// to OK'd items too, not just flagged ones.
+function VehicleInspectionItemRow({ label, value, onChange, readOnly }) {
+  const status = value && value.status;
+  const comment = (value && value.comment) || '';
+  const badgeStyle = status === 'notOk'
+    ? { background: '#E07A5F33', color: '#E07A5F' }
+    : status === 'na'
+      ? { background: COLORS.inkDim + '33', color: COLORS.inkDim }
+      : { background: COLORS.accent + '33', color: COLORS.accent };
+  const badgeLabel = status === 'notOk' ? 'Not OK' : status === 'na' ? 'N/A' : status === 'ok' ? 'OK' : '—';
+  if (readOnly) {
+    return (
+      <div className="py-2 border-b" style={{ borderColor: COLORS.line }}>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm flex-1">{label}</span>
+          <span className="text-xs font-bold px-2 py-1 rounded flex-shrink-0" style={badgeStyle}>{badgeLabel}</span>
+        </div>
+        {comment && <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>{comment}</p>}
+      </div>
+    );
+  }
+  return (
+    <div className="py-2 border-b" style={{ borderColor: COLORS.line }}>
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <span className="text-sm flex-1">{label}</span>
+        <div className="flex gap-1 flex-shrink-0">
+          {[['ok', 'OK'], ['na', 'N/A'], ['notOk', 'Not OK']].map(([key, lbl]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onChange({ status: key, comment })}
+              className="text-xs font-bold px-2 py-1 rounded"
+              style={status === key
+                ? (key === 'notOk' ? { background: '#E07A5F', color: '#1B1F19' } : key === 'na' ? { background: COLORS.inkDim, color: COLORS.bg } : { background: COLORS.accent, color: COLORS.bg })
+                : { background: COLORS.surface, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
+      </div>
+      <input
+        type="text"
+        placeholder="Action required / comments (optional)"
+        value={comment}
+        onChange={(e) => onChange({ status: status || null, comment: e.target.value })}
+        className="w-full px-3 py-2 rounded-lg text-sm"
+        style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+      />
+    </div>
+  );
+}
+
+// New Vehicle Inspection form — digitized "Monthly Vehicle Inspection
+// Report". Same shape as the yard form (unit picker, date, checklist,
+// typed-name signature) plus the Km reading the paper form also tracks.
+function NewVehicleInspectionForm({ knownUnits, defaultInspector, submitting, onCancel, onSubmit }) {
+  const [unit, setUnit] = useState(knownUnits[0] || '');
+  const [addingNewUnit, setAddingNewUnit] = useState(knownUnits.length === 0);
+  const [newUnitName, setNewUnitName] = useState('');
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [km, setKm] = useState('');
+  const [inspectedBy, setInspectedBy] = useState(defaultInspector);
+  const [items, setItems] = useState({});
+  const [signed, setSigned] = useState(false);
+
+  const effectiveUnit = addingNewUnit ? newUnitName.trim() : unit;
+  const answeredItems = Object.values(items).filter((v) => v && v.status).length;
+  const canSubmit = effectiveUnit && inspectedBy.trim() && signed && answeredItems === VEHICLE_INSPECTION_ITEMS.length && !submitting;
+
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <p className="font-display text-lg font-bold mb-3">New Vehicle Inspection</p>
+
+      <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Vehicle Unit #</label>
+      {!addingNewUnit ? (
+        <div className="flex gap-2 mb-3">
+          <select
+            value={unit}
+            onChange={(e) => setUnit(e.target.value)}
+            className="flex-1 px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          >
+            {knownUnits.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
+          <button
+            type="button"
+            onClick={() => { setAddingNewUnit(true); setNewUnitName(''); }}
+            className="text-xs font-semibold px-3 py-2 rounded-lg flex-shrink-0"
+            style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+          >
+            + New Unit
+          </button>
+        </div>
+      ) : (
+        <div className="flex gap-2 mb-3">
+          <input
+            type="text"
+            placeholder="Unit # (e.g. V8)"
+            value={newUnitName}
+            onChange={(e) => setNewUnitName(e.target.value)}
+            className="flex-1 px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+          {knownUnits.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setAddingNewUnit(false)}
+              className="text-xs font-semibold px-3 py-2 rounded-lg flex-shrink-0"
+              style={{ background: COLORS.surfaceRaised, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
+            >
+              Pick Existing
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Date</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Km</label>
+          <input
+            type="number"
+            inputMode="numeric"
+            value={km}
+            onChange={(e) => setKm(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Inspected By</label>
+          <input
+            type="text"
+            value={inspectedBy}
+            onChange={(e) => setInspectedBy(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+        </div>
+      </div>
+
+      {VEHICLE_INSPECTION_ITEMS.map((label, iIdx) => (
+        <VehicleInspectionItemRow
+          key={iIdx}
+          label={label}
+          value={items[iIdx]}
+          onChange={(v) => setItems((prev) => ({ ...prev, [iIdx]: v }))}
+        />
+      ))}
+
+      <p className="text-xs my-3" style={{ color: COLORS.inkDim }}>{answeredItems} / {VEHICLE_INSPECTION_ITEMS.length} items answered</p>
+
+      <label className="flex items-start gap-2 mb-4 text-sm cursor-pointer">
+        <input type="checkbox" checked={signed} onChange={(e) => setSigned(e.target.checked)} className="mt-1" />
+        <span>I, {inspectedBy || '(name)'}, confirm this inspection was completed as recorded. This stands in as my inspector signature.</span>
+      </label>
+
+      <div className="flex gap-2">
+        <Btn
+          onClick={() => onSubmit({ unit: effectiveUnit, date, km: km.trim(), inspectedBy: inspectedBy.trim(), items, signedAt: Date.now() })}
+          disabled={!canSubmit}
+        >
+          {submitting ? 'Submitting…' : 'Submit Inspection'}
+        </Btn>
+        <Btn variant="ghost" onClick={onCancel} disabled={submitting}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
+// Read-only detail view of one past vehicle inspection, plus the paper
+// form's "Follow up Action Dated" + Signature line — filled in later, once
+// anything flagged Not OK actually gets addressed.
+function VehicleInspectionDetail({ record, isAdmin, onReview, onDelete, onBack }) {
+  const [followUpDate, setFollowUpDate] = useState('');
+  const [reviewerName, setReviewerName] = useState('');
+  const [reviewing, setReviewing] = useState(false);
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <button onClick={onBack} className="text-xs uppercase tracking-wide mb-3" style={{ color: COLORS.inkDim }}>← Back to list</button>
+      <p className="font-display text-lg font-bold">Unit {record.unit}</p>
+      <p className="text-sm mb-1" style={{ color: COLORS.inkDim }}>{record.date} · {record.km ? `${record.km} km · ` : ''}Inspected by {record.inspectedBy}</p>
+      <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>
+        {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
+      </p>
+
+      {VEHICLE_INSPECTION_ITEMS.map((label, iIdx) => (
+        <VehicleInspectionItemRow key={iIdx} label={label} value={record.items && record.items[iIdx]} readOnly />
+      ))}
+
+      {isAdmin && !record.reviewedBy && (
+        <div className="mt-2 pt-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+          <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Follow-up</p>
+          <div className="flex gap-2 mb-2">
+            <input
+              type="date"
+              value={followUpDate}
+              onChange={(e) => setFollowUpDate(e.target.value)}
+              className="flex-1 px-3 py-2 rounded-lg text-sm"
+              style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+            />
+            <input
+              type="text"
+              placeholder="Signed off by"
+              value={reviewerName}
+              onChange={(e) => setReviewerName(e.target.value)}
+              className="flex-1 px-3 py-2 rounded-lg text-sm"
+              style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+            />
+          </div>
+          <Btn
+            onClick={async () => { setReviewing(true); await onReview({ reviewedBy: reviewerName.trim(), followUpDate }); setReviewing(false); }}
+            disabled={!reviewerName.trim() || reviewing}
+          >
+            {reviewing ? '…' : 'Mark Followed Up'}
+          </Btn>
+        </div>
+      )}
+
+      {isAdmin && (
+        <button
+          onClick={() => { if (confirm('Delete this inspection record? This cannot be undone.')) onDelete(); }}
+          className="text-xs mt-4"
+          style={{ color: '#E07A5F' }}
+        >
+          🗑️ Delete Record
+        </button>
+      )}
+    </div>
+  );
+}
+
+// New Equipment Inspection form — digitized "Machine Inspection Report".
+// OK / Action Required per item (reuses InspectionItemRow, same shape as
+// the yard form), plus Hour Meter in place of the vehicle form's Km.
+function NewEquipmentInspectionForm({ knownUnits, defaultInspector, submitting, onCancel, onSubmit }) {
+  const [unit, setUnit] = useState(knownUnits[0] ? knownUnits[0].unit : '');
+  const [addingNewUnit, setAddingNewUnit] = useState(knownUnits.length === 0);
+  const [newUnitName, setNewUnitName] = useState('');
+  const priorForUnit = knownUnits.find((k) => k.unit === unit);
+  const [machine, setMachine] = useState((priorForUnit && priorForUnit.machine) || '');
+  const [hourMeter, setHourMeter] = useState('');
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [inspectedBy, setInspectedBy] = useState(defaultInspector);
+  const [items, setItems] = useState({});
+  const [comments, setComments] = useState('');
+  const [signed, setSigned] = useState(false);
+
+  const effectiveUnit = addingNewUnit ? newUnitName.trim() : unit;
+  const answeredItems = Object.values(items).filter((v) => v && v.status).length;
+  const canSubmit = effectiveUnit && machine.trim() && inspectedBy.trim() && signed && answeredItems === EQUIPMENT_INSPECTION_ITEMS.length && !submitting;
+
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <p className="font-display text-lg font-bold mb-3">New Equipment Inspection</p>
+
+      <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Unit #</label>
+      {!addingNewUnit ? (
+        <div className="flex gap-2 mb-3">
+          <select
+            value={unit}
+            onChange={(e) => { setUnit(e.target.value); const p = knownUnits.find((k) => k.unit === e.target.value); setMachine((p && p.machine) || ''); }}
+            className="flex-1 px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          >
+            {knownUnits.map((k) => <option key={k.unit} value={k.unit}>{k.unit}</option>)}
+          </select>
+          <button
+            type="button"
+            onClick={() => { setAddingNewUnit(true); setNewUnitName(''); setMachine(''); }}
+            className="text-xs font-semibold px-3 py-2 rounded-lg flex-shrink-0"
+            style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+          >
+            + New Unit
+          </button>
+        </div>
+      ) : (
+        <div className="flex gap-2 mb-3">
+          <input
+            type="text"
+            placeholder="Unit # (e.g. S3)"
+            value={newUnitName}
+            onChange={(e) => setNewUnitName(e.target.value)}
+            className="flex-1 px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+          {knownUnits.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setAddingNewUnit(false)}
+              className="text-xs font-semibold px-3 py-2 rounded-lg flex-shrink-0"
+              style={{ background: COLORS.surfaceRaised, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
+            >
+              Pick Existing
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2 mb-2">
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Machine</label>
+          <input
+            type="text"
+            placeholder="e.g. Skidder"
+            value={machine}
+            onChange={(e) => setMachine(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Hour Meter</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={hourMeter}
+            onChange={(e) => setHourMeter(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 mb-4">
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Date</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Inspected By</label>
+          <input
+            type="text"
+            value={inspectedBy}
+            onChange={(e) => setInspectedBy(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+        </div>
+      </div>
+
+      {EQUIPMENT_INSPECTION_ITEMS.map((label, iIdx) => (
+        <InspectionItemRow
+          key={iIdx}
+          label={label}
+          value={items[iIdx]}
+          onChange={(v) => setItems((prev) => ({ ...prev, [iIdx]: v }))}
+        />
+      ))}
+
+      <p className="text-xs my-3" style={{ color: COLORS.inkDim }}>{answeredItems} / {EQUIPMENT_INSPECTION_ITEMS.length} items answered</p>
+
+      <textarea
+        placeholder="Comments (optional)"
+        value={comments}
+        onChange={(e) => setComments(e.target.value)}
+        rows={3}
+        className="w-full mb-4 px-3 py-2 rounded-lg text-sm"
+        style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+      />
+
+      <label className="flex items-start gap-2 mb-4 text-sm cursor-pointer">
+        <input type="checkbox" checked={signed} onChange={(e) => setSigned(e.target.checked)} className="mt-1" />
+        <span>I, {inspectedBy || '(name)'}, confirm this inspection was completed as recorded. This stands in as my inspector signature.</span>
+      </label>
+
+      <div className="flex gap-2">
+        <Btn
+          onClick={() => onSubmit({ unit: effectiveUnit, machine: machine.trim(), hourMeter: hourMeter.trim(), date, inspectedBy: inspectedBy.trim(), items, comments: comments.trim(), signedAt: Date.now() })}
+          disabled={!canSubmit}
+        >
+          {submitting ? 'Submitting…' : 'Submit Inspection'}
+        </Btn>
+        <Btn variant="ghost" onClick={onCancel} disabled={submitting}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
+// Read-only detail view of one past equipment inspection, plus the paper
+// form's "Follow up Dated" + Signature line.
+function EquipmentInspectionDetail({ record, isAdmin, onReview, onDelete, onBack }) {
+  const [followUpDate, setFollowUpDate] = useState('');
+  const [reviewerName, setReviewerName] = useState('');
+  const [reviewing, setReviewing] = useState(false);
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <button onClick={onBack} className="text-xs uppercase tracking-wide mb-3" style={{ color: COLORS.inkDim }}>← Back to list</button>
+      <p className="font-display text-lg font-bold">Unit {record.unit}</p>
+      <p className="text-sm mb-1" style={{ color: COLORS.inkDim }}>
+        {record.machine}{record.hourMeter ? ` · ${record.hourMeter} hrs` : ''} · {record.date} · Inspected by {record.inspectedBy}
+      </p>
+      <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>
+        {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
+      </p>
+
+      {EQUIPMENT_INSPECTION_ITEMS.map((label, iIdx) => (
+        <InspectionItemRow key={iIdx} label={label} value={record.items && record.items[iIdx]} readOnly />
+      ))}
+
+      {record.comments && (
+        <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+          <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Comments</p>
+          <p className="text-sm">{record.comments}</p>
+        </div>
+      )}
+
+      {isAdmin && !record.reviewedBy && (
+        <div className="mt-2 pt-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+          <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Follow-up</p>
+          <div className="flex gap-2 mb-2">
+            <input
+              type="date"
+              value={followUpDate}
+              onChange={(e) => setFollowUpDate(e.target.value)}
+              className="flex-1 px-3 py-2 rounded-lg text-sm"
+              style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+            />
+            <input
+              type="text"
+              placeholder="Signed off by"
+              value={reviewerName}
+              onChange={(e) => setReviewerName(e.target.value)}
+              className="flex-1 px-3 py-2 rounded-lg text-sm"
+              style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+            />
+          </div>
+          <Btn
+            onClick={async () => { setReviewing(true); await onReview({ reviewedBy: reviewerName.trim(), followUpDate }); setReviewing(false); }}
+            disabled={!reviewerName.trim() || reviewing}
+          >
+            {reviewing ? '…' : 'Mark Followed Up'}
+          </Btn>
+        </div>
+      )}
+
+      {isAdmin && (
+        <button
+          onClick={() => { if (confirm('Delete this inspection record? This cannot be undone.')) onDelete(); }}
+          className="text-xs mt-4"
+          style={{ color: '#E07A5F' }}
+        >
+          🗑️ Delete Record
+        </button>
+      )}
+    </div>
+  );
+}
 // Full admin editing for one driver's logged day — always available, even
 // after the week is approved, since this data may need real correction
 // (a missed break added back in, a wrong time fixed) more often than
@@ -6363,6 +7358,37 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [showAddSafetyDoc, setShowAddSafetyDoc] = useState(null); // category name, or null
   const [openingSafetyDocId, setOpeningSafetyDocId] = useState(null);
   const warmedSafetyDocIds = useRef(new Set());
+  const [safetyInspections, setSafetyInspections] = useState(() => cacheGet('safetyInspections', []));
+  const [safetyInspectionType, setSafetyInspectionType] = useState(null); // one of SAFETY_INSPECTION_TYPES.key, or null (showing the menu)
+  const [safetyInspectionSite, setSafetyInspectionSite] = useState(null); // which site's list is expanded, for types that are bySite
+  const [newYardInspectionOpen, setNewYardInspectionOpen] = useState(false);
+  const [newVehicleInspectionOpen, setNewVehicleInspectionOpen] = useState(false);
+  const [newEquipmentInspectionOpen, setNewEquipmentInspectionOpen] = useState(false);
+  const [viewingSafetyInspectionId, setViewingSafetyInspectionId] = useState(null);
+  const [submittingSafetyInspection, setSubmittingSafetyInspection] = useState(false);
+  const [fuelTankExtraUnits, setFuelTankExtraUnits] = useState(() => cacheGet('fuelTankExtraUnits', []));
+  const [addingFuelTankUnit, setAddingFuelTankUnit] = useState(false);
+  const [newFuelTankUnitName, setNewFuelTankUnitName] = useState('');
+  const [fuelTankMonth, setFuelTankMonth] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM'
+  const [editingFuelTankUnit, setEditingFuelTankUnit] = useState(null);
+  // The Fuel Tank Ledger's row order: every unit already tracked in the app,
+  // in whatever order they were added, then any ledger-only extras appended
+  // after — never re-sorted, so a newly added unit always lands at the end
+  // and nothing already on the sheet ever jumps around.
+  const fuelTankLedgerUnits = [...units, ...fuelTankExtraUnits];
+  // Flags any unit whose last fuel tank inspection is 25+ days old (or has
+  // never had one) — a 5-day heads-up on the roughly-monthly cycle these
+  // need to stay current on. This only surfaces as an in-app banner/badge
+  // when someone opens the Safety page; it can't push a notification to a
+  // closed app on its own (that needs a small server-side scheduled job —
+  // flagged separately, not something this file alone can do).
+  const fuelTankDueSoonUnits = fuelTankLedgerUnits.filter((u) => {
+    const records = safetyInspections.filter((r) => r.type === 'fuelTank' && r.unit === u);
+    if (records.length === 0) return true;
+    const latest = records.reduce((a, b) => ((a.dateOfInspection || '') > (b.dateOfInspection || '') ? a : b));
+    const days = (Date.now() - new Date(latest.dateOfInspection).getTime()) / 86400000;
+    return days >= 25;
+  });
   const [mapPins, setMapPins] = useState(() => cacheGet('mapPins', [])); // [{id, mapId, x, y, type, note, addedBy, isPublic, time}]
   const [inviteRoleDraft, setInviteRoleDraft] = useState('employee');
   const [inviteUnitDraft, setInviteUnitDraft] = useState('');
@@ -6616,6 +7642,26 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = Object.values(snap.val() || {});
       setSafetyDocs(val);
       cacheSet('safetyDocs', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('safetyInspectionRecords');
+    const on = ref.on('value', (snap) => {
+      const val = Object.values(snap.val() || {});
+      setSafetyInspections(val);
+      cacheSet('safetyInspections', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('fuelTankExtraUnits');
+    const on = ref.on('value', (snap) => {
+      const val = (snap.val() || []).filter((u) => typeof u === 'string' && u.trim());
+      setFuelTankExtraUnits(val);
+      cacheSet('fuelTankExtraUnits', val);
     });
     return () => ref.off('value', on);
   }, []);
@@ -8087,6 +9133,47 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setSafetyDocs(next);
     cacheSet('safetyDocs', next);
     await queueWrite('safetyDocs', { kind: 'delete', entryId: docId });
+  };
+  const submitSafetyInspection = async (record) => {
+    const full = {
+      id: uid(),
+      createdBy: currentMechanic,
+      createdAt: Date.now(),
+      reviewedBy: null,
+      reviewedAt: null,
+      ...record,
+    };
+    const next = [...safetyInspections, full];
+    setSafetyInspections(next);
+    cacheSet('safetyInspections', next);
+    await queueWrite('safetyInspections', { kind: 'save', entry: full });
+    return full;
+  };
+  const reviewSafetyInspection = async (recordId, extra) => {
+    const record = safetyInspections.find((r) => r.id === recordId);
+    if (!record) return;
+    const updated = { ...record, reviewedAt: Date.now(), ...extra };
+    const next = safetyInspections.map((r) => (r.id === recordId ? updated : r));
+    setSafetyInspections(next);
+    cacheSet('safetyInspections', next);
+    await queueWrite('safetyInspections', { kind: 'save', entry: updated });
+  };
+  const deleteSafetyInspection = async (recordId) => {
+    const next = safetyInspections.filter((r) => r.id !== recordId);
+    setSafetyInspections(next);
+    cacheSet('safetyInspections', next);
+    await queueWrite('safetyInspections', { kind: 'delete', entryId: recordId });
+  };
+  // Adds a unit to the Fuel Tank Ledger's own extra list — always appended
+  // at the end, never sorted, so the row order the ledger already shows
+  // stays exactly where everyone expects it month to month.
+  const addFuelTankExtraUnit = async (name) => {
+    const trimmed = name.trim();
+    if (!trimmed || fuelTankLedgerUnits.includes(trimmed)) return;
+    const next = [...fuelTankExtraUnits, trimmed];
+    setFuelTankExtraUnits(next);
+    cacheSet('fuelTankExtraUnits', next);
+    await queueWrite('fuelTankExtraUnits', { kind: 'setWhole', value: next });
   };
   // Opens a safety doc by fetching it in-app (rather than navigating an <a>
   // tag straight to the Firebase Storage URL) so the request passes through
@@ -13648,6 +14735,392 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               </AdminSection>
             );
           })}
+
+          {(isAdmin || isSafety) && (
+            <AdminSection
+              icon="🧰"
+              title={`Inspections${safetyInspectionType ? ' — ' + SAFETY_INSPECTION_TYPES.find((t) => t.key === safetyInspectionType).label : ''}`}
+              expanded={true}
+              onToggle={() => {}}
+            >
+              {!safetyInspectionType ? (
+                <div className="space-y-2">
+                  {SAFETY_INSPECTION_TYPES.map((type) => {
+                    const count = safetyInspections.filter((r) => r.type === type.key).length;
+                    const hasForm = type.key === 'yard' || type.key === 'vehicle' || type.key === 'fuelTank' || type.key === 'equipment';
+                    const dueSoon = type.key === 'fuelTank' ? fuelTankDueSoonUnits.length : 0;
+                    return (
+                      <button
+                        key={type.key}
+                        onClick={() => hasForm && setSafetyInspectionType(type.key)}
+                        disabled={!hasForm}
+                        className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                        style={{ background: COLORS.surfaceRaised, opacity: hasForm ? 1 : 0.5 }}
+                      >
+                        <span className="text-sm font-semibold">{type.label}</span>
+                        <span className="text-xs font-bold" style={{ color: dueSoon > 0 ? '#E07A5F' : COLORS.inkDim }}>
+                          {!hasForm ? 'Form coming soon' : dueSoon > 0 ? `${dueSoon} due soon` : `${count} on file`}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : safetyInspectionType === 'yard' ? (
+                <div>
+                  <button
+                    onClick={() => { setSafetyInspectionType(null); setSafetyInspectionSite(null); setNewYardInspectionOpen(false); setViewingSafetyInspectionId(null); }}
+                    className="text-xs uppercase tracking-wide mb-3"
+                    style={{ color: COLORS.inkDim }}
+                  >
+                    ← Back to Inspections
+                  </button>
+
+                  {viewingSafetyInspectionId ? (
+                    <YardInspectionDetail
+                      record={safetyInspections.find((r) => r.id === viewingSafetyInspectionId)}
+                      isAdmin={isAdmin || isSafety}
+                      onBack={() => setViewingSafetyInspectionId(null)}
+                      onReview={(reviewerName) => reviewSafetyInspection(viewingSafetyInspectionId, { reviewedBy: reviewerName })}
+                      onDelete={async () => { await deleteSafetyInspection(viewingSafetyInspectionId); setViewingSafetyInspectionId(null); }}
+                    />
+                  ) : newYardInspectionOpen ? (
+                    <NewYardInspectionForm
+                      knownSites={[...new Set(safetyInspections.filter((r) => r.type === 'yard').map((r) => r.site))].sort((a, b) => a.localeCompare(b))}
+                      defaultInspector={currentMechanic}
+                      submitting={submittingSafetyInspection}
+                      onCancel={() => setNewYardInspectionOpen(false)}
+                      onSubmit={async (record) => {
+                        setSubmittingSafetyInspection(true);
+                        await submitSafetyInspection({ type: 'yard', ...record });
+                        setSubmittingSafetyInspection(false);
+                        setNewYardInspectionOpen(false);
+                      }}
+                    />
+                  ) : (
+                    <div>
+                      <button
+                        onClick={() => setNewYardInspectionOpen(true)}
+                        className="text-xs font-semibold px-3 py-2 rounded-lg mb-4"
+                        style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                      >
+                        + New Inspection
+                      </button>
+
+                      {[...new Set(safetyInspections.filter((r) => r.type === 'yard').map((r) => r.site))]
+                        .sort((a, b) => a.localeCompare(b))
+                        .map((siteName) => {
+                          const records = safetyInspections
+                            .filter((r) => r.type === 'yard' && r.site === siteName)
+                            .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+                          return (
+                            <div key={siteName} className="mb-4">
+                              <p className="font-display text-sm font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>
+                                {siteName} ({records.length})
+                              </p>
+                              <div className="space-y-2">
+                                {records.map((r) => (
+                                  <button
+                                    key={r.id}
+                                    onClick={() => setViewingSafetyInspectionId(r.id)}
+                                    className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                                    style={{ background: COLORS.surfaceRaised }}
+                                  >
+                                    <span className="text-sm">{r.date} · {r.inspectedBy}</span>
+                                    <span className="text-xs" style={{ color: r.reviewedBy ? COLORS.accent : COLORS.inkDim }}>
+                                      {r.reviewedBy ? 'Reviewed' : 'Needs review'}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                      {safetyInspections.filter((r) => r.type === 'yard').length === 0 && (
+                        <p className="text-sm" style={{ color: COLORS.inkDim }}>No yard inspections on file yet.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : safetyInspectionType === 'vehicle' ? (
+                <div>
+                  <button
+                    onClick={() => { setSafetyInspectionType(null); setNewVehicleInspectionOpen(false); setViewingSafetyInspectionId(null); }}
+                    className="text-xs uppercase tracking-wide mb-3"
+                    style={{ color: COLORS.inkDim }}
+                  >
+                    ← Back to Inspections
+                  </button>
+
+                  {viewingSafetyInspectionId ? (
+                    <VehicleInspectionDetail
+                      record={safetyInspections.find((r) => r.id === viewingSafetyInspectionId)}
+                      isAdmin={isAdmin || isSafety}
+                      onBack={() => setViewingSafetyInspectionId(null)}
+                      onReview={(extra) => reviewSafetyInspection(viewingSafetyInspectionId, extra)}
+                      onDelete={async () => { await deleteSafetyInspection(viewingSafetyInspectionId); setViewingSafetyInspectionId(null); }}
+                    />
+                  ) : newVehicleInspectionOpen ? (
+                    <NewVehicleInspectionForm
+                      knownUnits={[...new Set(safetyInspections.filter((r) => r.type === 'vehicle').map((r) => r.unit))].sort((a, b) => a.localeCompare(b))}
+                      defaultInspector={currentMechanic}
+                      submitting={submittingSafetyInspection}
+                      onCancel={() => setNewVehicleInspectionOpen(false)}
+                      onSubmit={async (record) => {
+                        setSubmittingSafetyInspection(true);
+                        await submitSafetyInspection({ type: 'vehicle', ...record });
+                        setSubmittingSafetyInspection(false);
+                        setNewVehicleInspectionOpen(false);
+                      }}
+                    />
+                  ) : (
+                    <div>
+                      <button
+                        onClick={() => setNewVehicleInspectionOpen(true)}
+                        className="text-xs font-semibold px-3 py-2 rounded-lg mb-4"
+                        style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                      >
+                        + New Inspection
+                      </button>
+
+                      {[...new Set(safetyInspections.filter((r) => r.type === 'vehicle').map((r) => r.unit))]
+                        .sort((a, b) => a.localeCompare(b))
+                        .map((unitName) => {
+                          const records = safetyInspections
+                            .filter((r) => r.type === 'vehicle' && r.unit === unitName)
+                            .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+                          return (
+                            <div key={unitName} className="mb-4">
+                              <p className="font-display text-sm font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>
+                                Unit {unitName} ({records.length})
+                              </p>
+                              <div className="space-y-2">
+                                {records.map((r) => (
+                                  <button
+                                    key={r.id}
+                                    onClick={() => setViewingSafetyInspectionId(r.id)}
+                                    className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                                    style={{ background: COLORS.surfaceRaised }}
+                                  >
+                                    <span className="text-sm">{r.date} · {r.inspectedBy}</span>
+                                    <span className="text-xs" style={{ color: r.reviewedBy ? COLORS.accent : COLORS.inkDim }}>
+                                      {r.reviewedBy ? 'Followed up' : 'Open'}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                      {safetyInspections.filter((r) => r.type === 'vehicle').length === 0 && (
+                        <p className="text-sm" style={{ color: COLORS.inkDim }}>No vehicle inspections on file yet.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : safetyInspectionType === 'equipment' ? (
+                <div>
+                  <button
+                    onClick={() => { setSafetyInspectionType(null); setNewEquipmentInspectionOpen(false); setViewingSafetyInspectionId(null); }}
+                    className="text-xs uppercase tracking-wide mb-3"
+                    style={{ color: COLORS.inkDim }}
+                  >
+                    ← Back to Inspections
+                  </button>
+
+                  {viewingSafetyInspectionId ? (
+                    <EquipmentInspectionDetail
+                      record={safetyInspections.find((r) => r.id === viewingSafetyInspectionId)}
+                      isAdmin={isAdmin || isSafety}
+                      onBack={() => setViewingSafetyInspectionId(null)}
+                      onReview={(extra) => reviewSafetyInspection(viewingSafetyInspectionId, extra)}
+                      onDelete={async () => { await deleteSafetyInspection(viewingSafetyInspectionId); setViewingSafetyInspectionId(null); }}
+                    />
+                  ) : newEquipmentInspectionOpen ? (
+                    <NewEquipmentInspectionForm
+                      knownUnits={
+                        [...new Map(
+                          safetyInspections
+                            .filter((r) => r.type === 'equipment')
+                            .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+                            .map((r) => [r.unit, { unit: r.unit, machine: r.machine }])
+                        ).values()]
+                      }
+                      defaultInspector={currentMechanic}
+                      submitting={submittingSafetyInspection}
+                      onCancel={() => setNewEquipmentInspectionOpen(false)}
+                      onSubmit={async (record) => {
+                        setSubmittingSafetyInspection(true);
+                        await submitSafetyInspection({ type: 'equipment', ...record });
+                        setSubmittingSafetyInspection(false);
+                        setNewEquipmentInspectionOpen(false);
+                      }}
+                    />
+                  ) : (
+                    <div>
+                      <button
+                        onClick={() => setNewEquipmentInspectionOpen(true)}
+                        className="text-xs font-semibold px-3 py-2 rounded-lg mb-4"
+                        style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                      >
+                        + New Inspection
+                      </button>
+
+                      {[...new Set(safetyInspections.filter((r) => r.type === 'equipment').map((r) => r.unit))]
+                        .sort((a, b) => a.localeCompare(b))
+                        .map((unitName) => {
+                          const records = safetyInspections
+                            .filter((r) => r.type === 'equipment' && r.unit === unitName)
+                            .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+                          return (
+                            <div key={unitName} className="mb-4">
+                              <p className="font-display text-sm font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>
+                                Unit {unitName} ({records.length})
+                              </p>
+                              <div className="space-y-2">
+                                {records.map((r) => (
+                                  <button
+                                    key={r.id}
+                                    onClick={() => setViewingSafetyInspectionId(r.id)}
+                                    className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                                    style={{ background: COLORS.surfaceRaised }}
+                                  >
+                                    <span className="text-sm">{r.date} · {r.machine} · {r.inspectedBy}</span>
+                                    <span className="text-xs" style={{ color: r.reviewedBy ? COLORS.accent : COLORS.inkDim }}>
+                                      {r.reviewedBy ? 'Followed up' : 'Open'}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                      {safetyInspections.filter((r) => r.type === 'equipment').length === 0 && (
+                        <p className="text-sm" style={{ color: COLORS.inkDim }}>No equipment inspections on file yet.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : safetyInspectionType === 'fuelTank' ? (
+                <div>
+                  <button
+                    onClick={() => { setSafetyInspectionType(null); setEditingFuelTankUnit(null); setAddingFuelTankUnit(false); }}
+                    className="text-xs uppercase tracking-wide mb-3"
+                    style={{ color: COLORS.inkDim }}
+                  >
+                    ← Back to Inspections
+                  </button>
+
+                  {fuelTankDueSoonUnits.length > 0 && (
+                    <div className="rounded-lg p-3 mb-4" style={{ background: '#E07A5F22', border: '1px solid #E07A5F' }}>
+                      <p className="text-xs font-semibold" style={{ color: '#E07A5F' }}>
+                        Due soon or overdue: {fuelTankDueSoonUnits.join(', ')}
+                      </p>
+                    </div>
+                  )}
+
+                  {editingFuelTankUnit ? (() => {
+                    const unitRecords = safetyInspections.filter((r) => r.type === 'fuelTank' && r.unit === editingFuelTankUnit);
+                    const existingForMonth = unitRecords.find((r) => r.month === fuelTankMonth);
+                    const mostRecentPrior = unitRecords.slice().sort((a, b) => (b.dateOfInspection || '').localeCompare(a.dateOfInspection || ''))[0];
+                    return (
+                      <FuelTankUnitForm
+                        unit={editingFuelTankUnit}
+                        month={fuelTankMonth}
+                        priorRecord={mostRecentPrior}
+                        existingRecord={existingForMonth}
+                        defaultInitials=""
+                        submitting={submittingSafetyInspection}
+                        onCancel={() => setEditingFuelTankUnit(null)}
+                        onSubmit={async (fields) => {
+                          setSubmittingSafetyInspection(true);
+                          if (existingForMonth) {
+                            const updated = { ...existingForMonth, ...fields };
+                            const next = safetyInspections.map((r) => (r.id === existingForMonth.id ? updated : r));
+                            setSafetyInspections(next);
+                            cacheSet('safetyInspections', next);
+                            await queueWrite('safetyInspections', { kind: 'save', entry: updated });
+                          } else {
+                            await submitSafetyInspection({ type: 'fuelTank', unit: editingFuelTankUnit, month: fuelTankMonth, ...fields });
+                          }
+                          setSubmittingSafetyInspection(false);
+                          setEditingFuelTankUnit(null);
+                        }}
+                      />
+                    );
+                  })() : (
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <button
+                          onClick={() => { const [y, m] = fuelTankMonth.split('-').map(Number); const d = new Date(y, m - 2, 1); setFuelTankMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`); }}
+                          className="text-lg px-3" style={{ color: COLORS.accent }}
+                        >‹</button>
+                        <p className="font-display text-sm font-bold">
+                          {(() => { const [y, m] = fuelTankMonth.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }); })()}
+                        </p>
+                        <button
+                          onClick={() => { const [y, m] = fuelTankMonth.split('-').map(Number); const d = new Date(y, m, 1); setFuelTankMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`); }}
+                          className="text-lg px-3" style={{ color: COLORS.accent }}
+                        >›</button>
+                      </div>
+
+                      <div className="space-y-2 mb-4">
+                        {fuelTankLedgerUnits.map((unit) => {
+                          const record = safetyInspections.find((r) => r.type === 'fuelTank' && r.unit === unit && r.month === fuelTankMonth);
+                          const isDueSoon = fuelTankDueSoonUnits.includes(unit);
+                          return (
+                            <button
+                              key={unit}
+                              onClick={() => setEditingFuelTankUnit(unit)}
+                              className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                              style={{ background: COLORS.surfaceRaised }}
+                            >
+                              <span className="text-sm font-semibold">{unit}</span>
+                              <span className="text-xs font-bold" style={{ color: record ? COLORS.accent : isDueSoon ? '#E07A5F' : COLORS.inkDim }}>
+                                {record ? 'Filled' : isDueSoon ? 'Due soon' : 'Not filled'}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {(isAdmin || isSafety) && (
+                        addingFuelTankUnit ? (
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              placeholder="Unit or plate # (e.g. CRF3433)"
+                              value={newFuelTankUnitName}
+                              onChange={(e) => setNewFuelTankUnitName(e.target.value)}
+                              className="flex-1 px-3 py-2 rounded-lg text-sm"
+                              style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                            />
+                            <Btn
+                              onClick={async () => { await addFuelTankExtraUnit(newFuelTankUnitName); setNewFuelTankUnitName(''); setAddingFuelTankUnit(false); }}
+                              disabled={!newFuelTankUnitName.trim()}
+                            >
+                              Add
+                            </Btn>
+                            <Btn variant="ghost" onClick={() => { setAddingFuelTankUnit(false); setNewFuelTankUnitName(''); }}>Cancel</Btn>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setAddingFuelTankUnit(true)}
+                            className="text-xs font-semibold px-3 py-2 rounded-lg"
+                            style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                          >
+                            + Add Unit
+                          </button>
+                        )
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </AdminSection>
+          )}
         </div>
       </div>
     );
