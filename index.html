@@ -5696,12 +5696,12 @@ function NewYardInspectionForm({ knownSites, defaultInspector, submitting, onCan
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [inspectedBy, setInspectedBy] = useState(defaultInspector);
   const [items, setItems] = useState({});
-  const [signed, setSigned] = useState(false);
+  const [signature, setSignature] = useState('');
 
   const effectiveSite = addingNewSite ? newSiteName.trim() : site;
   const totalItems = YARD_INSPECTION_SECTIONS.reduce((n, s) => n + s.items.length, 0);
   const answeredItems = Object.values(items).filter((v) => v && v.status).length;
-  const canSubmit = effectiveSite && inspectedBy.trim() && signed && answeredItems === totalItems && !submitting;
+  const canSubmit = effectiveSite && inspectedBy.trim() && signature.trim() && answeredItems === totalItems && !submitting;
 
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
@@ -5792,14 +5792,19 @@ function NewYardInspectionForm({ knownSites, defaultInspector, submitting, onCan
 
       <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>{answeredItems} / {totalItems} items answered</p>
 
-      <label className="flex items-start gap-2 mb-4 text-sm cursor-pointer">
-        <input type="checkbox" checked={signed} onChange={(e) => setSigned(e.target.checked)} className="mt-1" />
-        <span>I, {inspectedBy || '(name)'}, confirm this inspection was completed as recorded. This stands in as my inspector signature.</span>
-      </label>
+      <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Signature</label>
+      <input
+        type="text"
+        placeholder="Type your name to sign"
+        value={signature}
+        onChange={(e) => setSignature(e.target.value)}
+        className="w-full mb-4 px-3 py-2 rounded-lg text-sm"
+        style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}`, fontFamily: 'cursive' }}
+      />
 
       <div className="flex gap-2">
         <Btn
-          onClick={() => onSubmit({ site: effectiveSite, date, inspectedBy: inspectedBy.trim(), items, signedAt: Date.now() })}
+          onClick={() => onSubmit({ site: effectiveSite, date, inspectedBy: inspectedBy.trim(), items, signature: signature.trim(), signedAt: Date.now() })}
           disabled={!canSubmit}
         >
           {submitting ? 'Submitting…' : 'Submit Inspection'}
@@ -5937,11 +5942,11 @@ function NewVehicleInspectionForm({ knownUnits, defaultInspector, submitting, on
   const [km, setKm] = useState('');
   const [inspectedBy, setInspectedBy] = useState(defaultInspector);
   const [items, setItems] = useState({});
-  const [signed, setSigned] = useState(false);
+  const [signature, setSignature] = useState('');
 
   const effectiveUnit = addingNewUnit ? newUnitName.trim() : unit;
   const answeredItems = Object.values(items).filter((v) => v && v.status).length;
-  const canSubmit = effectiveUnit && inspectedBy.trim() && signed && answeredItems === VEHICLE_INSPECTION_ITEMS.length && !submitting;
+  const canSubmit = effectiveUnit && inspectedBy.trim() && signature.trim() && answeredItems === VEHICLE_INSPECTION_ITEMS.length && !submitting;
 
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
@@ -6035,14 +6040,19 @@ function NewVehicleInspectionForm({ knownUnits, defaultInspector, submitting, on
 
       <p className="text-xs my-3" style={{ color: COLORS.inkDim }}>{answeredItems} / {VEHICLE_INSPECTION_ITEMS.length} items answered</p>
 
-      <label className="flex items-start gap-2 mb-4 text-sm cursor-pointer">
-        <input type="checkbox" checked={signed} onChange={(e) => setSigned(e.target.checked)} className="mt-1" />
-        <span>I, {inspectedBy || '(name)'}, confirm this inspection was completed as recorded. This stands in as my inspector signature.</span>
-      </label>
+      <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Signature</label>
+      <input
+        type="text"
+        placeholder="Type your name to sign"
+        value={signature}
+        onChange={(e) => setSignature(e.target.value)}
+        className="w-full mb-4 px-3 py-2 rounded-lg text-sm"
+        style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}`, fontFamily: 'cursive' }}
+      />
 
       <div className="flex gap-2">
         <Btn
-          onClick={() => onSubmit({ unit: effectiveUnit, date, km: km.trim(), inspectedBy: inspectedBy.trim(), items, signedAt: Date.now() })}
+          onClick={() => onSubmit({ unit: effectiveUnit, date, km: km.trim(), inspectedBy: inspectedBy.trim(), items, signature: signature.trim(), signedAt: Date.now() })}
           disabled={!canSubmit}
         >
           {submitting ? 'Submitting…' : 'Submit Inspection'}
@@ -6129,11 +6139,11 @@ function NewEquipmentInspectionForm({ knownUnits, defaultInspector, submitting, 
   const [inspectedBy, setInspectedBy] = useState(defaultInspector);
   const [items, setItems] = useState({});
   const [comments, setComments] = useState('');
-  const [signed, setSigned] = useState(false);
+  const [signature, setSignature] = useState('');
 
   const effectiveUnit = addingNewUnit ? newUnitName.trim() : unit;
   const answeredItems = Object.values(items).filter((v) => v && v.status).length;
-  const canSubmit = effectiveUnit && machine.trim() && inspectedBy.trim() && signed && answeredItems === EQUIPMENT_INSPECTION_ITEMS.length && !submitting;
+  const canSubmit = effectiveUnit && machine.trim() && inspectedBy.trim() && signature.trim() && answeredItems === EQUIPMENT_INSPECTION_ITEMS.length && !submitting;
 
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
@@ -6249,14 +6259,19 @@ function NewEquipmentInspectionForm({ knownUnits, defaultInspector, submitting, 
         style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
       />
 
-      <label className="flex items-start gap-2 mb-4 text-sm cursor-pointer">
-        <input type="checkbox" checked={signed} onChange={(e) => setSigned(e.target.checked)} className="mt-1" />
-        <span>I, {inspectedBy || '(name)'}, confirm this inspection was completed as recorded. This stands in as my inspector signature.</span>
-      </label>
+      <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Signature</label>
+      <input
+        type="text"
+        placeholder="Type your name to sign"
+        value={signature}
+        onChange={(e) => setSignature(e.target.value)}
+        className="w-full mb-4 px-3 py-2 rounded-lg text-sm"
+        style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}`, fontFamily: 'cursive' }}
+      />
 
       <div className="flex gap-2">
         <Btn
-          onClick={() => onSubmit({ unit: effectiveUnit, machine: machine.trim(), hourMeter: hourMeter.trim(), date, inspectedBy: inspectedBy.trim(), items, comments: comments.trim(), signedAt: Date.now() })}
+          onClick={() => onSubmit({ unit: effectiveUnit, machine: machine.trim(), hourMeter: hourMeter.trim(), date, inspectedBy: inspectedBy.trim(), items, comments: comments.trim(), signature: signature.trim(), signedAt: Date.now() })}
           disabled={!canSubmit}
         >
           {submitting ? 'Submitting…' : 'Submit Inspection'}
@@ -7355,6 +7370,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [safetyDocs, setSafetyDocs] = useState(() => cacheGet('safetyDocs', [])); // [{id, title, category, url, fileName, addedBy, addedAt}]
   const [uploadingSafetyDoc, setUploadingSafetyDoc] = useState(false);
   const [expandedSafetyCategory, setExpandedSafetyCategory] = useState(null);
+  const [inspectionsExpanded, setInspectionsExpanded] = useState(false);
   const [showAddSafetyDoc, setShowAddSafetyDoc] = useState(null); // category name, or null
   const [openingSafetyDocId, setOpeningSafetyDocId] = useState(null);
   const warmedSafetyDocIds = useRef(new Set());
@@ -7371,11 +7387,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [newFuelTankUnitName, setNewFuelTankUnitName] = useState('');
   const [fuelTankMonth, setFuelTankMonth] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM'
   const [editingFuelTankUnit, setEditingFuelTankUnit] = useState(null);
-  // The Fuel Tank Ledger's row order: every unit already tracked in the app,
-  // in whatever order they were added, then any ledger-only extras appended
-  // after — never re-sorted, so a newly added unit always lands at the end
-  // and nothing already on the sheet ever jumps around.
-  const fuelTankLedgerUnits = [...units, ...fuelTankExtraUnits];
+  // The Fuel Tank Ledger's row order: only actual vehicles (trucks and
+  // pickups — the ones that carry a slip tank), in whatever order they were
+  // added, then any ledger-only extras appended after — never re-sorted,
+  // so a newly added unit always lands at the end and nothing already on
+  // the sheet ever jumps around.
+  const fuelTankLedgerUnits = [
+    ...units.filter((u) => { const t = unitTypes[slugForUnit(u)]; return t === 'truck' || t === 'pickup'; }),
+    ...fuelTankExtraUnits,
+  ];
   // Flags any unit whose last fuel tank inspection is 25+ days old (or has
   // never had one) — a 5-day heads-up on the roughly-monthly cycle these
   // need to stay current on. This only surfaces as an in-app banner/badge
@@ -14740,8 +14760,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             <AdminSection
               icon="🧰"
               title={`Inspections${safetyInspectionType ? ' — ' + SAFETY_INSPECTION_TYPES.find((t) => t.key === safetyInspectionType).label : ''}`}
-              expanded={true}
-              onToggle={() => {}}
+              expanded={inspectionsExpanded}
+              onToggle={() => setInspectionsExpanded((x) => !x)}
             >
               {!safetyInspectionType ? (
                 <div className="space-y-2">
