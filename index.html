@@ -109,6 +109,11 @@
   setTimeout(() => { if (!window.pdfjsLib) window.__loadStatus['pdfjs'] = 'FAILED'; }, 5000);
 </script>
 
+<!-- pdf-lib — builds a new PDF client-side from scanned photos (Safety
+     Manual scan-in), and extracts a chosen page range out of an existing
+     PDF for printing or sending just part of a document. -->
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js" onload="window.__loadStatus['pdf-lib']='ok'" onerror="window.__loadStatus['pdf-lib']='FAILED'"></script>
+
 <style>
   html, body {
     background: #1B1F19;
@@ -1372,8 +1377,8 @@ function ProductionClockOutReviewOverlay({ show, shift, mechanic, unitTypes, onC
         <div className="rounded-lg p-4 mb-5 space-y-2" style={{ background: COLORS.surfaceRaised }}>
           <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Start</span><span>{fmtTime(shift.start)}</span></div>
           <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>End</span><span>{fmtTime(new Date().toISOString())}</span></div>
-          {blocksForShift(shift).length > 0 && (
-            <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Block{blocksForShift(shift).length > 1 ? 's' : ''}</span><span>{blocksForShift(shift).join(', ')}</span></div>
+          {shift.block && (
+            <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Block</span><span>{shift.block}</span></div>
           )}
           {activeType === 'buncher' && shift.trees && (
             <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Trees</span><span>{shift.trees}</span></div>
@@ -3370,10 +3375,18 @@ async function saveMeta(meta) {
   await firebase.database().ref('meta').set(meta);
 }
 // Extra units for the Fuel Tank Ledger only — for any plate-numbered tank
-// or truck that isn't in the app's main unit list. Always appended, never
-// reordered, so the ledger's row order stays stable month to month.
+// or truck that isn't in the app's main unit list. The ledger itself
+// groups all units (these included) by prefix, so this list doesn't need
+// to be kept in any particular order — just appended to.
 async function saveFuelTankExtraUnits(list) {
   await firebase.database().ref('fuelTankExtraUnits').set(list);
+}
+// A simple on/off switch for the Fuel Tank Ledger's due-soon banner/badge
+// — for seasonal shutdown, when nothing's running and nothing needs a
+// monthly re-check. Doesn't touch the records themselves, just whether the
+// reminder shows.
+async function saveFuelTankReminderSettings(settings) {
+  await firebase.database().ref('fuelTankReminderSettings').set(settings);
 }
 // Firebase Realtime Database rejects an entire write if ANY value anywhere
 // in it is undefined (not null — undefined specifically), even deeply
@@ -3382,6 +3395,89 @@ async function saveFuelTankExtraUnits(list) {
 // undefined properties.
 function stripUndefined(data) {
   return JSON.parse(JSON.stringify(data));
+}
+
+// Turns "1-3, 5" into 0-indexed page numbers [0,1,2,4], clamped to what the
+// document actually has. Blank input means every page — this is what makes
+// "one page or as many as I want" work for both printing and sending.
+function parsePageRangeInput(input, totalPages) {
+  if (!input || !input.trim()) return Array.from({ length: totalPages }, (_, i) => i);
+  const indices = new Set();
+  input.split(',').forEach((part) => {
+    const seg = part.trim();
+    if (!seg) return;
+    const m = seg.match(/^(\d+)(?:-(\d+))?$/);
+    if (!m) return;
+    const start = parseInt(m[1], 10);
+    const end = m[2] ? parseInt(m[2], 10) : start;
+    for (let p = start; p <= end; p++) {
+      if (p >= 1 && p <= totalPages) indices.add(p - 1);
+    }
+  });
+  return [...indices].sort((a, b) => a - b);
+}
+
+// Builds a new, smaller PDF containing only the chosen pages — used so
+// printing or sending "just page 3" doesn't mean handling the whole manual.
+async function extractPdfPageSubset(bytes, pageIndices) {
+  const src = await PDFLib.PDFDocument.load(bytes);
+  const out = await PDFLib.PDFDocument.create();
+  const copied = await out.copyPages(src, pageIndices);
+  copied.forEach((p) => out.addPage(p));
+  return out.save();
+}
+
+// Combines one or more scanned photos into a single multi-page PDF, one
+// photo per page, each page sized to match that photo so nothing gets
+// cropped or stretched.
+async function buildPdfFromImages(images) {
+  const out = await PDFLib.PDFDocument.create();
+  for (const img of images) {
+    const bytes = await img.blob.arrayBuffer();
+    const embedded = img.blob.type === 'image/png' ? await out.embedPng(bytes) : await out.embedJpg(bytes);
+    const page = out.addPage([embedded.width, embedded.height]);
+    page.drawImage(embedded, { x: 0, y: 0, width: embedded.width, height: embedded.height });
+  }
+  return out.save();
+}
+
+// Prints via a hidden iframe rather than opening a new tab — works for
+// both PDFs and plain images, and doesn't leave a stray tab behind.
+function printBytes(bytes, mimeType) {
+  const blob = new Blob([bytes], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const iframe = document.createElement('iframe');
+  iframe.style.display = 'none';
+  iframe.src = url;
+  document.body.appendChild(iframe);
+  iframe.onload = () => {
+    try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) { /* best effort */ }
+    setTimeout(() => { document.body.removeChild(iframe); URL.revokeObjectURL(url); }, 60000);
+  };
+}
+
+// Hands the file to the device's own share sheet (Messages, email, WhatsApp,
+// AirDrop, whatever's installed) when that's supported; otherwise falls
+// back to a normal download so it can still be shared manually.
+async function shareBytes(bytes, fileName, mimeType, title) {
+  const blob = new Blob([bytes], { type: mimeType });
+  const file = new File([blob], fileName, { type: mimeType });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title });
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return; // they cancelled the share sheet — not an error
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
 // Every save to these paths is a full read-modify-write of the whole list —
@@ -3789,6 +3885,7 @@ const OFFLINE_QUEUE_HANDLERS = {
   highwayLines: { save: saveHighwayLineRecord, patch: patchHighwayLineRecord, delete: deleteHighwayLineRecord },
   meta: { setWhole: saveMeta },
   fuelTankExtraUnits: { setWhole: saveFuelTankExtraUnits },
+  fuelTankReminderSettings: { setWhole: saveFuelTankReminderSettings },
   templates: { setWhole: saveTemplates },
   pins: { setWhole: savePins },
   blocks: { setWhole: saveBlocksList },
@@ -3968,15 +4065,6 @@ async function saveAuthMigrated(data) {
 function slugForMechanic(name) {
   if (typeof name !== 'string') return '';
   return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-}
-// A shift can carry more than one block worked that day now — this reads
-// either the new blocks array or, for shifts recorded before that
-// existed, falls back to the old single block field so nothing already
-// saved looks broken.
-function blocksForShift(shift) {
-  if (!shift) return [];
-  if (shift.blocks && shift.blocks.length > 0) return shift.blocks;
-  return shift.block ? [shift.block] : [];
 }
 // Real unit numbers can contain characters Firebase flatly rejects as a key
 // (/, ., #, $, [, ]) — a unit like "104/A" would silently fail to save its
@@ -4869,7 +4957,7 @@ function PreTripInspectionDetail({ inspection, onDelete }) {
   );
 }
 
-function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel, onStart }) {
+function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel }) {
   const [unitsData, setUnitsData] = useState([
     { unitName: truckUnitName, unitType: 'truck', items: TRUCK_PRETRIP_ITEMS.map((def) => ({ ...def, status: null, severity: null, note: '', photos: [] })) },
   ]);
@@ -4878,11 +4966,6 @@ function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel, onSt
   const [newTrailerName, setNewTrailerName] = useState('');
   const [signature, setSignature] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (onStart) onStart();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const setItemStatus = (unitIdx, itemIdx, status) => {
     setUnitsData((prev) => prev.map((u, ui) => (ui !== unitIdx ? u : {
@@ -5378,7 +5461,7 @@ function ProductionShiftHistory({ shifts, editingId, onEdit, onCancelEdit, onSav
                 <span style={{ color: COLORS.inkDim }}>{fmtTime(s.start)}–{fmtTime(s.end)}</span>
               </div>
               <div className="flex justify-between items-center mt-1">
-                <span className="text-xs" style={{ color: COLORS.inkDim }}>{blocksForShift(s).length > 0 ? `Block${blocksForShift(s).length > 1 ? 's' : ''} ${blocksForShift(s).join(', ')}` : ''}</span>
+                <span className="text-xs" style={{ color: COLORS.inkDim }}>{s.block ? `Block ${s.block}` : ''}</span>
                 <span className="text-xs font-mono" style={{ color: COLORS.accent }}>{fmtHours((new Date(s.end) - new Date(s.start)) / 1000 / 60 / 60)}</span>
               </div>
               {machineType(s.machine, unitTypes) === 'fuel' && s.fuelLog && Object.keys(s.fuelLog).length > 0 && (
@@ -5630,6 +5713,102 @@ function SafetyDocUploadForm({ uploading, onCancel, onSubmit }) {
           {uploading ? 'Uploading…' : 'Upload'}
         </Btn>
         <Btn variant="ghost" onClick={onCancel} disabled={uploading}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
+// Scan-in flow — takes one or more camera photos and combines them into a
+// single multi-page PDF, so scanning a whole page or a whole stapled
+// handout works the same way as scanning just one sheet. Each tap of
+// "Take Photo" captures one page; they build up in order until "Save".
+function ScanDocumentForm({ scanning, onCancel, onSubmit }) {
+  const [title, setTitle] = useState('');
+  const [pages, setPages] = useState([]); // [{id, blob, previewUrl}]
+  const [building, setBuilding] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const addPage = (file) => {
+    if (!file) return;
+    setPages((prev) => [...prev, { id: uid(), blob: file, previewUrl: URL.createObjectURL(file) }]);
+  };
+  const removePage = (id) => {
+    setPages((prev) => {
+      const target = prev.find((p) => p.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((p) => p.id !== id);
+    });
+  };
+
+  const handleSave = async () => {
+    setBuilding(true);
+    try {
+      const pdfBytes = await buildPdfFromImages(pages);
+      const file = new File([pdfBytes], `${title.trim()}.pdf`, { type: 'application/pdf' });
+      await onSubmit(title, file);
+    } catch (e) {
+      alert("Couldn't build the PDF — " + (e.message || 'try again.'));
+    }
+    setBuilding(false);
+  };
+
+  const busy = scanning || building;
+
+  return (
+    <div className="rounded-lg p-3" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <input
+        type="text"
+        placeholder="Document title (e.g. Safety Manual 2026)"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        disabled={busy}
+        className="w-full mb-2 px-3 py-2 rounded-lg text-sm"
+        style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+      />
+
+      {pages.length > 0 && (
+        <div className="flex gap-2 mb-2 overflow-x-auto">
+          {pages.map((p, i) => (
+            <div key={p.id} className="relative flex-shrink-0">
+              <img src={p.previewUrl} alt={`Page ${i + 1}`} className="rounded" style={{ width: 64, height: 84, objectFit: 'cover', border: `1px solid ${COLORS.line}` }} />
+              <button
+                type="button"
+                onClick={() => removePage(p.id)}
+                disabled={busy}
+                className="absolute -top-1 -right-1 rounded-full text-xs w-5 h-5 flex items-center justify-center"
+                style={{ background: '#E07A5F', color: '#1B1F19' }}
+              >
+                ✕
+              </button>
+              <p className="text-xs text-center mt-0.5" style={{ color: COLORS.inkDim }}>{i + 1}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => { addPage(e.target.files && e.target.files[0]); e.target.value = ''; }}
+      />
+      <button
+        type="button"
+        onClick={() => fileInputRef.current && fileInputRef.current.click()}
+        disabled={busy}
+        className="text-xs font-semibold px-3 py-2 rounded-lg mb-3"
+        style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+      >
+        📷 {pages.length === 0 ? 'Take Photo' : 'Add Another Page'}
+      </button>
+
+      <div className="flex gap-2">
+        <Btn onClick={handleSave} disabled={busy || !title.trim() || pages.length === 0}>
+          {building ? 'Building PDF…' : scanning ? 'Uploading…' : `Save ${pages.length > 0 ? `(${pages.length} page${pages.length === 1 ? '' : 's'})` : ''}`}
+        </Btn>
+        <Btn variant="ghost" onClick={onCancel} disabled={busy}>Cancel</Btn>
       </div>
     </div>
   );
@@ -6960,8 +7139,8 @@ function PrintableProductionShift({ shift, unitTypes }) {
 
       <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginBottom: 12 }}>
         <tbody>
-          {blocksForShift(shift).length > 0 && (
-            <tr><td style={{ padding: '3px 6px', color: '#555' }}>Block{blocksForShift(shift).length > 1 ? 's' : ''}</td><td style={{ padding: '3px 6px' }}>{blocksForShift(shift).join(', ')}</td></tr>
+          {shift.block && (
+            <tr><td style={{ padding: '3px 6px', color: '#555' }}>Block</td><td style={{ padding: '3px 6px' }}>{shift.block}</td></tr>
           )}
           {(shift.startHours || shift.endHours) && (
             <tr><td style={{ padding: '3px 6px', color: '#555' }}>Machine hours</td><td style={{ padding: '3px 6px' }}>{shift.startHours || '—'} → {shift.endHours || '—'}</td></tr>
@@ -7101,7 +7280,7 @@ function PrintableWorkOrder({ order, activeUnit, t, lang, getAssignedMechanics, 
 }
 
 function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, onDelete, isAdmin }) {
-  const [block, setBlock] = useState(blocksForShift(shift).join(', '));
+  const [block, setBlock] = useState(shift.block || '');
   const [startHours, setStartHours] = useState(shift.startHours || '');
   const [endHours, setEndHours] = useState(shift.endHours || '');
   const [spruce, setSpruce] = useState(shift.spruce || '');
@@ -7147,8 +7326,8 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
       )}
       {activeType !== 'fuel' && activeType !== 'winch' && (
         <label className="block mb-3">
-          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Block(s) — separate with commas if more than one</span>
-          <TextInput value={block} onChange={(e) => setBlock(e.target.value)} placeholder="e.g. 40-A, 40-B" />
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Block</span>
+          <TextInput value={block} onChange={(e) => setBlock(e.target.value)} />
         </label>
       )}
       {activeType !== 'crawler' && activeType !== 'grader' && activeType !== 'winch' && activeType !== 'fuel' && (
@@ -7232,7 +7411,7 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
         </div>
       ) : (
         <div className="flex gap-2 flex-wrap">
-          <Btn onClick={() => onSave({ blocks: block.split(',').map((b) => b.trim()).filter(Boolean), block: null, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes })}>Save changes</Btn>
+          <Btn onClick={() => onSave({ block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes })}>Save changes</Btn>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
           <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>Delete shift</button>
         </div>
@@ -7386,6 +7565,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [expandedSafetyCategory, setExpandedSafetyCategory] = useState(null);
   const [inspectionsExpanded, setInspectionsExpanded] = useState(false);
   const [showAddSafetyDoc, setShowAddSafetyDoc] = useState(null); // category name, or null
+  const [showScanSafetyDoc, setShowScanSafetyDoc] = useState(null); // category name, or null
+  const [safetyDocActionBusy, setSafetyDocActionBusy] = useState(null); // doc id currently printing/sending, or null
   const [openingSafetyDocId, setOpeningSafetyDocId] = useState(null);
   const warmedSafetyDocIds = useRef(new Set());
   const [safetyInspections, setSafetyInspections] = useState(() => cacheGet('safetyInspections', []));
@@ -7397,26 +7578,40 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [viewingSafetyInspectionId, setViewingSafetyInspectionId] = useState(null);
   const [submittingSafetyInspection, setSubmittingSafetyInspection] = useState(false);
   const [fuelTankExtraUnits, setFuelTankExtraUnits] = useState(() => cacheGet('fuelTankExtraUnits', []));
+  const [fuelTankRemindersPaused, setFuelTankRemindersPaused] = useState(() => cacheGet('fuelTankRemindersPaused', false));
   const [addingFuelTankUnit, setAddingFuelTankUnit] = useState(false);
   const [newFuelTankUnitName, setNewFuelTankUnitName] = useState('');
   const [fuelTankMonth, setFuelTankMonth] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM'
   const [editingFuelTankUnit, setEditingFuelTankUnit] = useState(null);
   // The Fuel Tank Ledger's row order: only actual vehicles (trucks and
-  // pickups — the ones that carry a slip tank), in whatever order they were
-  // added, then any ledger-only extras appended after — never re-sorted,
-  // so a newly added unit always lands at the end and nothing already on
-  // the sheet ever jumps around.
+  // pickups — the ones that carry a slip tank), grouped by their letter
+  // prefix (all V's together, all S's together, etc.) and sorted
+  // numerically within each group, so V4 comes before V12 rather than
+  // string-sorting them the wrong way. A ledger-only extra unit slots into
+  // its matching prefix group the same as any other unit.
+  const fuelTankUnitSortKey = (u) => {
+    const m = u.match(/^([A-Za-z]+)-?(\d+)?/);
+    const prefix = m ? m[1].toUpperCase() : u.toUpperCase();
+    const num = m && m[2] ? parseInt(m[2], 10) : 0;
+    return { prefix, num };
+  };
   const fuelTankLedgerUnits = [
     ...units.filter((u) => { const t = unitTypes[slugForUnit(u)]; return t === 'truck' || t === 'pickup'; }),
     ...fuelTankExtraUnits,
-  ];
+  ].sort((a, b) => {
+    const ka = fuelTankUnitSortKey(a);
+    const kb = fuelTankUnitSortKey(b);
+    return ka.prefix.localeCompare(kb.prefix) || ka.num - kb.num || a.localeCompare(b);
+  });
   // Flags any unit whose last fuel tank inspection is 25+ days old (or has
   // never had one) — a 5-day heads-up on the roughly-monthly cycle these
   // need to stay current on. This only surfaces as an in-app banner/badge
   // when someone opens the Safety page; it can't push a notification to a
   // closed app on its own (that needs a small server-side scheduled job —
-  // flagged separately, not something this file alone can do).
-  const fuelTankDueSoonUnits = fuelTankLedgerUnits.filter((u) => {
+  // flagged separately, not something this file alone can do). Comes back
+  // empty while paused (seasonal shutdown), so every banner/badge that
+  // reads from this just naturally goes quiet — nothing else to gate.
+  const fuelTankDueSoonUnits = fuelTankRemindersPaused ? [] : fuelTankLedgerUnits.filter((u) => {
     const records = safetyInspections.filter((r) => r.type === 'fuelTank' && r.unit === u);
     if (records.length === 0) return true;
     const latest = records.reduce((a, b) => ((a.dateOfInspection || '') > (b.dateOfInspection || '') ? a : b));
@@ -7696,6 +7891,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = (snap.val() || []).filter((u) => typeof u === 'string' && u.trim());
       setFuelTankExtraUnits(val);
       cacheSet('fuelTankExtraUnits', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('fuelTankReminderSettings');
+    const on = ref.on('value', (snap) => {
+      const paused = !!(snap.val() && snap.val().paused);
+      setFuelTankRemindersPaused(paused);
+      cacheSet('fuelTankRemindersPaused', paused);
     });
     return () => ref.off('value', on);
   }, []);
@@ -9198,9 +9403,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     cacheSet('safetyInspections', next);
     await queueWrite('safetyInspections', { kind: 'delete', entryId: recordId });
   };
-  // Adds a unit to the Fuel Tank Ledger's own extra list — always appended
-  // at the end, never sorted, so the row order the ledger already shows
-  // stays exactly where everyone expects it month to month.
+  // Adds a unit to the Fuel Tank Ledger's own extra list — the ledger
+  // groups everything by prefix on display, so it'll land in its matching
+  // group automatically rather than needing to be inserted in any
+  // particular spot here.
   const addFuelTankExtraUnit = async (name) => {
     const trimmed = name.trim();
     if (!trimmed || fuelTankLedgerUnits.includes(trimmed)) return;
@@ -9208,6 +9414,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setFuelTankExtraUnits(next);
     cacheSet('fuelTankExtraUnits', next);
     await queueWrite('fuelTankExtraUnits', { kind: 'setWhole', value: next });
+  };
+  const toggleFuelTankReminders = async () => {
+    const next = !fuelTankRemindersPaused;
+    setFuelTankRemindersPaused(next);
+    cacheSet('fuelTankRemindersPaused', next);
+    await queueWrite('fuelTankReminderSettings', { kind: 'setWhole', value: { paused: next } });
   };
   // Opens a safety doc by fetching it in-app (rather than navigating an <a>
   // tag straight to the Firebase Storage URL) so the request passes through
@@ -9225,6 +9437,42 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       alert("Couldn't open that document — it hasn't been downloaded to this device yet. Connect once with signal, open Safety, then it'll be available offline after that.");
     }
     setOpeningSafetyDocId(null);
+  };
+  // Print or send a doc — for a multi-page PDF, asks which pages first
+  // (blank = all) so "just page 3" doesn't mean handling the whole thing.
+  // Single-page PDFs and plain images skip straight to the action.
+  const handleSafetyDocAction = async (doc, action) => {
+    setSafetyDocActionBusy(doc.id);
+    try {
+      const res = await fetch(doc.url);
+      const blob = await res.blob();
+      const isPdf = /\.pdf$/i.test(doc.fileName || doc.title || '') || blob.type === 'application/pdf';
+      let bytes = await blob.arrayBuffer();
+      let mimeType = blob.type || (isPdf ? 'application/pdf' : 'application/octet-stream');
+
+      if (isPdf) {
+        const pdf = await PDFLib.PDFDocument.load(bytes);
+        const total = pdf.getPageCount();
+        if (total > 1) {
+          const input = window.prompt(`This document has ${total} pages. Which pages would you like? (e.g. "1-3,5") Leave blank for all.`, '');
+          if (input === null) { setSafetyDocActionBusy(null); return; } // cancelled
+          const indices = parsePageRangeInput(input, total);
+          if (indices.length > 0 && indices.length < total) {
+            bytes = await extractPdfPageSubset(bytes, indices);
+          }
+        }
+        mimeType = 'application/pdf';
+      }
+
+      if (action === 'print') {
+        printBytes(bytes, mimeType);
+      } else {
+        await shareBytes(bytes, doc.fileName || `${doc.title}.pdf`, mimeType, doc.title);
+      }
+    } catch (e) {
+      alert("Couldn't complete that — " + (e.message || 'check your signal and try again.'));
+    }
+    setSafetyDocActionBusy(null);
   };
   const deleteMap = async (mapId) => {
     await deleteOneMap(mapId);
@@ -9853,7 +10101,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await patchOneTimesheetEntry(entry.id, { logBookHours: Math.round(onDutyHours * 2) / 2 });
   };
 
-  const startDriverLog = async (odometerStart, unit, initialStatus) => {
+  const startDriverLog = async (odometerStart, unit) => {
     const now = new Date().toISOString();
     const entry = {
       id: uid(),
@@ -9863,29 +10111,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       end: null,
       odometerStart: odometerStart || '',
       odometerEnd: '',
-      statusChanges: [{ id: uid(), status: initialStatus || 'off', time: now, note: initialStatus === 'onDuty' ? 'Starting pre-trip' : 'Starting shift' }],
+      statusChanges: [{ id: uid(), status: 'off', time: now, note: 'Starting shift' }],
       signature: null,
       signedAt: null,
     };
     await saveOneDriverLog(entry);
     await syncTimesheetToLogBook(currentMechanic, localDateStr(new Date(now)), entry);
-  };
-
-  // Fires the moment a driver actually opens the pre-trip inspection form
-  // — HOS rules treat pre-trip as On Duty time starting right then, not
-  // only once the inspection is fully submitted a few minutes later. If
-  // there's no log open yet for today, this starts one already On Duty
-  // rather than the usual Off Duty default; if one's already open and
-  // isn't already showing On Duty, it just adds the status change.
-  const handlePreTripStarted = async (unitForLog) => {
-    if (!openDriverLog) {
-      await startDriverLog('', unitForLog, 'onDuty');
-      return;
-    }
-    const changes = openDriverLog.statusChanges || [];
-    const latest = changes.length > 0 ? changes[changes.length - 1] : null;
-    if (latest && latest.status === 'onDuty') return; // already there — no need for a duplicate entry
-    await addDriverStatusChange('onDuty', 'Starting pre-trip');
   };
 
   const addDriverStatusChange = async (status, note) => {
@@ -10038,7 +10269,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const attemptProductionClockOut = () => {
     if (!openProductionShift) return;
     const shiftType = machineType(openProductionShift.machine, unitTypes);
-    if (shiftType !== 'fuel' && shiftType !== 'winch' && blocksForShift(openProductionShift).length === 0) {
+    if (shiftType !== 'fuel' && shiftType !== 'winch' && !openProductionShift.block) {
       alert('Select or add a block number before clocking out.');
       return;
     }
@@ -10074,7 +10305,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       return;
     }
     const shiftType = currentType;
-    if (shiftType !== 'fuel' && shiftType !== 'winch' && blocksForShift(openProductionShift).length === 0) {
+    if (shiftType !== 'fuel' && shiftType !== 'winch' && !openProductionShift.block) {
       alert('Select or add a block number for the current machine before switching — that finalizes its numbers first.');
       return;
     }
@@ -10561,7 +10792,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           s.employee,
           (s.end || s.start || '').slice(0, 10),
           s.machine,
-          blocksForShift(s).join(', '),
+          s.block || '',
           fmtTime(s.start),
           fmtTime(s.end),
           fmtHoursDecimal(hours),
@@ -11618,7 +11849,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           driver={currentMechanic}
           truckUnitName={effectiveUnit}
           onCancel={() => setShowPreTripForm(false)}
-          onStart={() => handlePreTripStarted(effectiveUnit)}
           onSubmit={async (unitsData, signature) => {
             await submitPreTripInspection(unitsData, signature);
             setShowPreTripForm(false);
@@ -11732,54 +11962,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               </Section>
 
               {activeType !== 'fuel' && activeType !== 'winch' && (
-                <Section label="Block numbers">
-                  {blocksForShift(openProductionShift).length > 0 && (
-                    <div className="flex gap-2 flex-wrap mb-2">
-                      {blocksForShift(openProductionShift).map((b) => (
-                        <span key={b} className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
-                          {b}
-                          <button
-                            onClick={() => patchOpenProductionShift({ blocks: blocksForShift(openProductionShift).filter((x) => x !== b), block: null })}
-                            style={{ color: COLORS.inkDim }}
-                          >
-                            ✕
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                <Section label="Block number">
                   <div className="flex gap-2">
-                    <Select
-                      value=""
-                      onChange={(e) => {
-                        if (!e.target.value) return;
-                        const current = blocksForShift(openProductionShift);
-                        if (!current.includes(e.target.value)) {
-                          patchOpenProductionShift({ blocks: [...current, e.target.value], block: null });
-                        }
-                      }}
-                      className="flex-1"
-                    >
-                      <option value="" disabled>+ Add a block…</option>
-                      {blocks.filter((b) => !blocksForShift(openProductionShift).includes(b)).map((b) => <option key={b} value={b}>{b}</option>)}
+                    <Select value={openProductionShift.block} onChange={(e) => patchOpenProductionShift({ block: e.target.value })} className="flex-1">
+                      <option value="" disabled>Select block…</option>
+                      {blocks.map((b) => <option key={b} value={b}>{b}</option>)}
                     </Select>
                   </div>
                   <div className="flex gap-2 mt-2">
                     <TextInput value={newBlockText} onChange={(e) => setNewBlockText(e.target.value)} placeholder="Add new block, e.g. 40-A" className="flex-1" />
-                    <Btn
-                      onClick={async () => {
-                        const trimmed = newBlockText.trim();
-                        await addBlock(trimmed);
-                        const current = blocksForShift(openProductionShift);
-                        if (!current.includes(trimmed)) {
-                          patchOpenProductionShift({ blocks: [...current, trimmed], block: null });
-                        }
-                        setNewBlockText('');
-                      }}
-                      disabled={!newBlockText.trim()}
-                    >
-                      Add
-                    </Btn>
+                    <Btn onClick={async () => { await addBlock(newBlockText); patchOpenProductionShift({ block: newBlockText.trim() }); setNewBlockText(''); }} disabled={!newBlockText.trim()}>Add</Btn>
                   </div>
                 </Section>
               )}
@@ -13312,7 +13504,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                                 <span className="underline text-xs" style={{ color: COLORS.accent }}>Edit</span>
                               </div>
                               <div className="flex items-center justify-between text-xs" style={{ color: COLORS.inkDim }}>
-                                <span>{s.machine}{blocksForShift(s).length > 0 ? ` · Block${blocksForShift(s).length > 1 ? 's' : ''} ${blocksForShift(s).join(', ')}` : ''}</span>
+                                <span>{s.machine}{s.block ? ` · Block ${s.block}` : ''}</span>
                                 <span className="font-mono">{fmtTime(s.start)} – {fmtTime(s.end)}</span>
                               </div>
                               {machineType(s.machine, unitTypes) === 'fuel' && s.fuelLog && Object.keys(s.fuelLog).length > 0 && (
@@ -14791,6 +14983,24 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                             {openingSafetyDocId === doc.id ? 'Opening…' : doc.title}
                           </span>
                         </button>
+                        <button
+                          onClick={() => handleSafetyDocAction(doc, 'print')}
+                          disabled={safetyDocActionBusy === doc.id}
+                          className="text-sm flex-shrink-0"
+                          style={{ color: COLORS.inkDim }}
+                          title="Print"
+                        >
+                          🖨️
+                        </button>
+                        <button
+                          onClick={() => handleSafetyDocAction(doc, 'send')}
+                          disabled={safetyDocActionBusy === doc.id}
+                          className="text-sm flex-shrink-0"
+                          style={{ color: COLORS.inkDim }}
+                          title="Send"
+                        >
+                          📤
+                        </button>
                         {(isAdmin || isSafety) && (
                           <button
                             onClick={() => { if (confirm(`Remove "${doc.title}"?`)) deleteSafetyDoc(doc.id); }}
@@ -14812,14 +15022,31 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       onCancel={() => setShowAddSafetyDoc(null)}
                       onSubmit={(title, file) => addSafetyDoc(category, title, file)}
                     />
+                  ) : showScanSafetyDoc === category ? (
+                    <ScanDocumentForm
+                      scanning={uploadingSafetyDoc}
+                      onCancel={() => setShowScanSafetyDoc(null)}
+                      onSubmit={async (title, file) => { await addSafetyDoc(category, title, file); setShowScanSafetyDoc(null); }}
+                    />
                   ) : (
-                    <button
-                      onClick={() => setShowAddSafetyDoc(category)}
-                      className="text-xs font-semibold px-3 py-2 rounded-lg"
-                      style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-                    >
-                      + Add Document
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setShowAddSafetyDoc(category)}
+                        className="text-xs font-semibold px-3 py-2 rounded-lg"
+                        style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                      >
+                        + Add Document
+                      </button>
+                      {category === 'Safety Manual' && (
+                        <button
+                          onClick={() => setShowScanSafetyDoc(category)}
+                          className="text-xs font-semibold px-3 py-2 rounded-lg"
+                          style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                        >
+                          📷 Scan Pages
+                        </button>
+                      )}
+                    </div>
                   )
                 )}
               </AdminSection>
@@ -15102,6 +15329,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   >
                     ← Back to Inspections
                   </button>
+
+                  {(isAdmin || isSafety) && (
+                    <button
+                      onClick={toggleFuelTankReminders}
+                      className="text-xs font-semibold px-3 py-2 rounded-lg mb-3"
+                      style={fuelTankRemindersPaused
+                        ? { background: COLORS.surface, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }
+                        : { background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                    >
+                      {fuelTankRemindersPaused ? '🔕 Reminders paused — tap to resume' : '🔔 Reminders on — tap to pause for the season'}
+                    </button>
+                  )}
 
                   {fuelTankDueSoonUnits.length > 0 && (
                     <div className="rounded-lg p-3 mb-4" style={{ background: '#E07A5F22', border: '1px solid #E07A5F' }}>
