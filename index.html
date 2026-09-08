@@ -779,16 +779,23 @@ const SAFETY_INSPECTION_TYPES = [
   { key: 'equipment', label: 'Equipment Inspections', bySite: false },
   { key: 'fuelTank', label: 'Fuel Tank Ledgers', bySite: false },
 ];
-// "Incident" is the umbrella/legal term (ISO 45001 and most Canadian
-// OHS frameworks) for any work-related occurrence that could have caused
-// harm — Accident and Near Miss are both classifications OF an incident,
-// not separate categories next to it. That's why this is one report type
-// picked inside the form, not three separate folders.
-const INCIDENT_REPORT_TYPES = [
-  { key: 'accident', label: 'Accident' },
-  { key: 'nearMiss', label: 'Near Miss' },
-  { key: 'incident', label: 'Incident (other)' },
-];
+// Matches the "Incident Investigation Report Form" reference exactly — one
+// unified report, not separate folders per type. "Type" (Incident / Near
+// Miss / Property Damage / Vehicle Collision / Fire / Other) is a
+// check-all-that-apply field INSIDE the form, same as the paper version —
+// there's no more "Accident" bucket, since the reference form doesn't have
+// one either.
+const INCIDENT_TYPE_OPTIONS = ['Incident', 'Near Miss', 'Property Damage', 'Vehicle Collision', 'Fire', 'Other'];
+const INCIDENT_LOCATION_OPTIONS = ['Sawmill', 'Planer', 'Contractor', 'Yard', 'Woodlands', 'Roads', 'Office', 'Maint.', 'Shop', 'Chip Truck', 'Log Truck', 'Pellet Plant'];
+const INJURY_ILLNESS_OPTIONS = ['Fatality', 'Lost Time Incident', 'Medical Aid', 'First Aid', 'Modified Work'];
+const OCCURRENCE_TYPE_OPTIONS = ['Struck By', 'Struck Against', 'Caught In/on/between', 'Exposure', 'Fall to lower level', 'Over Exertion', 'Other'];
+const CONTACT_WITH_OPTIONS = ['Heat/Cold', 'Electricity', 'Pressure', 'Chemical', 'Fire', 'Noise', 'Radiation', 'Other'];
+const UNSAFE_ACTS_OPTIONS = ['Operating Without Authority', 'Unsafe Loading/Unloading', 'Failure to Wear Proper PPE', 'Failure to Warn Properly', 'Failure to Secure Properly', 'Unsafe Position or Posture', 'Horseplay', 'Inadequate Lighting', 'Working at Unsafe Speed', 'Hazardous Personal Attire', 'Servicing Operating Equipment', 'Using Defective Tools', 'Using Defective Equipment', 'Working on Moving Equipment', 'Improper Lifting', 'Other'];
+const UNSAFE_CONDITIONS_OPTIONS = ['Inadequate Guards/Barriers', 'Improper or Inadequate PPE', 'Defective Tools or Equipment', 'Defective Materials', 'Congested Work Area', 'Inadequate Warning Systems', 'Poor Housekeeping', 'Extreme Temperature(s)', 'Inadequate Lighting', 'Hazardous Environmental Conditions', 'Fire Hazard', 'Explosion Hazard', 'Unsafe Job Design', 'Extreme Weather Conditions', 'Unsafe Mobile Equipment', 'Hazardous Procedure', 'Noise Exposure', 'Radiation Exposure', 'Other'];
+const PERSONAL_FACTORS_OPTIONS = ['Inadequate Physical Capability', 'Inadequate Mental Capability', 'Physical Stress', 'Mental Stress', 'Lack of Knowledge', 'Lack of Skill', 'Improper Motivation', 'Abuse or Misuse of Equipment'];
+const JOB_FACTORS_OPTIONS = ['Inadequate Leadership or Supervision', 'Inadequate Engineering Controls', 'Inadequate Purchasing', 'Inadequate Maintenance', 'Inadequate Tools or Equipment', 'Inadequate Work Standards', 'Wear and Tear', 'Other'];
+const ROOT_CAUSES_OPTIONS = ['Management Commitment', 'Leadership Training', 'Planned Inspections', 'Preventive Maintenance', 'Hazard Identification', 'Safe Work Practices and Procedures', 'Inadequate Previous Investigation', 'Emergency Preparedness and Response', 'Company Safety Rules', 'Worker Knowledge & Skill Training', 'Personal Protective Equipment (PPE)', 'Personal or Group Communications', 'Hygiene and Sanitation', 'Hiring & Placement Standards'];
+const PREVENTION_OPTIONS = ['Training/Retraining', 'Job procedure/design changes', 'Equipment repair or replacement', 'Hazard Identification and Analysis', 'Improved Hazard Controls', 'Supervisory Communication', 'Improve Safety Inspection Process', 'Reassignment of Involved Worker', 'Facilities Layout Review and Redesign', 'Installation of Safety Guards/Barriers', 'Safe work procedure reviewed and revised', 'Other'];
 // Matches Harder Contracting's paper "Work Site Inspection Form" exactly —
 // same section order, same item wording, so a filled-out digital copy reads
 // the same as the paper one it replaces. Every item gets an OK / Req. Att.
@@ -943,6 +950,108 @@ function PinModalOverlay({ pinModal, pinInput, setPinInput, pinError, onSubmit, 
             {tr('forgotPin')}
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Standalone, unauthenticated page for someone signing an incident report
+// via a link — no login, no app chrome, just this one report and a
+// signature pad. Both steps (loading the request, submitting the
+// signature) go through the Cloud Function rather than direct Firebase
+// calls, since this visitor was never authenticated and never will be —
+// same reasoning as the PIN-reset flow just below.
+function PublicSignScreen({ token }) {
+  const [state, setState] = useState('loading'); // 'loading' | 'invalid' | 'ready' | 'done'
+  const [data, setData] = useState(null);
+  const [signatureData, setSignatureData] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(CLOUD_FUNCTION_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: APP_SECRET, mode: 'getSignRequest', token }),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.valid) { setState('invalid'); return; }
+        setData(json);
+        setState('ready');
+      } catch (e) {
+        setState('invalid');
+      }
+    })();
+  }, [token]);
+
+  const submit = async () => {
+    if (!signatureData) { alert('Draw a signature first.'); return; }
+    setSubmitting(true);
+    try {
+      const res = await fetch(CLOUD_FUNCTION_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: APP_SECRET, mode: 'submitSignature', token, dataUrl: signatureData }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || 'Failed');
+      setState('done');
+    } catch (e) {
+      alert("Couldn't submit — " + (e.message || 'try again.'));
+    }
+    setSubmitting(false);
+  };
+
+  if (state === 'loading') {
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-6 flex items-center justify-center">
+        <span className="text-sm uppercase tracking-widest" style={{ color: COLORS.inkDim }}>Loading…</span>
+      </div>
+    );
+  }
+  if (state === 'invalid') {
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-6 flex items-center justify-center">
+        <div className="max-w-sm text-center">
+          <p className="text-4xl mb-4">⚠️</p>
+          <p className="text-base">This signing link has expired, already been used, or isn't valid.</p>
+        </div>
+      </div>
+    );
+  }
+  if (state === 'done') {
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-6 flex items-center justify-center">
+        <div className="max-w-sm text-center">
+          <p className="text-4xl mb-4">✅</p>
+          <p className="text-base font-semibold">Thanks, {data.signerName} — your signature has been recorded.</p>
+          <p className="text-sm mt-2" style={{ color: COLORS.inkDim }}>You can close this page now.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const typeLabel = (data.report.incidentTypes || []).join(', ') || 'Incident';
+  return (
+    <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-6">
+      <div className="max-w-sm mx-auto">
+        <p className="font-display text-xl font-bold mb-1">Harder Contracting Ltd.</p>
+        <p className="text-sm mb-6" style={{ color: COLORS.inkDim }}>Incident Report — Signature Requested</p>
+
+        <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+          <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>{typeLabel}</p>
+          <p className="text-sm mb-1">{data.report.dateOfOccurrence} · {data.report.exactLocation}</p>
+          <p className="text-sm" style={{ color: COLORS.inkDim }}>{data.report.sequenceDescription}</p>
+        </div>
+
+        <p className="text-sm mb-2">You've been asked to sign as <strong>{data.signerName}</strong>{data.signerRole ? ` (${data.signerRole})` : ''}.</p>
+
+        <SignaturePad onChange={setSignatureData} />
+
+        <div className="mt-4">
+          <Btn onClick={submit} disabled={submitting}>{submitting ? 'Submitting…' : 'Submit Signature'}</Btn>
+        </div>
       </div>
     </div>
   );
@@ -3455,6 +3564,12 @@ async function buildPdfFromImages(images) {
 // the same order as the digital form, with any collected signatures
 // embedded as images at the bottom. This is what "Print" and "Send" on an
 // incident report actually generate.
+// Lays out one incident report as a clean, printable PDF — same nine
+// sections, same order, as both the paper form and the digital one. Only
+// sections that actually have data get printed (e.g. Section 4/Medical
+// Treatment is skipped entirely if no injury was recorded), same as how
+// someone filling out the paper form would leave inapplicable sections
+// blank rather than write "N/A" through pages of boxes.
 async function buildIncidentReportPdf(record) {
   const doc = await PDFLib.PDFDocument.create();
   const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica);
@@ -3486,6 +3601,7 @@ async function buildIncidentReportPdf(record) {
     return lines;
   };
   const drawField = (label, value) => {
+    if (!value) return;
     ensureSpace(30);
     page.drawText(label.toUpperCase(), { x: margin, y, size: 8, font: bold, color: PDFLib.rgb(0.4, 0.4, 0.4) });
     y -= 12;
@@ -3496,6 +3612,10 @@ async function buildIncidentReportPdf(record) {
     });
     y -= 8;
   };
+  const drawChecks = (label, arr, other) => {
+    if (!arr || arr.length === 0) return;
+    drawField(label, arr.join(', ') + (other ? ` (${other})` : ''));
+  };
   const drawHeading = (text) => {
     ensureSpace(26);
     y -= 6;
@@ -3505,43 +3625,70 @@ async function buildIncidentReportPdf(record) {
     y -= 14;
   };
 
-  page.drawText('INCIDENT REPORT', { x: margin, y, size: 20, font: bold });
+  page.drawText('INCIDENT INVESTIGATION REPORT', { x: margin, y, size: 18, font: bold });
   y -= 22;
   page.drawText('Harder Contracting Ltd.', { x: margin, y, size: 10, font, color: PDFLib.rgb(0.4, 0.4, 0.4) });
-  y -= 16;
-  const typeLabel = (INCIDENT_REPORT_TYPES.find((t) => t.key === record.type) || {}).label || record.type;
-  page.drawText(`Type: ${typeLabel}`, { x: margin, y, size: 11, font: bold });
   y -= 24;
 
-  drawHeading('Occurrence');
-  drawField('Date of Occurrence', record.dateOfOccurrence);
-  drawField('Time of Occurrence', record.timeOfOccurrence);
-  drawField('Location', record.location);
-  drawField('Reported By', record.reportedBy);
-  drawField('Date Reported', record.dateReported);
+  drawHeading('1-2. Employee & Employment Info');
+  drawField('Name', [record.firstName, record.initial, record.lastName].filter(Boolean).join(' '));
+  drawField('Equipment Operator / Equipment #', [record.equipmentOperator, record.equipmentNum].filter(Boolean).join(' / '));
+  drawField('Company', record.companyName);
+  drawField('Department', record.department);
+  drawField('Occupation', record.occupation);
+  drawField('Supervisor', record.supervisor);
 
-  drawHeading('People Involved');
-  drawField('Involved Person(s)', record.involvedPersons);
-  drawField('Witness(es)', record.witnesses);
+  drawHeading('3. Details of Incident');
+  drawField('Exact Location', record.exactLocation);
+  drawChecks('Location Category', record.locationCategories);
+  drawField('Date/Time of Occurrence', `${record.dateOfOccurrence || ''} ${record.timeOfOccurrence || ''}`);
+  drawField('Date/Time Reported', `${record.dateReported || ''} ${record.timeReported || ''}`);
+  drawChecks('Type', record.incidentTypes, record.incidentTypeOther);
+  drawChecks('Injury/Illness', record.injuryIllness);
+  drawField('Body Part(s) Injured', record.bodyPartsInjured);
+  drawField('Injury Description', record.injuryDescription);
 
-  drawHeading('What Happened');
-  drawField('Description', record.description);
-  drawField('Equipment/Property Involved', record.equipmentInvolved);
-
-  if (record.injuryOccurred) {
-    drawHeading('Injury Details');
-    drawField('Nature of Injury', record.natureOfInjury);
-    drawField('Body Part Affected', record.bodyPart);
-    drawField('Medical Attention Required', record.medicalAttention);
-    drawField('Treatment / First Aid Given', record.treatmentGiven);
+  if (record.injuryIllness && record.injuryIllness.length > 0) {
+    drawHeading('4. Medical Treatment Information');
+    drawField('First Aid Attendant', record.firstAidAttendant);
+    drawField('Incident Forms Filled Out', record.incidentFormsFilledOut);
+    drawField('Level of First Aid', record.levelOfFirstAid);
+    drawField('Type of First Aid Administered', record.typeOfFirstAid);
+    drawField('Clinic/Hospital', record.clinicHospital);
+    drawField('Attending Physician/Paramedic', record.attendingPhysician);
+    drawField('Attending Police Officer', record.attendingPoliceOfficer);
   }
 
-  drawHeading('Investigation');
-  drawField('Immediate / Direct Cause', record.immediateCause);
-  drawField('Root Cause / Contributing Factors', record.rootCause);
-  drawField('Corrective Actions Taken', record.correctiveActions);
-  drawField('Preventive Recommendations', record.preventiveActions);
-  drawField('Follow-up Required By', record.followUpBy);
+  if (record.incidentTypes && record.incidentTypes.includes('Property Damage')) {
+    drawHeading('5. Property Damage');
+    drawField('Property Damaged', record.propertyDamaged);
+    drawField('Estimated Cost of Damage', record.estimatedCostOfDamage);
+    drawField('Description', record.damagedPropertyDescription);
+  }
+
+  drawHeading('6. Witness Information');
+  drawField('Witnesses', record.witnesses);
+  drawField('Statement(s) Provided', record.witnessStatementProvided);
+
+  drawHeading('7. Incident Information');
+  drawChecks('Type of Occurrence', record.occurrenceTypes, record.occurrenceTypeOther);
+  drawChecks('Contact With', record.contactWith, record.contactWithOther);
+  drawField('Sequence of Events', record.sequenceDescription);
+  drawField('Diagram/Picture Attached', record.diagramAttached);
+  drawChecks('7.a Unsafe Acts', record.unsafeActs, record.unsafeActsOther);
+  drawField('Safety Device Made Inoperable', record.safetyDeviceInoperable);
+  drawField('Substance Suspicion', record.substanceSuspicion);
+  drawField('Operations Manager Notified', record.operationsManagerNotified);
+  drawChecks('7.b Unsafe Conditions', record.unsafeConditions, record.unsafeConditionsOther);
+  drawChecks('7.c Personal Factors', record.personalFactors, record.personalFactorsOther);
+  drawChecks('7.c Job Factors', record.jobFactors, record.jobFactorsOther);
+
+  drawHeading('8. Root Causes');
+  drawChecks('Root Causes', record.rootCauses);
+
+  drawHeading('9. Prevention');
+  drawChecks('Prevention', record.prevention, record.preventionOther);
+  drawField('Actions Taken to Prevent Recurrence', record.recurrenceActions);
 
   if (record.signatures && record.signatures.length > 0) {
     drawHeading('Signatures');
@@ -3566,6 +3713,7 @@ async function buildIncidentReportPdf(record) {
 
   return doc.save();
 }
+
 
 // Prints via a hidden iframe rather than opening a new tab — works for
 // both PDFs and plain images, and doesn't leave a stray tab behind.
@@ -3604,6 +3752,26 @@ async function shareBytes(bytes, fileName, mimeType, title) {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+// Shares a plain link (not a file) via the device's share sheet when
+// available; otherwise copies it to the clipboard so it can be pasted into
+// a text or email manually.
+async function shareLink(url, title, text) {
+  if (navigator.share) {
+    try {
+      await navigator.share({ url, title, text });
+      return 'shared';
+    } catch (e) {
+      if (e.name === 'AbortError') return 'cancelled';
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    return 'copied';
+  } catch (e) {
+    return 'unavailable';
+  }
 }
 
 // Every save to these paths is a full read-modify-write of the whole list —
@@ -3858,18 +4026,6 @@ const EQUIPMENT_INSPECTION_ITEMS = [
 // everyone (crew included); adding or removing entries is gated to admins
 // in the UI. Files themselves live in Firebase Storage under safetyDocs/,
 // this record just holds the metadata + download URL.
-// Driver documents (annual permits, trip permits) — visible to the driver
-// themselves and to an inspecting officer via Inspection Mode. Same shape
-// as safety docs: files live in Storage, this record just holds the
-// metadata + download URL. Annual permits carry an expiry date so a
-// renewal warning can be shown before one lapses; trip permits don't,
-// since they're inherently short-lived and get replaced per trip.
-async function saveDriverDocumentRecord(doc) {
-  await firebase.database().ref('driverDocumentRecords/' + doc.id).set(stripUndefined(doc));
-}
-async function deleteDriverDocumentRecord(docId) {
-  await firebase.database().ref('driverDocumentRecords/' + docId).remove();
-}
 async function saveSafetyDocRecord(doc) {
   await firebase.database().ref('safetyDocRecords/' + doc.id).set(stripUndefined(doc));
 }
@@ -5221,7 +5377,7 @@ function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel }) {
 // 24-hour period and the previous 14 consecutive days" — nothing about the
 // rest of the app, no editing, no navigation elsewhere. This shows exactly
 // that and nothing more, with one clear way back out.
-function InspectionModeScreen({ driver, allLogs, onExit, documents, renewalStatus }) {
+function InspectionModeScreen({ driver, allLogs, onExit }) {
   const [confirmingExit, setConfirmingExit] = useState(false);
   const [exitPin, setExitPin] = useState('');
   const [exitError, setExitError] = useState('');
@@ -5268,13 +5424,6 @@ function InspectionModeScreen({ driver, allLogs, onExit, documents, renewalStatu
         </div>
         <Btn variant="ghost" onClick={() => setConfirmingExit(true)}>Exit</Btn>
       </div>
-
-      <DriverDocumentsPanel
-        driver={driver}
-        documents={documents}
-        canEdit={false}
-        renewalStatus={renewalStatus}
-      />
 
       {confirmingExit && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 600, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} className="p-6">
@@ -5415,101 +5564,7 @@ function DriverRecentLogsSection({ driver, allLogs, onBackfillOffDuty }) {
   );
 }
 
-// Shown both in the driver's own log section (editable — upload/delete)
-// and in Inspection Mode (read-only, for the officer to actually look
-// at). Annual permits show a renewal warning once within 30 days of
-// expiring, or an "Expired" flag past that — same visual language as the
-// fuel tank ledger's due-soon warnings elsewhere in the app.
-function DriverDocumentsPanel({ driver, documents, canEdit, onAdd, onDelete, uploading, renewalStatus }) {
-  const [addingCategory, setAddingCategory] = useState(null); // 'annual' | 'trip' | null
-  const [titleDraft, setTitleDraft] = useState('');
-  const [expiryDraft, setExpiryDraft] = useState('');
-  const [fileDraft, setFileDraft] = useState(null);
-
-  const myDocs = (documents || []).filter((d) => d.driver === driver);
-  const annualDocs = myDocs.filter((d) => d.category === 'annual');
-  const tripDocs = myDocs.filter((d) => d.category === 'trip');
-
-  const resetForm = () => { setAddingCategory(null); setTitleDraft(''); setExpiryDraft(''); setFileDraft(null); };
-
-  const renderDocList = (docs, category) => (
-    <div className="space-y-2 mb-2">
-      {docs.length === 0 && <p className="text-xs" style={{ color: COLORS.inkDim }}>None on file.</p>}
-      {docs.map((d) => {
-        const renewal = category === 'annual' ? renewalStatus(d.expiryDate) : null;
-        return (
-          <div key={d.id} className="rounded-lg p-3 flex items-center justify-between gap-2" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
-            <a href={d.url} target="_blank" rel="noreferrer" className="text-sm underline flex-1 min-w-0 truncate" style={{ color: COLORS.accent }}>{d.title}</a>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              {renewal && (
-                <span className="text-xs font-semibold px-2 py-1 rounded" style={{ background: renewal.color, color: '#1B1F19' }}>{renewal.label}</span>
-              )}
-              {canEdit && (
-                <button onClick={() => onDelete(d.id)} className="text-xs underline" style={{ color: '#E07A5F' }}>Remove</button>
-              )}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-
-  return (
-    <div className="rounded-lg p-4 mb-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-      <p className="font-display text-sm font-bold uppercase tracking-wide mb-3" style={{ color: COLORS.accent }}>📄 Documents</p>
-
-      <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Annual Permits</p>
-      {renderDocList(annualDocs, 'annual')}
-      {canEdit && (
-        addingCategory === 'annual' ? (
-          <div className="rounded-lg p-3 mb-3" style={{ background: COLORS.surfaceRaised }}>
-            <TextInput value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} placeholder="Permit name" className="w-full mb-2" />
-            <label className="block mb-2">
-              <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Expiry date</span>
-              <input type="date" value={expiryDraft} onChange={(e) => setExpiryDraft(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
-            </label>
-            <input type="file" accept="image/*,application/pdf" onChange={(e) => setFileDraft(e.target.files[0])} className="w-full mb-2 text-xs" />
-            <div className="flex gap-2">
-              <Btn
-                onClick={async () => { await onAdd(driver, 'annual', titleDraft, fileDraft, expiryDraft); resetForm(); }}
-                disabled={!titleDraft.trim() || !fileDraft || !expiryDraft || uploading}
-              >
-                {uploading ? 'Uploading…' : 'Save'}
-              </Btn>
-              <Btn variant="ghost" onClick={resetForm}>Cancel</Btn>
-            </div>
-          </div>
-        ) : (
-          <button onClick={() => setAddingCategory('annual')} className="text-xs underline mb-4 block" style={{ color: COLORS.accent }}>+ Add annual permit</button>
-        )
-      )}
-
-      <p className="text-xs font-semibold uppercase tracking-wide mb-2 mt-2" style={{ color: COLORS.inkDim }}>Trip Permits</p>
-      {renderDocList(tripDocs, 'trip')}
-      {canEdit && (
-        addingCategory === 'trip' ? (
-          <div className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised }}>
-            <TextInput value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} placeholder="Permit name" className="w-full mb-2" />
-            <input type="file" accept="image/*,application/pdf" onChange={(e) => setFileDraft(e.target.files[0])} className="w-full mb-2 text-xs" />
-            <div className="flex gap-2">
-              <Btn
-                onClick={async () => { await onAdd(driver, 'trip', titleDraft, fileDraft, null); resetForm(); }}
-                disabled={!titleDraft.trim() || !fileDraft || uploading}
-              >
-                {uploading ? 'Uploading…' : 'Save'}
-              </Btn>
-              <Btn variant="ghost" onClick={resetForm}>Cancel</Btn>
-            </div>
-          </div>
-        ) : (
-          <button onClick={() => setAddingCategory('trip')} className="text-xs underline block" style={{ color: COLORS.accent }}>+ Add trip permit</button>
-        )
-      )}
-    </div>
-  );
-}
-
-function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEnd, onUpdateStatusChange, hasValidInspection, inspectionHoursRemaining, onOpenPreTrip, onOpenInspectionMode, isAdmin, documents, onAddDocument, onDeleteDocument, uploadingDocument, renewalStatus }) {
+function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEnd, onUpdateStatusChange, hasValidInspection, inspectionHoursRemaining, onOpenPreTrip, onOpenInspectionMode, isAdmin }) {
   const [startingLog, setStartingLog] = useState(false);
   const [odometerStartDraft, setOdometerStartDraft] = useState('');
   const [pendingStatus, setPendingStatus] = useState(null);
@@ -5557,17 +5612,6 @@ function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEn
         </div>
       </div>
       <p className="text-xs mb-4 no-print" style={{ color: COLORS.inkDim }}>Separate from your regular clock — this tracks hours of service.</p>
-      <div className="no-print">
-        <DriverDocumentsPanel
-          driver={driver}
-          documents={documents}
-          canEdit={true}
-          onAdd={onAddDocument}
-          onDelete={onDeleteDocument}
-          uploading={uploadingDocument}
-          renewalStatus={renewalStatus}
-        />
-      </div>
       {isAdmin && openLog && openLog.statusChanges && openLog.statusChanges.length > 0 && (
         <PrintPortal>
           <PrintableDriverLog log={openLog} driverName={driver} />
@@ -6814,77 +6858,243 @@ function EquipmentInspectionDetail({ record, isAdmin, onReview, onDelete, onBack
 // signs at filing time; anyone else's signature (investigator, an involved
 // party, a witness) gets added afterward from the report's detail view —
 // they may not be available to sign the same day it's filed.
-function NewIncidentReportForm({ type, defaultReporter, submitting, onCancel, onSubmit }) {
+// Reusable check-all-that-apply group — the reference form is built almost
+// entirely out of these (locations, injury type, unsafe acts/conditions,
+// root causes, prevention...), so one data-driven component renders all of
+// them rather than hand-writing dozens of near-identical checkbox blocks.
+// An "Other" option (however it's worded) reveals a specify box.
+function CheckboxGroup({ label, options, selected, onChange, otherText, onOtherTextChange, readOnly }) {
+  const hasOther = options.some((o) => /other/i.test(o)) && selected.some((o) => /other/i.test(o));
+  if (readOnly) {
+    if (!selected || selected.length === 0) return null;
+    return (
+      <div className="mb-2">
+        <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: COLORS.inkDim }}>{label}</p>
+        <p className="text-sm">{selected.join(', ')}{hasOther && otherText ? ` (${otherText})` : ''}</p>
+      </div>
+    );
+  }
+  const toggle = (opt) => {
+    onChange(selected.includes(opt) ? selected.filter((o) => o !== opt) : [...selected, opt]);
+  };
+  return (
+    <div className="mb-3">
+      <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>{label}</p>
+      <div className="flex flex-wrap gap-1">
+        {options.map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => toggle(opt)}
+            className="text-xs px-2 py-1 rounded-full"
+            style={selected.includes(opt) ? { background: COLORS.accent, color: COLORS.bg } : { background: COLORS.bg, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+      {hasOther && onOtherTextChange && (
+        <input
+          type="text"
+          placeholder="Specify"
+          value={otherText}
+          onChange={(e) => onOtherTextChange(e.target.value)}
+          className="w-full mt-2 px-3 py-2 rounded-lg text-sm"
+          style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+        />
+      )}
+    </div>
+  );
+}
+
+// New Incident Report form — digitized "Incident Investigation Report
+// Form," same nine numbered sections in the same order, so it reads the
+// same as the paper original it replaces. Two intentional simplifications
+// from the paper form: the front/back body diagram becomes a plain "body
+// part(s) injured" text field, and per-witness statement checkboxes become
+// one witness list plus one overall "statement(s) provided" toggle —
+// everything else is a direct match, right down to the checkbox wording.
+function NewIncidentReportForm({ defaultReporter, submitting, onCancel, onSubmit }) {
+  const inputStyle = { background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
+  const sectionHeading = (num, text) => (
+    <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>{num}. {text}</p>
+  );
+
+  // Section 1 — Employee Personal Information
+  const [lastName, setLastName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [initial, setInitial] = useState('');
+  const [equipmentOperator, setEquipmentOperator] = useState('');
+  const [equipmentNum, setEquipmentNum] = useState('');
+  const [companyName, setCompanyName] = useState('');
+  // Section 2 — Employment Information
+  const [department, setDepartment] = useState('');
+  const [occupation, setOccupation] = useState('');
+  const [supervisor, setSupervisor] = useState('');
+  // Section 3 — Details of Incident
+  const [exactLocation, setExactLocation] = useState('');
+  const [locationCategories, setLocationCategories] = useState([]);
   const [dateOfOccurrence, setDateOfOccurrence] = useState(() => new Date().toISOString().slice(0, 10));
   const [timeOfOccurrence, setTimeOfOccurrence] = useState('');
-  const [location, setLocation] = useState('');
-  const [reportedBy, setReportedBy] = useState(defaultReporter);
   const [dateReported] = useState(() => new Date().toISOString().slice(0, 10));
-  const [involvedPersons, setInvolvedPersons] = useState('');
+  const [timeReported, setTimeReported] = useState('');
+  const [incidentTypes, setIncidentTypes] = useState([]);
+  const [incidentTypeOther, setIncidentTypeOther] = useState('');
+  const [injuryIllness, setInjuryIllness] = useState([]);
+  const [bodyPartsInjured, setBodyPartsInjured] = useState('');
+  const [injuryDescription, setInjuryDescription] = useState('');
+  // Section 4 — Medical Treatment Information
+  const [firstAidAttendant, setFirstAidAttendant] = useState('');
+  const [incidentFormsFilledOut, setIncidentFormsFilledOut] = useState('');
+  const [levelOfFirstAid, setLevelOfFirstAid] = useState('');
+  const [typeOfFirstAid, setTypeOfFirstAid] = useState('');
+  const [clinicHospital, setClinicHospital] = useState('');
+  const [attendingPhysician, setAttendingPhysician] = useState('');
+  const [attendingPoliceOfficer, setAttendingPoliceOfficer] = useState('');
+  // Section 5 — Property Damage
+  const [propertyDamaged, setPropertyDamaged] = useState('');
+  const [estimatedCostOfDamage, setEstimatedCostOfDamage] = useState('');
+  const [damagedPropertyDescription, setDamagedPropertyDescription] = useState('');
+  // Section 6 — Witness Information
   const [witnesses, setWitnesses] = useState('');
-  const [description, setDescription] = useState('');
-  const [equipmentInvolved, setEquipmentInvolved] = useState('');
-  const [injuryOccurred, setInjuryOccurred] = useState(false);
-  const [natureOfInjury, setNatureOfInjury] = useState('');
-  const [bodyPart, setBodyPart] = useState('');
-  const [medicalAttention, setMedicalAttention] = useState('');
-  const [treatmentGiven, setTreatmentGiven] = useState('');
-  const [immediateCause, setImmediateCause] = useState('');
-  const [rootCause, setRootCause] = useState('');
-  const [correctiveActions, setCorrectiveActions] = useState('');
-  const [preventiveActions, setPreventiveActions] = useState('');
-  const [followUpBy, setFollowUpBy] = useState('');
+  const [witnessStatementProvided, setWitnessStatementProvided] = useState('');
+  // Section 7 — Incident Information
+  const [occurrenceTypes, setOccurrenceTypes] = useState([]);
+  const [occurrenceTypeOther, setOccurrenceTypeOther] = useState('');
+  const [contactWith, setContactWith] = useState([]);
+  const [contactWithOther, setContactWithOther] = useState('');
+  const [sequenceDescription, setSequenceDescription] = useState('');
+  const [diagramAttached, setDiagramAttached] = useState('');
+  // 7.a — Immediate Causes: Unsafe Acts
+  const [unsafeActs, setUnsafeActs] = useState([]);
+  const [unsafeActsOther, setUnsafeActsOther] = useState('');
+  const [safetyDeviceInoperable, setSafetyDeviceInoperable] = useState('');
+  const [substanceSuspicion, setSubstanceSuspicion] = useState('');
+  const [operationsManagerNotified, setOperationsManagerNotified] = useState('');
+  // 7.b — Unsafe Conditions
+  const [unsafeConditions, setUnsafeConditions] = useState([]);
+  const [unsafeConditionsOther, setUnsafeConditionsOther] = useState('');
+  // 7.c — Basic Causes
+  const [personalFactors, setPersonalFactors] = useState([]);
+  const [personalFactorsOther, setPersonalFactorsOther] = useState('');
+  const [jobFactors, setJobFactors] = useState([]);
+  const [jobFactorsOther, setJobFactorsOther] = useState('');
+  // Section 8 — Root Causes
+  const [rootCauses, setRootCauses] = useState([]);
+  // Section 9 — Prevention
+  const [prevention, setPrevention] = useState([]);
+  const [preventionOther, setPreventionOther] = useState('');
+  const [recurrenceActions, setRecurrenceActions] = useState('');
+  // Reporter signature
+  const [reportedBy, setReportedBy] = useState(defaultReporter);
   const [reporterSignatureData, setReporterSignatureData] = useState(null);
 
-  const inputStyle = { background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
-  const canSubmit = dateOfOccurrence && location.trim() && reportedBy.trim() && description.trim() && reporterSignatureData && !submitting;
+  const canSubmit = exactLocation.trim() && dateOfOccurrence && reportedBy.trim() && sequenceDescription.trim() && reporterSignatureData && !submitting;
 
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-      <p className="font-display text-lg font-bold mb-3">New {INCIDENT_REPORT_TYPES.find((t) => t.key === type).label} Report</p>
+      <p className="font-display text-lg font-bold mb-1">New Incident Report</p>
+      <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Harder Contracting Ltd.</p>
 
+      {sectionHeading(1, 'Employee Personal Information')}
+      <div className="grid grid-cols-2 gap-2 mb-2">
+        <input type="text" placeholder="Last Name" value={lastName} onChange={(e) => setLastName(e.target.value)} className="px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+        <input type="text" placeholder="First Name" value={firstName} onChange={(e) => setFirstName(e.target.value)} className="px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      </div>
+      <div className="grid grid-cols-3 gap-2 mb-2">
+        <input type="text" placeholder="Initial" value={initial} onChange={(e) => setInitial(e.target.value)} className="px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+        <input type="text" placeholder="Equipment Operator" value={equipmentOperator} onChange={(e) => setEquipmentOperator(e.target.value)} className="px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+        <input type="text" placeholder="Equipment #" value={equipmentNum} onChange={(e) => setEquipmentNum(e.target.value)} className="px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      </div>
+      <input type="text" placeholder="Company Name" value={companyName} onChange={(e) => setCompanyName(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+
+      {sectionHeading(2, 'Employment Information')}
+      <input type="text" placeholder="Department" value={department} onChange={(e) => setDepartment(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      <input type="text" placeholder="Occupation/Job at Time of Incident" value={occupation} onChange={(e) => setOccupation(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      <input type="text" placeholder="Supervisor" value={supervisor} onChange={(e) => setSupervisor(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+
+      {sectionHeading(3, 'Details of Incident')}
+      <input type="text" placeholder="Exact Location" value={exactLocation} onChange={(e) => setExactLocation(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      <CheckboxGroup label="Location" options={INCIDENT_LOCATION_OPTIONS} selected={locationCategories} onChange={setLocationCategories} />
       <div className="grid grid-cols-2 gap-2 mb-2">
         <div>
-          <label className="block text-xs mb-1" style={{ color: COLORS.inkDim }}>Date of Occurrence</label>
+          <label className="block text-xs mb-1" style={{ color: COLORS.inkDim }}>Occurrence Date</label>
           <input type="date" value={dateOfOccurrence} onChange={(e) => setDateOfOccurrence(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm" style={inputStyle} />
         </div>
         <div>
-          <label className="block text-xs mb-1" style={{ color: COLORS.inkDim }}>Time of Occurrence</label>
+          <label className="block text-xs mb-1" style={{ color: COLORS.inkDim }}>Occurrence Time</label>
           <input type="time" value={timeOfOccurrence} onChange={(e) => setTimeOfOccurrence(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm" style={inputStyle} />
         </div>
       </div>
-      <input type="text" placeholder="Location" value={location} onChange={(e) => setLocation(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-      <input type="text" placeholder="Reported By" value={reportedBy} onChange={(e) => setReportedBy(e.target.value)} className="w-full mb-4 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-
-      <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>People Involved</p>
-      <textarea placeholder="Involved person(s) — name and job title, one per line" value={involvedPersons} onChange={(e) => setInvolvedPersons(e.target.value)} rows={2} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-      <textarea placeholder="Witness(es)" value={witnesses} onChange={(e) => setWitnesses(e.target.value)} rows={2} className="w-full mb-4 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-
-      <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>What Happened</p>
-      <textarea placeholder="Description of what happened" value={description} onChange={(e) => setDescription(e.target.value)} rows={4} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-      <input type="text" placeholder="Equipment/property involved (optional)" value={equipmentInvolved} onChange={(e) => setEquipmentInvolved(e.target.value)} className="w-full mb-4 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-
-      <label className="flex items-center gap-2 mb-3 text-sm cursor-pointer">
-        <input type="checkbox" checked={injuryOccurred} onChange={(e) => setInjuryOccurred(e.target.checked)} />
-        <span>An injury occurred</span>
-      </label>
-      {injuryOccurred && (
-        <div className="mb-4 pl-3" style={{ borderLeft: `2px solid ${COLORS.accent}` }}>
-          <input type="text" placeholder="Nature of injury" value={natureOfInjury} onChange={(e) => setNatureOfInjury(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-          <input type="text" placeholder="Body part affected" value={bodyPart} onChange={(e) => setBodyPart(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-          <input type="text" placeholder="Medical attention required?" value={medicalAttention} onChange={(e) => setMedicalAttention(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-          <textarea placeholder="Treatment / first aid given" value={treatmentGiven} onChange={(e) => setTreatmentGiven(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-        </div>
+      <div className="mb-2">
+        <label className="block text-xs mb-1" style={{ color: COLORS.inkDim }}>Time Reported (date is today)</label>
+        <input type="time" value={timeReported} onChange={(e) => setTimeReported(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      </div>
+      <CheckboxGroup label="Type" options={INCIDENT_TYPE_OPTIONS} selected={incidentTypes} onChange={setIncidentTypes} otherText={incidentTypeOther} onOtherTextChange={setIncidentTypeOther} />
+      <CheckboxGroup label="Injury/Illness" options={INJURY_ILLNESS_OPTIONS} selected={injuryIllness} onChange={setInjuryIllness} />
+      {injuryIllness.length > 0 && (
+        <>
+          <input type="text" placeholder="Body part(s) injured (specify left or right)" value={bodyPartsInjured} onChange={(e) => setBodyPartsInjured(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+          <textarea placeholder="Detailed description of the injury" value={injuryDescription} onChange={(e) => setInjuryDescription(e.target.value)} rows={2} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+        </>
       )}
 
-      <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>Investigation</p>
-      <textarea placeholder="Immediate / direct cause" value={immediateCause} onChange={(e) => setImmediateCause(e.target.value)} rows={2} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-      <textarea placeholder="Root cause / contributing factors" value={rootCause} onChange={(e) => setRootCause(e.target.value)} rows={2} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-      <textarea placeholder="Corrective actions taken" value={correctiveActions} onChange={(e) => setCorrectiveActions(e.target.value)} rows={2} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-      <textarea placeholder="Preventive recommendations" value={preventiveActions} onChange={(e) => setPreventiveActions(e.target.value)} rows={2} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-      <input type="text" placeholder="Follow-up required by (date/name)" value={followUpBy} onChange={(e) => setFollowUpBy(e.target.value)} className="w-full mb-4 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      {injuryIllness.length > 0 && (
+        <>
+          {sectionHeading(4, 'Medical Treatment Information')}
+          <input type="text" placeholder="Name of First Aid Attendant" value={firstAidAttendant} onChange={(e) => setFirstAidAttendant(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+          <input type="text" placeholder="Incident Forms Filled Out? (Yes/No)" value={incidentFormsFilledOut} onChange={(e) => setIncidentFormsFilledOut(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+          <input type="text" placeholder="Level of First Aid" value={levelOfFirstAid} onChange={(e) => setLevelOfFirstAid(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+          <input type="text" placeholder="Type of First Aid Administered" value={typeOfFirstAid} onChange={(e) => setTypeOfFirstAid(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+          <input type="text" placeholder="Clinic/Hospital Sent To" value={clinicHospital} onChange={(e) => setClinicHospital(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+          <input type="text" placeholder="Attending Physician/Paramedic (if applicable)" value={attendingPhysician} onChange={(e) => setAttendingPhysician(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+          <input type="text" placeholder="Attending Police Officer (if applicable)" value={attendingPoliceOfficer} onChange={(e) => setAttendingPoliceOfficer(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+        </>
+      )}
 
-      <p className="font-display text-sm font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>Reporter Signature</p>
+      {incidentTypes.includes('Property Damage') && (
+        <>
+          {sectionHeading(5, 'Property Damage')}
+          <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Photographs must be taken for all property damage incidents — attach via Print/Send later, or note in comments where photos are filed.</p>
+          <input type="text" placeholder="Property Damaged" value={propertyDamaged} onChange={(e) => setPropertyDamaged(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+          <input type="text" placeholder="Estimated Cost of Damage" value={estimatedCostOfDamage} onChange={(e) => setEstimatedCostOfDamage(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+          <textarea placeholder="Description of damaged property — where the damage is, what the employee was doing, size/type/weight of equipment or materials, weather conditions" value={damagedPropertyDescription} onChange={(e) => setDamagedPropertyDescription(e.target.value)} rows={3} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+        </>
+      )}
+
+      {sectionHeading(6, 'Witness Information')}
+      <textarea placeholder="Witness name(s) and contact info, one per line" value={witnesses} onChange={(e) => setWitnesses(e.target.value)} rows={2} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      <input type="text" placeholder="Witness statement(s) provided? (Yes/No)" value={witnessStatementProvided} onChange={(e) => setWitnessStatementProvided(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+
+      {sectionHeading(7, 'Incident Information')}
+      <CheckboxGroup label="Type of Occurrence" options={OCCURRENCE_TYPE_OPTIONS} selected={occurrenceTypes} onChange={setOccurrenceTypes} otherText={occurrenceTypeOther} onOtherTextChange={setOccurrenceTypeOther} />
+      <CheckboxGroup label="Contact With" options={CONTACT_WITH_OPTIONS} selected={contactWith} onChange={setContactWith} otherText={contactWithOther} onOtherTextChange={setContactWithOther} />
+      <textarea placeholder="Describe in detail the sequence of events leading up to the incident — where it occurred, what the employee was doing, mental state, size/type/weight of equipment or materials, weather conditions" value={sequenceDescription} onChange={(e) => setSequenceDescription(e.target.value)} rows={4} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      <input type="text" placeholder="Diagram/Picture attached? (Yes/No)" value={diagramAttached} onChange={(e) => setDiagramAttached(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+
+      <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>7.a Unsafe Acts Which Contributed to the Incident</p>
+      <CheckboxGroup options={UNSAFE_ACTS_OPTIONS} selected={unsafeActs} onChange={setUnsafeActs} otherText={unsafeActsOther} onOtherTextChange={setUnsafeActsOther} label="" />
+      <input type="text" placeholder="Making Safety Device Inoperable (specify)" value={safetyDeviceInoperable} onChange={(e) => setSafetyDeviceInoperable(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      <input type="text" placeholder="Suspicion of alcohol/drugs? (Yes/No/N-A)" value={substanceSuspicion} onChange={(e) => setSubstanceSuspicion(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      <input type="text" placeholder="Operations Manager notified? (Yes/No/N-A)" value={operationsManagerNotified} onChange={(e) => setOperationsManagerNotified(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+
+      <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>7.b Unsafe Conditions Which Contributed to the Incident</p>
+      <CheckboxGroup options={UNSAFE_CONDITIONS_OPTIONS} selected={unsafeConditions} onChange={setUnsafeConditions} otherText={unsafeConditionsOther} onOtherTextChange={setUnsafeConditionsOther} label="" />
+
+      <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>7.c Basic Causes — Personal Factors</p>
+      <CheckboxGroup options={PERSONAL_FACTORS_OPTIONS} selected={personalFactors} onChange={setPersonalFactors} otherText={personalFactorsOther} onOtherTextChange={setPersonalFactorsOther} label="" />
+      <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>7.c Basic Causes — Job Factors</p>
+      <CheckboxGroup options={JOB_FACTORS_OPTIONS} selected={jobFactors} onChange={setJobFactors} otherText={jobFactorsOther} onOtherTextChange={setJobFactorsOther} label="" />
+
+      {sectionHeading(8, 'Root Causes')}
+      <CheckboxGroup options={ROOT_CAUSES_OPTIONS} selected={rootCauses} onChange={setRootCauses} label="" />
+
+      {sectionHeading(9, 'Prevention')}
+      <CheckboxGroup options={PREVENTION_OPTIONS} selected={prevention} onChange={setPrevention} otherText={preventionOther} onOtherTextChange={setPreventionOther} label="" />
+      <textarea placeholder="Describe action(s) taken to prevent recurrence (short and long term). Assign dates of completion if possible." value={recurrenceActions} onChange={(e) => setRecurrenceActions(e.target.value)} rows={3} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+
+      <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>Reporter Signature</p>
+      <input type="text" placeholder="Your name" value={reportedBy} onChange={(e) => setReportedBy(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
       <div className="mb-4">
         <SignaturePad onChange={setReporterSignatureData} savedSignature={localStorage.getItem('savedSignature_' + defaultReporter)} />
       </div>
@@ -6892,11 +7102,21 @@ function NewIncidentReportForm({ type, defaultReporter, submitting, onCancel, on
       <div className="flex gap-2">
         <Btn
           onClick={() => onSubmit({
-            type, dateOfOccurrence, timeOfOccurrence, location: location.trim(), reportedBy: reportedBy.trim(), dateReported,
-            involvedPersons: involvedPersons.trim(), witnesses: witnesses.trim(), description: description.trim(), equipmentInvolved: equipmentInvolved.trim(),
-            injuryOccurred, natureOfInjury: natureOfInjury.trim(), bodyPart: bodyPart.trim(), medicalAttention: medicalAttention.trim(), treatmentGiven: treatmentGiven.trim(),
-            immediateCause: immediateCause.trim(), rootCause: rootCause.trim(), correctiveActions: correctiveActions.trim(), preventiveActions: preventiveActions.trim(), followUpBy: followUpBy.trim(),
-            reporterSignature: { name: reportedBy.trim(), role: 'Reporter', dataUrl: reporterSignatureData, signedAt: Date.now() },
+            lastName: lastName.trim(), firstName: firstName.trim(), initial: initial.trim(), equipmentOperator: equipmentOperator.trim(), equipmentNum: equipmentNum.trim(), companyName: companyName.trim(),
+            department: department.trim(), occupation: occupation.trim(), supervisor: supervisor.trim(),
+            exactLocation: exactLocation.trim(), locationCategories, dateOfOccurrence, timeOfOccurrence, dateReported, timeReported,
+            incidentTypes, incidentTypeOther: incidentTypeOther.trim(),
+            injuryIllness, bodyPartsInjured: bodyPartsInjured.trim(), injuryDescription: injuryDescription.trim(),
+            firstAidAttendant: firstAidAttendant.trim(), incidentFormsFilledOut: incidentFormsFilledOut.trim(), levelOfFirstAid: levelOfFirstAid.trim(), typeOfFirstAid: typeOfFirstAid.trim(), clinicHospital: clinicHospital.trim(), attendingPhysician: attendingPhysician.trim(), attendingPoliceOfficer: attendingPoliceOfficer.trim(),
+            propertyDamaged: propertyDamaged.trim(), estimatedCostOfDamage: estimatedCostOfDamage.trim(), damagedPropertyDescription: damagedPropertyDescription.trim(),
+            witnesses: witnesses.trim(), witnessStatementProvided: witnessStatementProvided.trim(),
+            occurrenceTypes, occurrenceTypeOther: occurrenceTypeOther.trim(), contactWith, contactWithOther: contactWithOther.trim(), sequenceDescription: sequenceDescription.trim(), diagramAttached: diagramAttached.trim(),
+            unsafeActs, unsafeActsOther: unsafeActsOther.trim(), safetyDeviceInoperable: safetyDeviceInoperable.trim(), substanceSuspicion: substanceSuspicion.trim(), operationsManagerNotified: operationsManagerNotified.trim(),
+            unsafeConditions, unsafeConditionsOther: unsafeConditionsOther.trim(),
+            personalFactors, personalFactorsOther: personalFactorsOther.trim(), jobFactors, jobFactorsOther: jobFactorsOther.trim(),
+            rootCauses, prevention, preventionOther: preventionOther.trim(), recurrenceActions: recurrenceActions.trim(),
+            reportedBy: reportedBy.trim(),
+            reporterSignature: { name: reportedBy.trim(), role: 'Employee', dataUrl: reporterSignatureData, signedAt: Date.now() },
           })}
           disabled={!canSubmit}
         >
@@ -6908,61 +7128,115 @@ function NewIncidentReportForm({ type, defaultReporter, submitting, onCancel, on
   );
 }
 
-// Read-only detail view of one incident report. Admin/safety can add more
-// signatures here as involved parties/witnesses/investigators become
-// available to sign, and print/send the report as a PDF at any point —
-// e.g. to email or hand to someone outside the app for their own copy.
-function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onSetStatus, onAction, onDelete, onBack }) {
+// Read-only detail view of one incident report — same section order as the
+// form above. Admin/safety can add more signatures here (Supervisor,
+// Management, H&S Coordinator — matching the paper form's sign-off table)
+// as people become available, and print/send the report as a PDF at any
+// point.
+function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onSetStatus, onAction, onDelete, onCreateSignLink, onBack }) {
   const [addingSignature, setAddingSignature] = useState(false);
   const [signerName, setSignerName] = useState('');
   const [signerRole, setSignerRole] = useState('');
   const [pendingSignatureData, setPendingSignatureData] = useState(null);
   const [savingSignature, setSavingSignature] = useState(false);
+  const [sendingSignLink, setSendingSignLink] = useState(false);
+  const [linkSignerName, setLinkSignerName] = useState('');
+  const [linkSignerRole, setLinkSignerRole] = useState('');
+  const [creatingLink, setCreatingLink] = useState(false);
 
-  const field = (label, value) => (
-    <div className="mb-2">
-      <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: COLORS.inkDim }}>{label}</p>
-      <p className="text-sm whitespace-pre-wrap">{value || '—'}</p>
-    </div>
-  );
+  const field = (label, value) => {
+    if (!value) return null;
+    return (
+      <div className="mb-2">
+        <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: COLORS.inkDim }}>{label}</p>
+        <p className="text-sm whitespace-pre-wrap">{value}</p>
+      </div>
+    );
+  };
+  const checks = (label, arr, other) => {
+    if (!arr || arr.length === 0) return null;
+    return (
+      <div className="mb-2">
+        <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: COLORS.inkDim }}>{label}</p>
+        <p className="text-sm">{arr.join(', ')}{other ? ` (${other})` : ''}</p>
+      </div>
+    );
+  };
 
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <button onClick={onBack} className="text-xs uppercase tracking-wide mb-3" style={{ color: COLORS.inkDim }}>← Back to list</button>
 
       <div className="flex items-center justify-between mb-1">
-        <p className="font-display text-lg font-bold">{INCIDENT_REPORT_TYPES.find((t) => t.key === record.type).label}</p>
+        <p className="font-display text-lg font-bold">{record.exactLocation}</p>
         <span className="text-xs font-bold px-2 py-1 rounded" style={record.status === 'closed' ? { background: COLORS.accent + '33', color: COLORS.accent } : { background: '#E07A5F33', color: '#E07A5F' }}>
           {record.status === 'closed' ? 'Closed' : 'Open'}
         </span>
       </div>
-      <p className="text-sm mb-4" style={{ color: COLORS.inkDim }}>{record.dateOfOccurrence} {record.timeOfOccurrence} · {record.location}</p>
+      <p className="text-sm mb-4" style={{ color: COLORS.inkDim }}>{record.dateOfOccurrence} {record.timeOfOccurrence} · {(record.incidentTypes || []).join(', ')}</p>
 
       <div className="flex gap-3 mb-4">
         <button onClick={() => onAction(record, 'print')} disabled={actionBusy === record.id} className="text-xs font-semibold" style={{ color: COLORS.accent }}>🖨️ Print</button>
         <button onClick={() => onAction(record, 'send')} disabled={actionBusy === record.id} className="text-xs font-semibold" style={{ color: COLORS.accent }}>📤 Send</button>
       </div>
 
-      {field('Reported By', `${record.reportedBy} (${record.dateReported})`)}
-      {field('Involved Person(s)', record.involvedPersons)}
-      {field('Witness(es)', record.witnesses)}
-      {field('Description', record.description)}
-      {field('Equipment/Property Involved', record.equipmentInvolved)}
+      <p className="font-display text-sm font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>1–2. Employee & Employment Info</p>
+      {field('Name', [record.firstName, record.initial, record.lastName].filter(Boolean).join(' '))}
+      {field('Equipment Operator / Equipment #', [record.equipmentOperator, record.equipmentNum].filter(Boolean).join(' / '))}
+      {field('Company', record.companyName)}
+      {field('Department', record.department)}
+      {field('Occupation', record.occupation)}
+      {field('Supervisor', record.supervisor)}
 
-      {record.injuryOccurred && (
+      <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>3. Details of Incident</p>
+      {checks('Location', record.locationCategories)}
+      {field('Date Reported', record.dateReported)}
+      {checks('Type', record.incidentTypes, record.incidentTypeOther)}
+      {checks('Injury/Illness', record.injuryIllness)}
+      {field('Body Part(s) Injured', record.bodyPartsInjured)}
+      {field('Injury Description', record.injuryDescription)}
+
+      {record.injuryIllness && record.injuryIllness.length > 0 && (
         <>
-          {field('Nature of Injury', record.natureOfInjury)}
-          {field('Body Part Affected', record.bodyPart)}
-          {field('Medical Attention Required', record.medicalAttention)}
-          {field('Treatment / First Aid Given', record.treatmentGiven)}
+          <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>4. Medical Treatment</p>
+          {field('First Aid Attendant', record.firstAidAttendant)}
+          {field('Incident Forms Filled Out', record.incidentFormsFilledOut)}
+          {field('Level of First Aid', record.levelOfFirstAid)}
+          {field('Type of First Aid Administered', record.typeOfFirstAid)}
+          {field('Clinic/Hospital', record.clinicHospital)}
+          {field('Attending Physician/Paramedic', record.attendingPhysician)}
+          {field('Attending Police Officer', record.attendingPoliceOfficer)}
         </>
       )}
 
-      {field('Immediate / Direct Cause', record.immediateCause)}
-      {field('Root Cause / Contributing Factors', record.rootCause)}
-      {field('Corrective Actions Taken', record.correctiveActions)}
-      {field('Preventive Recommendations', record.preventiveActions)}
-      {field('Follow-up Required By', record.followUpBy)}
+      {record.incidentTypes && record.incidentTypes.includes('Property Damage') && (
+        <>
+          <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>5. Property Damage</p>
+          {field('Property Damaged', record.propertyDamaged)}
+          {field('Estimated Cost of Damage', record.estimatedCostOfDamage)}
+          {field('Description', record.damagedPropertyDescription)}
+        </>
+      )}
+
+      <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>6. Witness Information</p>
+      {field('Witnesses', record.witnesses)}
+      {field('Statement(s) Provided', record.witnessStatementProvided)}
+
+      <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>7. Incident Information</p>
+      {checks('Type of Occurrence', record.occurrenceTypes, record.occurrenceTypeOther)}
+      {checks('Contact With', record.contactWith, record.contactWithOther)}
+      {field('Sequence of Events', record.sequenceDescription)}
+      {field('Diagram/Picture Attached', record.diagramAttached)}
+      {checks('7.a Unsafe Acts', record.unsafeActs, record.unsafeActsOther)}
+      {field('Safety Device Made Inoperable', record.safetyDeviceInoperable)}
+      {field('Substance Suspicion', record.substanceSuspicion)}
+      {field('Operations Manager Notified', record.operationsManagerNotified)}
+      {checks('7.b Unsafe Conditions', record.unsafeConditions, record.unsafeConditionsOther)}
+      {checks('7.c Personal Factors', record.personalFactors, record.personalFactorsOther)}
+      {checks('7.c Job Factors', record.jobFactors, record.jobFactorsOther)}
+      {checks('8. Root Causes', record.rootCauses)}
+      {checks('9. Prevention', record.prevention, record.preventionOther)}
+      {field('Actions Taken to Prevent Recurrence', record.recurrenceActions)}
 
       <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
         <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Signatures</p>
@@ -6978,7 +7252,7 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
           addingSignature ? (
             <div className="mt-2">
               <input type="text" placeholder="Name" value={signerName} onChange={(e) => setSignerName(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
-              <input type="text" placeholder="Role (e.g. Investigator, Involved Party, Witness)" value={signerRole} onChange={(e) => setSignerRole(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+              <input type="text" placeholder="Role (e.g. Supervisor, Management, H&S Coordinator)" value={signerRole} onChange={(e) => setSignerRole(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
               <SignaturePad onChange={setPendingSignatureData} />
               <div className="flex gap-2 mt-2">
                 <Btn
@@ -7006,14 +7280,49 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
                 </Btn>
               </div>
             </div>
+          ) : sendingSignLink ? (
+            <div className="mt-2">
+              <input type="text" placeholder="Name" value={linkSignerName} onChange={(e) => setLinkSignerName(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+              <input type="text" placeholder="Role (e.g. Investigator, Involved Party, Witness)" value={linkSignerRole} onChange={(e) => setLinkSignerRole(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+              <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Creates a link good for 7 days that opens straight to this report with a signature pad — no login needed on their end.</p>
+              <div className="flex gap-2">
+                <Btn
+                  disabled={creatingLink}
+                  onClick={async () => {
+                    if (!linkSignerName.trim()) { alert('Enter a name first.'); return; }
+                    setCreatingLink(true);
+                    const url = await onCreateSignLink(record.id, linkSignerName.trim(), linkSignerRole.trim());
+                    const result = await shareLink(url, 'Sign Incident Report', `Please sign this incident report as ${linkSignerName.trim()}.`);
+                    setCreatingLink(false);
+                    if (result === 'copied') alert('Link copied — paste it into a text or email.');
+                    if (result === 'unavailable') alert('Link: ' + url);
+                    setSendingSignLink(false);
+                    setLinkSignerName('');
+                    setLinkSignerRole('');
+                  }}
+                >
+                  {creatingLink ? 'Creating…' : 'Create & Send Link'}
+                </Btn>
+                <Btn variant="ghost" disabled={creatingLink} onClick={() => { setSendingSignLink(false); setLinkSignerName(''); setLinkSignerRole(''); }}>Cancel</Btn>
+              </div>
+            </div>
           ) : (
-            <button
-              onClick={() => setAddingSignature(true)}
-              className="text-xs font-semibold px-3 py-2 rounded-lg"
-              style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-            >
-              ✍️ Add a Signature
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setAddingSignature(true)}
+                className="text-xs font-semibold px-3 py-2 rounded-lg"
+                style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+              >
+                ✍️ Add a Signature
+              </button>
+              <button
+                onClick={() => setSendingSignLink(true)}
+                className="text-xs font-semibold px-3 py-2 rounded-lg"
+                style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+              >
+                🔗 Send Signing Link
+              </button>
+            </div>
           )
         )}
       </div>
@@ -7042,7 +7351,6 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
 
 // Full admin editing for one driver's logged day — always available, even
 // after the week is approved, since this data may need real correction
-// (a missed break added back in, a wrong time fixed) more often than
 // (a missed break added back in, a wrong time fixed) more often than
 // regular timesheets do.
 // Top-to-bottom row order, matching the traditional paper log book layout.
@@ -8007,6 +8315,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [showEmailPrompt, setShowEmailPrompt] = useState(false);
   const [showPushPrompt, setShowPushPrompt] = useState(false);
   const [loginTokenState, setLoginTokenState] = useState(null); // { token, mechanic } | 'invalid' | null while checking
+  // Read once at mount — a signing link is a dead-end, single-purpose page,
+  // so there's no need to re-check this on every render the way the other
+  // token flows below do (those need to distinguish "still checking" from
+  // "checked and invalid"; this one hands the whole thing off to
+  // PublicSignScreen, which does its own validation against the Cloud
+  // Function).
+  const [signTokenValue] = useState(() => new URLSearchParams(window.location.search).get('signToken'));
   const [inviteTokenState, setInviteTokenState] = useState(null); // { token, name } | 'invalid' | 'used' | null while checking
   const [inviteConsumed, setInviteConsumed] = useState(false);
   const [customPdtJokes, setCustomPdtJokes] = useState([]);
@@ -8059,8 +8374,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [addingLocalMap, setAddingLocalMap] = useState(false);
   const [safetyDocs, setSafetyDocs] = useState(() => cacheGet('safetyDocs', [])); // [{id, title, category, url, fileName, addedBy, addedAt}]
   const [uploadingSafetyDoc, setUploadingSafetyDoc] = useState(false);
-  const [driverDocuments, setDriverDocuments] = useState(() => cacheGet('driverDocuments', []));
-  const [uploadingDriverDoc, setUploadingDriverDoc] = useState(false);
   const [expandedSafetyCategory, setExpandedSafetyCategory] = useState(null);
   const [inspectionsExpanded, setInspectionsExpanded] = useState(false);
   const [incidentReportingExpanded, setIncidentReportingExpanded] = useState(false);
@@ -8071,7 +8384,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const warmedSafetyDocIds = useRef(new Set());
   const [safetyInspections, setSafetyInspections] = useState(() => cacheGet('safetyInspections', []));
   const [incidentReports, setIncidentReports] = useState(() => cacheGet('incidentReports', []));
-  const [incidentReportType, setIncidentReportType] = useState(null); // one of INCIDENT_REPORT_TYPES.key, or null (showing the type menu)
   const [newIncidentReportOpen, setNewIncidentReportOpen] = useState(false);
   const [viewingIncidentReportId, setViewingIncidentReportId] = useState(null);
   const [submittingIncidentReport, setSubmittingIncidentReport] = useState(false);
@@ -8377,16 +8689,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = Object.values(snap.val() || {});
       setSafetyDocs(val);
       cacheSet('safetyDocs', val);
-    });
-    return () => ref.off('value', on);
-  }, []);
-
-  useEffect(() => {
-    const ref = firebase.database().ref('driverDocumentRecords');
-    const on = ref.on('value', (snap) => {
-      const val = Object.values(snap.val() || {});
-      setDriverDocuments(val);
-      cacheSet('driverDocuments', val);
     });
     return () => ref.off('value', on);
   }, []);
@@ -9899,45 +10201,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     cacheSet('safetyDocs', next);
     await queueWrite('safetyDocs', { kind: 'delete', entryId: docId });
   };
-  // Annual permits carry an expiry date so a renewal warning can show
-  // before one lapses; trip permits don't need one (pass null) since
-  // they're inherently short-lived and just get replaced per trip.
-  const addDriverDocument = async (driver, category, title, file, expiryDate) => {
-    if (!file || !title.trim()) return;
-    setUploadingDriverDoc(true);
-    try {
-      const storageRef = firebase.storage().ref(`mapImages/driver-doc-${slugForMechanic(driver)}-${Date.now()}-${file.name}`);
-      await storageRef.put(file);
-      const url = await storageRef.getDownloadURL();
-      const doc = {
-        id: uid(),
-        driver,
-        category, // 'annual' | 'trip'
-        title: title.trim(),
-        fileName: file.name,
-        url,
-        expiryDate: expiryDate || null,
-        addedBy: currentMechanic,
-        addedAt: Date.now(),
-      };
-      await saveDriverDocumentRecord(doc);
-    } catch (e) {
-      alert("Couldn't upload that document — " + (e.message || 'check your signal and try again.'));
-    }
-    setUploadingDriverDoc(false);
-  };
-  const deleteDriverDocument = async (docId) => {
-    await deleteDriverDocumentRecord(docId);
-  };
-  // Under 30 days left counts as "due soon" — matches the same threshold
-  // already used for the fuel tank ledger, for consistency across the app.
-  const permitRenewalStatus = (expiryDate) => {
-    if (!expiryDate) return null;
-    const daysLeft = Math.ceil((new Date(expiryDate + 'T00:00:00') - new Date(todayStr() + 'T00:00:00')) / (1000 * 60 * 60 * 24));
-    if (daysLeft < 0) return { label: 'Expired', color: '#E07A5F' };
-    if (daysLeft <= 30) return { label: `Renews in ${daysLeft}d`, color: COLORS.progress };
-    return null;
-  };
   const submitSafetyInspection = async (record) => {
     const full = {
       id: uid(),
@@ -10016,7 +10279,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setIncidentReportActionBusy(record.id);
     try {
       const bytes = await buildIncidentReportPdf(record);
-      const fileName = `Incident Report - ${record.dateOfOccurrence || ''} - ${record.location || ''}.pdf`;
+      const fileName = `Incident Report - ${record.dateOfOccurrence || ''} - ${record.exactLocation || ''}.pdf`;
       if (action === 'print') {
         printBytes(bytes, 'application/pdf');
       } else {
@@ -10026,6 +10289,24 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       alert("Couldn't complete that — " + (e.message || 'try again.'));
     }
     setIncidentReportActionBusy(null);
+  };
+  // Generates a one-time, 7-day signing link for someone who isn't in the
+  // app — a contractor, a witness, anyone without a login. The link itself
+  // is the proof of who's allowed to sign; opening it hands the visitor
+  // straight to PublicSignScreen with no login required. Actually recording
+  // the signature happens through the Cloud Function (see submitSignature
+  // there), not a direct database write, since this visitor is never
+  // authenticated.
+  const createIncidentSignRequest = async (reportId, signerName, signerRole) => {
+    const token = (crypto.randomUUID ? crypto.randomUUID() : uid() + uid()).replace(/-/g, '');
+    await firebase.database().ref('incidentSignRequests/' + token).set({
+      reportId, signerName, signerRole,
+      createdBy: currentMechanic,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      used: false,
+    });
+    return `${window.location.origin}${window.location.pathname}?signToken=${token}`;
   };
   // Adds a unit to the Fuel Tank Ledger's own extra list — the ledger
   // groups everything by prefix on display, so it'll land in its matching
@@ -11720,6 +12001,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     );
   }
 
+  // ---------- INCIDENT REPORT SIGNING LINK ----------
+  // Takes priority over everything else, including the login-recovery
+  // check below — whoever's here clicked a link to sign one specific
+  // report and was never meant to see any other part of the app, logged
+  // in or not.
+  if (signTokenValue) {
+    return <PublicSignScreen token={signTokenValue} />;
+  }
+
   // ---------- LOGIN-RECOVERY LINK ----------
   // Takes priority over the normal login screen whenever a valid or
   // invalid token is present in the URL — someone arrived here from the
@@ -12487,8 +12777,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           driver={currentMechanic}
           allLogs={driverLogs}
           onExit={() => setShowInspectionMode(false)}
-          documents={driverDocuments}
-          renewalStatus={permitRenewalStatus}
         />
       );
     }
@@ -12720,11 +13008,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               onOpenPreTrip={() => setShowPreTripForm(true)}
               onOpenInspectionMode={() => setShowInspectionMode(true)}
               isAdmin={isAdmin}
-              documents={driverDocuments}
-              onAddDocument={addDriverDocument}
-              onDeleteDocument={deleteDriverDocument}
-              uploadingDocument={uploadingDriverDoc}
-              renewalStatus={permitRenewalStatus}
             />
           )}
 
@@ -14204,27 +14487,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             expanded={expandedAdmin === 'driverLog'}
             onToggle={() => setExpandedAdmin(expandedAdmin === 'driverLog' ? null : 'driverLog')}
           >
-          {(() => {
-            const expiringDocs = driverDocuments
-              .filter((d) => d.category === 'annual' && d.expiryDate)
-              .map((d) => ({ ...d, renewal: permitRenewalStatus(d.expiryDate) }))
-              .filter((d) => d.renewal)
-              .sort((a, b) => a.expiryDate.localeCompare(b.expiryDate));
-            if (expiringDocs.length === 0) return null;
-            return (
-              <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
-                <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Permits due for renewal</p>
-                <div className="space-y-1">
-                  {expiringDocs.map((d) => (
-                    <div key={d.id} className="flex items-center justify-between text-sm">
-                      <span>{d.driver} — {d.title}</span>
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: d.renewal.color, color: '#1B1F19' }}>{d.renewal.label}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
           {driverNames.length === 0 ? (
             <p className="text-sm" style={{ color: COLORS.inkDim }}>No driver logs yet.</p>
           ) : (
@@ -16106,98 +16368,65 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           {(isAdmin || isSafety) && (
             <AdminSection
               icon="🚨"
-              title={`Incident Reporting${incidentReportType ? ' — ' + INCIDENT_REPORT_TYPES.find((t) => t.key === incidentReportType).label : ''}`}
+              title="Incident Reporting"
               expanded={incidentReportingExpanded}
               onToggle={() => setIncidentReportingExpanded((x) => !x)}
             >
-              {!incidentReportType ? (
-                <div className="space-y-2">
-                  {INCIDENT_REPORT_TYPES.map((type) => {
-                    const count = incidentReports.filter((r) => r.type === type.key).length;
-                    const openCount = incidentReports.filter((r) => r.type === type.key && r.status !== 'closed').length;
-                    return (
-                      <button
-                        key={type.key}
-                        onClick={() => setIncidentReportType(type.key)}
-                        className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
-                        style={{ background: COLORS.surfaceRaised }}
-                      >
-                        <span className="text-sm font-semibold">{type.label}</span>
-                        <span className="text-xs font-bold" style={{ color: openCount > 0 ? '#E07A5F' : COLORS.inkDim }}>
-                          {openCount > 0 ? `${openCount} open` : `${count} on file`}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+              {viewingIncidentReportId ? (
+                <IncidentReportDetail
+                  record={incidentReports.find((r) => r.id === viewingIncidentReportId)}
+                  isAdmin={isAdmin || isSafety}
+                  actionBusy={incidentReportActionBusy}
+                  onBack={() => setViewingIncidentReportId(null)}
+                  onAddSignature={addIncidentReportSignature}
+                  onSetStatus={setIncidentReportStatus}
+                  onAction={handleIncidentReportAction}
+                  onCreateSignLink={createIncidentSignRequest}
+                  onDelete={async () => { await deleteIncidentReport(viewingIncidentReportId); setViewingIncidentReportId(null); }}
+                />
+              ) : newIncidentReportOpen ? (
+                <NewIncidentReportForm
+                  defaultReporter={currentMechanic}
+                  submitting={submittingIncidentReport}
+                  onCancel={() => setNewIncidentReportOpen(false)}
+                  onSubmit={async (record) => {
+                    setSubmittingIncidentReport(true);
+                    const saved = await submitIncidentReport(record);
+                    setSubmittingIncidentReport(false);
+                    setNewIncidentReportOpen(false);
+                    setViewingIncidentReportId(saved.id);
+                  }}
+                />
               ) : (
                 <div>
                   <button
-                    onClick={() => { setIncidentReportType(null); setNewIncidentReportOpen(false); setViewingIncidentReportId(null); }}
-                    className="text-xs uppercase tracking-wide mb-3"
-                    style={{ color: COLORS.inkDim }}
+                    onClick={() => setNewIncidentReportOpen(true)}
+                    className="text-xs font-semibold px-3 py-2 rounded-lg mb-4"
+                    style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
                   >
-                    ← Back to Incident Reporting
+                    + New Report
                   </button>
 
-                  {viewingIncidentReportId ? (
-                    <IncidentReportDetail
-                      record={incidentReports.find((r) => r.id === viewingIncidentReportId)}
-                      isAdmin={isAdmin || isSafety}
-                      actionBusy={incidentReportActionBusy}
-                      onBack={() => setViewingIncidentReportId(null)}
-                      onAddSignature={addIncidentReportSignature}
-                      onSetStatus={setIncidentReportStatus}
-                      onAction={handleIncidentReportAction}
-                      onDelete={async () => { await deleteIncidentReport(viewingIncidentReportId); setViewingIncidentReportId(null); }}
-                    />
-                  ) : newIncidentReportOpen ? (
-                    <NewIncidentReportForm
-                      type={incidentReportType}
-                      defaultReporter={currentMechanic}
-                      submitting={submittingIncidentReport}
-                      onCancel={() => setNewIncidentReportOpen(false)}
-                      onSubmit={async (record) => {
-                        setSubmittingIncidentReport(true);
-                        const saved = await submitIncidentReport(record);
-                        setSubmittingIncidentReport(false);
-                        setNewIncidentReportOpen(false);
-                        setViewingIncidentReportId(saved.id);
-                      }}
-                    />
-                  ) : (
-                    <div>
-                      <button
-                        onClick={() => setNewIncidentReportOpen(true)}
-                        className="text-xs font-semibold px-3 py-2 rounded-lg mb-4"
-                        style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-                      >
-                        + New Report
-                      </button>
+                  <div className="space-y-2">
+                    {incidentReports
+                      .sort((a, b) => (b.dateOfOccurrence || '').localeCompare(a.dateOfOccurrence || ''))
+                      .map((r) => (
+                        <button
+                          key={r.id}
+                          onClick={() => setViewingIncidentReportId(r.id)}
+                          className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                          style={{ background: COLORS.surfaceRaised }}
+                        >
+                          <span className="text-sm">{r.dateOfOccurrence} · {r.exactLocation} · {(r.incidentTypes || []).join(', ')}</span>
+                          <span className="text-xs font-bold flex-shrink-0 ml-2" style={{ color: r.status === 'closed' ? COLORS.accent : '#E07A5F' }}>
+                            {r.status === 'closed' ? 'Closed' : 'Open'}
+                          </span>
+                        </button>
+                      ))}
+                  </div>
 
-                      <div className="space-y-2">
-                        {incidentReports
-                          .filter((r) => r.type === incidentReportType)
-                          .sort((a, b) => (b.dateOfOccurrence || '').localeCompare(a.dateOfOccurrence || ''))
-                          .map((r) => (
-                            <button
-                              key={r.id}
-                              onClick={() => setViewingIncidentReportId(r.id)}
-                              className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
-                              style={{ background: COLORS.surfaceRaised }}
-                            >
-                              <span className="text-sm">{r.dateOfOccurrence} · {r.location}</span>
-                              <span className="text-xs font-bold" style={{ color: r.status === 'closed' ? COLORS.accent : '#E07A5F' }}>
-                                {r.status === 'closed' ? 'Closed' : 'Open'}
-                              </span>
-                            </button>
-                          ))}
-                      </div>
-
-                      {incidentReports.filter((r) => r.type === incidentReportType).length === 0 && (
-                        <p className="text-sm" style={{ color: COLORS.inkDim }}>No reports on file yet.</p>
-                      )}
-                    </div>
+                  {incidentReports.length === 0 && (
+                    <p className="text-sm" style={{ color: COLORS.inkDim }}>No reports on file yet.</p>
                   )}
                 </div>
               )}
