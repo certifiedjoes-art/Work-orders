@@ -786,7 +786,17 @@ const SAFETY_INSPECTION_TYPES = [
 // there's no more "Accident" bucket, since the reference form doesn't have
 // one either.
 const INCIDENT_TYPE_OPTIONS = ['Incident', 'Near Miss', 'Property Damage', 'Vehicle Collision', 'Fire', 'Other'];
-const INCIDENT_LOCATION_OPTIONS = ['Sawmill', 'Planer', 'Contractor', 'Yard', 'Woodlands', 'Roads', 'Office', 'Maint.', 'Shop', 'Chip Truck', 'Log Truck', 'Pellet Plant'];
+// Swapped out for Harder Contracting's own operation — the reference form
+// was written for a sawmill (planer, chip truck, pellet plant...), none of
+// which apply here. This is sites plus the same machine/vehicle type
+// wording already used elsewhere in the app (Buncher, Skidder, Fuel
+// Truck, etc.), so it stays consistent with how units are labelled
+// everywhere else instead of introducing new terminology.
+const INCIDENT_LOCATION_OPTIONS = [
+  'Woodlands', 'Road/Cutline', 'Highway', 'Camp Yard', 'Shop Yard', 'Sawmill Yard', 'Office',
+  'Buncher', 'Processor', 'Skidder', 'Log Loader', 'Crawler', 'Grader', 'Winch Truck', 'Fuel Truck',
+  'Service Truck', 'Pickup', 'Trailer', 'Light Tower', 'Other',
+];
 const INJURY_ILLNESS_OPTIONS = ['Fatality', 'Lost Time Incident', 'Medical Aid', 'First Aid', 'Modified Work'];
 const OCCURRENCE_TYPE_OPTIONS = ['Struck By', 'Struck Against', 'Caught In/on/between', 'Exposure', 'Fall to lower level', 'Over Exertion', 'Other'];
 const CONTACT_WITH_OPTIONS = ['Heat/Cold', 'Electricity', 'Pressure', 'Chemical', 'Fire', 'Noise', 'Radiation', 'Other'];
@@ -796,6 +806,15 @@ const PERSONAL_FACTORS_OPTIONS = ['Inadequate Physical Capability', 'Inadequate 
 const JOB_FACTORS_OPTIONS = ['Inadequate Leadership or Supervision', 'Inadequate Engineering Controls', 'Inadequate Purchasing', 'Inadequate Maintenance', 'Inadequate Tools or Equipment', 'Inadequate Work Standards', 'Wear and Tear', 'Other'];
 const ROOT_CAUSES_OPTIONS = ['Management Commitment', 'Leadership Training', 'Planned Inspections', 'Preventive Maintenance', 'Hazard Identification', 'Safe Work Practices and Procedures', 'Inadequate Previous Investigation', 'Emergency Preparedness and Response', 'Company Safety Rules', 'Worker Knowledge & Skill Training', 'Personal Protective Equipment (PPE)', 'Personal or Group Communications', 'Hygiene and Sanitation', 'Hiring & Placement Standards'];
 const PREVENTION_OPTIONS = ['Training/Retraining', 'Job procedure/design changes', 'Equipment repair or replacement', 'Hazard Identification and Analysis', 'Improved Hazard Controls', 'Supervisory Communication', 'Improve Safety Inspection Process', 'Reassignment of Involved Worker', 'Facilities Layout Review and Redesign', 'Installation of Safety Guards/Barriers', 'Safe work procedure reviewed and revised', 'Other'];
+// Matches the sign-off table at the bottom of the reference form exactly.
+// The reporter's own signature is auto-tagged 'Employee' at submission, so
+// that one's usually already checked off by the time anyone looks.
+const INCIDENT_EXPECTED_SIGNERS = ['Employee', 'Supervisor', 'Management', 'H&S Coordinator'];
+function incidentSignersStatus(record) {
+  const signedRoles = (record.signatures || []).map((s) => (s.role || '').trim().toLowerCase());
+  const missing = INCIDENT_EXPECTED_SIGNERS.filter((role) => !signedRoles.includes(role.toLowerCase()));
+  return { total: INCIDENT_EXPECTED_SIGNERS.length, signedCount: INCIDENT_EXPECTED_SIGNERS.length - missing.length, missing, complete: missing.length === 0 };
+}
 // Matches Harder Contracting's paper "Work Site Inspection Form" exactly —
 // same section order, same item wording, so a filled-out digital copy reads
 // the same as the paper one it replaces. Every item gets an OK / Req. Att.
@@ -7133,6 +7152,41 @@ function NewIncidentReportForm({ defaultReporter, submitting, onCancel, onSubmit
 // Management, H&S Coordinator — matching the paper form's sign-off table)
 // as people become available, and print/send the report as a PDF at any
 // point.
+// A role picker that defaults to the four expected sign-off roles (so the
+// completion checklist below can actually match against them reliably)
+// but still allows a free-text role for anyone outside that list, like a
+// witness or an involved third party.
+function RoleSelect({ value, onChange }) {
+  const [custom, setCustom] = useState(value && !INCIDENT_EXPECTED_SIGNERS.includes(value));
+  if (custom) {
+    return (
+      <div className="flex gap-2 mb-2">
+        <input
+          type="text"
+          placeholder="Role"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="flex-1 px-3 py-2 rounded-lg text-sm"
+          style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+        />
+        <button type="button" onClick={() => { setCustom(false); onChange(''); }} className="text-xs" style={{ color: COLORS.inkDim }}>Pick from list</button>
+      </div>
+    );
+  }
+  return (
+    <select
+      value={value}
+      onChange={(e) => { if (e.target.value === '__other__') { setCustom(true); onChange(''); } else onChange(e.target.value); }}
+      className="w-full mb-2 px-3 py-2 rounded-lg text-sm"
+      style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+    >
+      <option value="">Role…</option>
+      {INCIDENT_EXPECTED_SIGNERS.map((r) => <option key={r} value={r}>{r}</option>)}
+      <option value="__other__">Other (witness, involved party, etc.)</option>
+    </select>
+  );
+}
+
 function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onSetStatus, onAction, onDelete, onCreateSignLink, onBack }) {
   const [addingSignature, setAddingSignature] = useState(false);
   const [signerName, setSignerName] = useState('');
@@ -7162,6 +7216,7 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
       </div>
     );
   };
+  const signersStatus = incidentSignersStatus(record);
 
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
@@ -7173,7 +7228,16 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
           {record.status === 'closed' ? 'Closed' : 'Open'}
         </span>
       </div>
-      <p className="text-sm mb-4" style={{ color: COLORS.inkDim }}>{record.dateOfOccurrence} {record.timeOfOccurrence} · {(record.incidentTypes || []).join(', ')}</p>
+      <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>{record.dateOfOccurrence} {record.timeOfOccurrence} · {(record.incidentTypes || []).join(', ')}</p>
+
+      <div className="rounded-lg p-3 mb-4" style={signersStatus.complete ? { background: COLORS.accent + '22', border: `1px solid ${COLORS.accent}` } : { background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+        <p className="text-xs font-bold mb-1" style={{ color: signersStatus.complete ? COLORS.accent : COLORS.inkDim }}>
+          {signersStatus.complete ? '✅ Fully signed — ready to send' : `Signatures: ${signersStatus.signedCount} of ${signersStatus.total}`}
+        </p>
+        {!signersStatus.complete && (
+          <p className="text-xs" style={{ color: COLORS.inkDim }}>Still needed: {signersStatus.missing.join(', ')}</p>
+        )}
+      </div>
 
       <div className="flex gap-3 mb-4">
         <button onClick={() => onAction(record, 'print')} disabled={actionBusy === record.id} className="text-xs font-semibold" style={{ color: COLORS.accent }}>🖨️ Print</button>
@@ -7252,7 +7316,7 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
           addingSignature ? (
             <div className="mt-2">
               <input type="text" placeholder="Name" value={signerName} onChange={(e) => setSignerName(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
-              <input type="text" placeholder="Role (e.g. Supervisor, Management, H&S Coordinator)" value={signerRole} onChange={(e) => setSignerRole(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+              <RoleSelect value={signerRole} onChange={setSignerRole} />
               <SignaturePad onChange={setPendingSignatureData} />
               <div className="flex gap-2 mt-2">
                 <Btn
@@ -7283,7 +7347,7 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
           ) : sendingSignLink ? (
             <div className="mt-2">
               <input type="text" placeholder="Name" value={linkSignerName} onChange={(e) => setLinkSignerName(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
-              <input type="text" placeholder="Role (e.g. Investigator, Involved Party, Witness)" value={linkSignerRole} onChange={(e) => setLinkSignerRole(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+              <RoleSelect value={linkSignerRole} onChange={setLinkSignerRole} />
               <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Creates a link good for 7 days that opens straight to this report with a signature pad — no login needed on their end.</p>
               <div className="flex gap-2">
                 <Btn
@@ -16410,19 +16474,27 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   <div className="space-y-2">
                     {incidentReports
                       .sort((a, b) => (b.dateOfOccurrence || '').localeCompare(a.dateOfOccurrence || ''))
-                      .map((r) => (
-                        <button
-                          key={r.id}
-                          onClick={() => setViewingIncidentReportId(r.id)}
-                          className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
-                          style={{ background: COLORS.surfaceRaised }}
-                        >
-                          <span className="text-sm">{r.dateOfOccurrence} · {r.exactLocation} · {(r.incidentTypes || []).join(', ')}</span>
-                          <span className="text-xs font-bold flex-shrink-0 ml-2" style={{ color: r.status === 'closed' ? COLORS.accent : '#E07A5F' }}>
-                            {r.status === 'closed' ? 'Closed' : 'Open'}
-                          </span>
-                        </button>
-                      ))}
+                      .map((r) => {
+                        const sig = incidentSignersStatus(r);
+                        return (
+                          <button
+                            key={r.id}
+                            onClick={() => setViewingIncidentReportId(r.id)}
+                            className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                            style={{ background: COLORS.surfaceRaised }}
+                          >
+                            <span className="text-sm">{r.dateOfOccurrence} · {r.exactLocation} · {(r.incidentTypes || []).join(', ')}</span>
+                            <span className="flex items-center gap-2 flex-shrink-0 ml-2">
+                              <span className="text-xs font-bold" style={{ color: sig.complete ? COLORS.accent : COLORS.inkDim }}>
+                                {sig.complete ? '✅' : `${sig.signedCount}/${sig.total} signed`}
+                              </span>
+                              <span className="text-xs font-bold" style={{ color: r.status === 'closed' ? COLORS.accent : '#E07A5F' }}>
+                                {r.status === 'closed' ? 'Closed' : 'Open'}
+                              </span>
+                            </span>
+                          </button>
+                        );
+                      })}
                   </div>
 
                   {incidentReports.length === 0 && (
