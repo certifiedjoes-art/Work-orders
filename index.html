@@ -4045,6 +4045,12 @@ const EQUIPMENT_INSPECTION_ITEMS = [
 // everyone (crew included); adding or removing entries is gated to admins
 // in the UI. Files themselves live in Firebase Storage under safetyDocs/,
 // this record just holds the metadata + download URL.
+async function saveDriverDocumentRecord(doc) {
+  await firebase.database().ref('driverDocumentRecords/' + doc.id).set(stripUndefined(doc));
+}
+async function deleteDriverDocumentRecord(docId) {
+  await firebase.database().ref('driverDocumentRecords/' + docId).remove();
+}
 async function saveSafetyDocRecord(doc) {
   await firebase.database().ref('safetyDocRecords/' + doc.id).set(stripUndefined(doc));
 }
@@ -5396,7 +5402,101 @@ function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel }) {
 // 24-hour period and the previous 14 consecutive days" — nothing about the
 // rest of the app, no editing, no navigation elsewhere. This shows exactly
 // that and nothing more, with one clear way back out.
-function InspectionModeScreen({ driver, allLogs, onExit }) {
+// Shown both in the driver's own log section (editable — upload/delete)
+// and in Inspection Mode (read-only, for the officer to actually look
+// at). Annual permits show a renewal warning once within 30 days of
+// expiring, or an "Expired" flag past that — same visual language as the
+// fuel tank ledger's due-soon warnings elsewhere in the app.
+function DriverDocumentsPanel({ driver, documents, canEdit, onAdd, onDelete, uploading, renewalStatus }) {
+  const [addingCategory, setAddingCategory] = useState(null); // 'annual' | 'trip' | null
+  const [titleDraft, setTitleDraft] = useState('');
+  const [expiryDraft, setExpiryDraft] = useState('');
+  const [fileDraft, setFileDraft] = useState(null);
+
+  const myDocs = (documents || []).filter((d) => d.driver === driver);
+  const annualDocs = myDocs.filter((d) => d.category === 'annual');
+  const tripDocs = myDocs.filter((d) => d.category === 'trip');
+
+  const resetForm = () => { setAddingCategory(null); setTitleDraft(''); setExpiryDraft(''); setFileDraft(null); };
+
+  const renderDocList = (docs, category) => (
+    <div className="space-y-2 mb-2">
+      {docs.length === 0 && <p className="text-xs" style={{ color: COLORS.inkDim }}>None on file.</p>}
+      {docs.map((d) => {
+        const renewal = category === 'annual' ? renewalStatus(d.expiryDate) : null;
+        return (
+          <div key={d.id} className="rounded-lg p-3 flex items-center justify-between gap-2" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+            <a href={d.url} target="_blank" rel="noreferrer" className="text-sm underline flex-1 min-w-0 truncate" style={{ color: COLORS.accent }}>{d.title}</a>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {renewal && (
+                <span className="text-xs font-semibold px-2 py-1 rounded" style={{ background: renewal.color, color: '#1B1F19' }}>{renewal.label}</span>
+              )}
+              {canEdit && (
+                <button onClick={() => onDelete(d.id)} className="text-xs underline" style={{ color: '#E07A5F' }}>Remove</button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <div className="rounded-lg p-4 mb-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <p className="font-display text-sm font-bold uppercase tracking-wide mb-3" style={{ color: COLORS.accent }}>📄 Documents</p>
+
+      <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Annual Permits</p>
+      {renderDocList(annualDocs, 'annual')}
+      {canEdit && (
+        addingCategory === 'annual' ? (
+          <div className="rounded-lg p-3 mb-3" style={{ background: COLORS.surfaceRaised }}>
+            <TextInput value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} placeholder="Permit name" className="w-full mb-2" />
+            <label className="block mb-2">
+              <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Expiry date</span>
+              <input type="date" value={expiryDraft} onChange={(e) => setExpiryDraft(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            </label>
+            <input type="file" accept="image/*,application/pdf" onChange={(e) => setFileDraft(e.target.files[0])} className="w-full mb-2 text-xs" />
+            <div className="flex gap-2">
+              <Btn
+                onClick={async () => { await onAdd(driver, 'annual', titleDraft, fileDraft, expiryDraft); resetForm(); }}
+                disabled={!titleDraft.trim() || !fileDraft || !expiryDraft || uploading}
+              >
+                {uploading ? 'Uploading…' : 'Save'}
+              </Btn>
+              <Btn variant="ghost" onClick={resetForm}>Cancel</Btn>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setAddingCategory('annual')} className="text-xs underline mb-4 block" style={{ color: COLORS.accent }}>+ Add annual permit</button>
+        )
+      )}
+
+      <p className="text-xs font-semibold uppercase tracking-wide mb-2 mt-2" style={{ color: COLORS.inkDim }}>Trip Permits</p>
+      {renderDocList(tripDocs, 'trip')}
+      {canEdit && (
+        addingCategory === 'trip' ? (
+          <div className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised }}>
+            <TextInput value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} placeholder="Permit name" className="w-full mb-2" />
+            <input type="file" accept="image/*,application/pdf" onChange={(e) => setFileDraft(e.target.files[0])} className="w-full mb-2 text-xs" />
+            <div className="flex gap-2">
+              <Btn
+                onClick={async () => { await onAdd(driver, 'trip', titleDraft, fileDraft, null); resetForm(); }}
+                disabled={!titleDraft.trim() || !fileDraft || uploading}
+              >
+                {uploading ? 'Uploading…' : 'Save'}
+              </Btn>
+              <Btn variant="ghost" onClick={resetForm}>Cancel</Btn>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setAddingCategory('trip')} className="text-xs underline block" style={{ color: COLORS.accent }}>+ Add trip permit</button>
+        )
+      )}
+    </div>
+  );
+}
+
+function InspectionModeScreen({ driver, allLogs, onExit, documents, renewalStatus }) {
   const [confirmingExit, setConfirmingExit] = useState(false);
   const [exitPin, setExitPin] = useState('');
   const [exitError, setExitError] = useState('');
@@ -5443,6 +5543,13 @@ function InspectionModeScreen({ driver, allLogs, onExit }) {
         </div>
         <Btn variant="ghost" onClick={() => setConfirmingExit(true)}>Exit</Btn>
       </div>
+
+      <DriverDocumentsPanel
+        driver={driver}
+        documents={documents}
+        canEdit={false}
+        renewalStatus={renewalStatus}
+      />
 
       {confirmingExit && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 600, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} className="p-6">
@@ -5583,7 +5690,7 @@ function DriverRecentLogsSection({ driver, allLogs, onBackfillOffDuty }) {
   );
 }
 
-function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEnd, onUpdateStatusChange, hasValidInspection, inspectionHoursRemaining, onOpenPreTrip, onOpenInspectionMode, isAdmin }) {
+function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEnd, onUpdateStatusChange, hasValidInspection, inspectionHoursRemaining, onOpenPreTrip, onOpenInspectionMode, isAdmin, documents, onAddDocument, onDeleteDocument, uploadingDocument, renewalStatus }) {
   const [startingLog, setStartingLog] = useState(false);
   const [odometerStartDraft, setOdometerStartDraft] = useState('');
   const [pendingStatus, setPendingStatus] = useState(null);
@@ -5631,6 +5738,17 @@ function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEn
         </div>
       </div>
       <p className="text-xs mb-4 no-print" style={{ color: COLORS.inkDim }}>Separate from your regular clock — this tracks hours of service.</p>
+      <div className="no-print">
+        <DriverDocumentsPanel
+          driver={driver}
+          documents={documents}
+          canEdit={true}
+          onAdd={onAddDocument}
+          onDelete={onDeleteDocument}
+          uploading={uploadingDocument}
+          renewalStatus={renewalStatus}
+        />
+      </div>
       {isAdmin && openLog && openLog.statusChanges && openLog.statusChanges.length > 0 && (
         <PrintPortal>
           <PrintableDriverLog log={openLog} driverName={driver} />
@@ -8438,6 +8556,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [addingLocalMap, setAddingLocalMap] = useState(false);
   const [safetyDocs, setSafetyDocs] = useState(() => cacheGet('safetyDocs', [])); // [{id, title, category, url, fileName, addedBy, addedAt}]
   const [uploadingSafetyDoc, setUploadingSafetyDoc] = useState(false);
+  const [driverDocuments, setDriverDocuments] = useState(() => cacheGet('driverDocuments', []));
+  const [uploadingDriverDoc, setUploadingDriverDoc] = useState(false);
   const [expandedSafetyCategory, setExpandedSafetyCategory] = useState(null);
   const [inspectionsExpanded, setInspectionsExpanded] = useState(false);
   const [incidentReportingExpanded, setIncidentReportingExpanded] = useState(false);
@@ -8753,6 +8873,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = Object.values(snap.val() || {});
       setSafetyDocs(val);
       cacheSet('safetyDocs', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('driverDocumentRecords');
+    const on = ref.on('value', (snap) => {
+      const val = Object.values(snap.val() || {});
+      setDriverDocuments(val);
+      cacheSet('driverDocuments', val);
     });
     return () => ref.off('value', on);
   }, []);
@@ -10264,6 +10394,45 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setSafetyDocs(next);
     cacheSet('safetyDocs', next);
     await queueWrite('safetyDocs', { kind: 'delete', entryId: docId });
+  };
+  // Annual permits carry an expiry date so a renewal warning can show
+  // before one lapses; trip permits don't need one (pass null) since
+  // they're inherently short-lived and just get replaced per trip.
+  const addDriverDocument = async (driver, category, title, file, expiryDate) => {
+    if (!file || !title.trim()) return;
+    setUploadingDriverDoc(true);
+    try {
+      const storageRef = firebase.storage().ref(`mapImages/driver-doc-${slugForMechanic(driver)}-${Date.now()}-${file.name}`);
+      await storageRef.put(file);
+      const url = await storageRef.getDownloadURL();
+      const doc = {
+        id: uid(),
+        driver,
+        category, // 'annual' | 'trip'
+        title: title.trim(),
+        fileName: file.name,
+        url,
+        expiryDate: expiryDate || null,
+        addedBy: currentMechanic,
+        addedAt: Date.now(),
+      };
+      await saveDriverDocumentRecord(doc);
+    } catch (e) {
+      alert("Couldn't upload that document — " + (e.message || 'check your signal and try again.'));
+    }
+    setUploadingDriverDoc(false);
+  };
+  const deleteDriverDocument = async (docId) => {
+    await deleteDriverDocumentRecord(docId);
+  };
+  // Under 30 days left counts as "due soon" — matches the same threshold
+  // already used for the fuel tank ledger, for consistency across the app.
+  const permitRenewalStatus = (expiryDate) => {
+    if (!expiryDate) return null;
+    const daysLeft = Math.ceil((new Date(expiryDate + 'T00:00:00') - new Date(todayStr() + 'T00:00:00')) / (1000 * 60 * 60 * 24));
+    if (daysLeft < 0) return { label: 'Expired', color: '#E07A5F' };
+    if (daysLeft <= 30) return { label: `Renews in ${daysLeft}d`, color: COLORS.progress };
+    return null;
   };
   const submitSafetyInspection = async (record) => {
     const full = {
@@ -12841,6 +13010,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           driver={currentMechanic}
           allLogs={driverLogs}
           onExit={() => setShowInspectionMode(false)}
+          documents={driverDocuments}
+          renewalStatus={permitRenewalStatus}
         />
       );
     }
@@ -13072,6 +13243,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               onOpenPreTrip={() => setShowPreTripForm(true)}
               onOpenInspectionMode={() => setShowInspectionMode(true)}
               isAdmin={isAdmin}
+              documents={driverDocuments}
+              onAddDocument={addDriverDocument}
+              onDeleteDocument={deleteDriverDocument}
+              uploadingDocument={uploadingDriverDoc}
+              renewalStatus={permitRenewalStatus}
             />
           )}
 
@@ -14551,6 +14727,27 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             expanded={expandedAdmin === 'driverLog'}
             onToggle={() => setExpandedAdmin(expandedAdmin === 'driverLog' ? null : 'driverLog')}
           >
+          {(() => {
+            const expiringDocs = driverDocuments
+              .filter((d) => d.category === 'annual' && d.expiryDate)
+              .map((d) => ({ ...d, renewal: permitRenewalStatus(d.expiryDate) }))
+              .filter((d) => d.renewal)
+              .sort((a, b) => a.expiryDate.localeCompare(b.expiryDate));
+            if (expiringDocs.length === 0) return null;
+            return (
+              <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Permits due for renewal</p>
+                <div className="space-y-1">
+                  {expiringDocs.map((d) => (
+                    <div key={d.id} className="flex items-center justify-between text-sm">
+                      <span>{d.driver} — {d.title}</span>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded" style={{ background: d.renewal.color, color: '#1B1F19' }}>{d.renewal.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
           {driverNames.length === 0 ? (
             <p className="text-sm" style={{ color: COLORS.inkDim }}>No driver logs yet.</p>
           ) : (
