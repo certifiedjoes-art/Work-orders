@@ -1372,8 +1372,8 @@ function ProductionClockOutReviewOverlay({ show, shift, mechanic, unitTypes, onC
         <div className="rounded-lg p-4 mb-5 space-y-2" style={{ background: COLORS.surfaceRaised }}>
           <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Start</span><span>{fmtTime(shift.start)}</span></div>
           <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>End</span><span>{fmtTime(new Date().toISOString())}</span></div>
-          {shift.block && (
-            <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Block</span><span>{shift.block}</span></div>
+          {blocksForShift(shift).length > 0 && (
+            <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Block{blocksForShift(shift).length > 1 ? 's' : ''}</span><span>{blocksForShift(shift).join(', ')}</span></div>
           )}
           {activeType === 'buncher' && shift.trees && (
             <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Trees</span><span>{shift.trees}</span></div>
@@ -3969,6 +3969,15 @@ function slugForMechanic(name) {
   if (typeof name !== 'string') return '';
   return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
+// A shift can carry more than one block worked that day now — this reads
+// either the new blocks array or, for shifts recorded before that
+// existed, falls back to the old single block field so nothing already
+// saved looks broken.
+function blocksForShift(shift) {
+  if (!shift) return [];
+  if (shift.blocks && shift.blocks.length > 0) return shift.blocks;
+  return shift.block ? [shift.block] : [];
+}
 // Real unit numbers can contain characters Firebase flatly rejects as a key
 // (/, ., #, $, [, ]) — a unit like "104/A" would silently fail to save its
 // type tag without this. Case-sensitive, unlike the mechanic slug, since
@@ -4860,7 +4869,7 @@ function PreTripInspectionDetail({ inspection, onDelete }) {
   );
 }
 
-function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel }) {
+function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel, onStart }) {
   const [unitsData, setUnitsData] = useState([
     { unitName: truckUnitName, unitType: 'truck', items: TRUCK_PRETRIP_ITEMS.map((def) => ({ ...def, status: null, severity: null, note: '', photos: [] })) },
   ]);
@@ -4869,6 +4878,11 @@ function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel }) {
   const [newTrailerName, setNewTrailerName] = useState('');
   const [signature, setSignature] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (onStart) onStart();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const setItemStatus = (unitIdx, itemIdx, status) => {
     setUnitsData((prev) => prev.map((u, ui) => (ui !== unitIdx ? u : {
@@ -5364,7 +5378,7 @@ function ProductionShiftHistory({ shifts, editingId, onEdit, onCancelEdit, onSav
                 <span style={{ color: COLORS.inkDim }}>{fmtTime(s.start)}–{fmtTime(s.end)}</span>
               </div>
               <div className="flex justify-between items-center mt-1">
-                <span className="text-xs" style={{ color: COLORS.inkDim }}>{s.block ? `Block ${s.block}` : ''}</span>
+                <span className="text-xs" style={{ color: COLORS.inkDim }}>{blocksForShift(s).length > 0 ? `Block${blocksForShift(s).length > 1 ? 's' : ''} ${blocksForShift(s).join(', ')}` : ''}</span>
                 <span className="text-xs font-mono" style={{ color: COLORS.accent }}>{fmtHours((new Date(s.end) - new Date(s.start)) / 1000 / 60 / 60)}</span>
               </div>
               {machineType(s.machine, unitTypes) === 'fuel' && s.fuelLog && Object.keys(s.fuelLog).length > 0 && (
@@ -6946,8 +6960,8 @@ function PrintableProductionShift({ shift, unitTypes }) {
 
       <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginBottom: 12 }}>
         <tbody>
-          {shift.block && (
-            <tr><td style={{ padding: '3px 6px', color: '#555' }}>Block</td><td style={{ padding: '3px 6px' }}>{shift.block}</td></tr>
+          {blocksForShift(shift).length > 0 && (
+            <tr><td style={{ padding: '3px 6px', color: '#555' }}>Block{blocksForShift(shift).length > 1 ? 's' : ''}</td><td style={{ padding: '3px 6px' }}>{blocksForShift(shift).join(', ')}</td></tr>
           )}
           {(shift.startHours || shift.endHours) && (
             <tr><td style={{ padding: '3px 6px', color: '#555' }}>Machine hours</td><td style={{ padding: '3px 6px' }}>{shift.startHours || '—'} → {shift.endHours || '—'}</td></tr>
@@ -7087,7 +7101,7 @@ function PrintableWorkOrder({ order, activeUnit, t, lang, getAssignedMechanics, 
 }
 
 function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, onDelete, isAdmin }) {
-  const [block, setBlock] = useState(shift.block || '');
+  const [block, setBlock] = useState(blocksForShift(shift).join(', '));
   const [startHours, setStartHours] = useState(shift.startHours || '');
   const [endHours, setEndHours] = useState(shift.endHours || '');
   const [spruce, setSpruce] = useState(shift.spruce || '');
@@ -7133,8 +7147,8 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
       )}
       {activeType !== 'fuel' && activeType !== 'winch' && (
         <label className="block mb-3">
-          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Block</span>
-          <TextInput value={block} onChange={(e) => setBlock(e.target.value)} />
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Block(s) — separate with commas if more than one</span>
+          <TextInput value={block} onChange={(e) => setBlock(e.target.value)} placeholder="e.g. 40-A, 40-B" />
         </label>
       )}
       {activeType !== 'crawler' && activeType !== 'grader' && activeType !== 'winch' && activeType !== 'fuel' && (
@@ -7218,7 +7232,7 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
         </div>
       ) : (
         <div className="flex gap-2 flex-wrap">
-          <Btn onClick={() => onSave({ block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes })}>Save changes</Btn>
+          <Btn onClick={() => onSave({ blocks: block.split(',').map((b) => b.trim()).filter(Boolean), block: null, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes })}>Save changes</Btn>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
           <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>Delete shift</button>
         </div>
@@ -9839,7 +9853,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await patchOneTimesheetEntry(entry.id, { logBookHours: Math.round(onDutyHours * 2) / 2 });
   };
 
-  const startDriverLog = async (odometerStart, unit) => {
+  const startDriverLog = async (odometerStart, unit, initialStatus) => {
     const now = new Date().toISOString();
     const entry = {
       id: uid(),
@@ -9849,12 +9863,29 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       end: null,
       odometerStart: odometerStart || '',
       odometerEnd: '',
-      statusChanges: [{ id: uid(), status: 'off', time: now, note: 'Starting shift' }],
+      statusChanges: [{ id: uid(), status: initialStatus || 'off', time: now, note: initialStatus === 'onDuty' ? 'Starting pre-trip' : 'Starting shift' }],
       signature: null,
       signedAt: null,
     };
     await saveOneDriverLog(entry);
     await syncTimesheetToLogBook(currentMechanic, localDateStr(new Date(now)), entry);
+  };
+
+  // Fires the moment a driver actually opens the pre-trip inspection form
+  // — HOS rules treat pre-trip as On Duty time starting right then, not
+  // only once the inspection is fully submitted a few minutes later. If
+  // there's no log open yet for today, this starts one already On Duty
+  // rather than the usual Off Duty default; if one's already open and
+  // isn't already showing On Duty, it just adds the status change.
+  const handlePreTripStarted = async (unitForLog) => {
+    if (!openDriverLog) {
+      await startDriverLog('', unitForLog, 'onDuty');
+      return;
+    }
+    const changes = openDriverLog.statusChanges || [];
+    const latest = changes.length > 0 ? changes[changes.length - 1] : null;
+    if (latest && latest.status === 'onDuty') return; // already there — no need for a duplicate entry
+    await addDriverStatusChange('onDuty', 'Starting pre-trip');
   };
 
   const addDriverStatusChange = async (status, note) => {
@@ -10007,7 +10038,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const attemptProductionClockOut = () => {
     if (!openProductionShift) return;
     const shiftType = machineType(openProductionShift.machine, unitTypes);
-    if (shiftType !== 'fuel' && shiftType !== 'winch' && !openProductionShift.block) {
+    if (shiftType !== 'fuel' && shiftType !== 'winch' && blocksForShift(openProductionShift).length === 0) {
       alert('Select or add a block number before clocking out.');
       return;
     }
@@ -10043,7 +10074,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       return;
     }
     const shiftType = currentType;
-    if (shiftType !== 'fuel' && shiftType !== 'winch' && !openProductionShift.block) {
+    if (shiftType !== 'fuel' && shiftType !== 'winch' && blocksForShift(openProductionShift).length === 0) {
       alert('Select or add a block number for the current machine before switching — that finalizes its numbers first.');
       return;
     }
@@ -10530,7 +10561,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           s.employee,
           (s.end || s.start || '').slice(0, 10),
           s.machine,
-          s.block || '',
+          blocksForShift(s).join(', '),
           fmtTime(s.start),
           fmtTime(s.end),
           fmtHoursDecimal(hours),
@@ -11587,6 +11618,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           driver={currentMechanic}
           truckUnitName={effectiveUnit}
           onCancel={() => setShowPreTripForm(false)}
+          onStart={() => handlePreTripStarted(effectiveUnit)}
           onSubmit={async (unitsData, signature) => {
             await submitPreTripInspection(unitsData, signature);
             setShowPreTripForm(false);
@@ -11700,16 +11732,54 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               </Section>
 
               {activeType !== 'fuel' && activeType !== 'winch' && (
-                <Section label="Block number">
+                <Section label="Block numbers">
+                  {blocksForShift(openProductionShift).length > 0 && (
+                    <div className="flex gap-2 flex-wrap mb-2">
+                      {blocksForShift(openProductionShift).map((b) => (
+                        <span key={b} className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+                          {b}
+                          <button
+                            onClick={() => patchOpenProductionShift({ blocks: blocksForShift(openProductionShift).filter((x) => x !== b), block: null })}
+                            style={{ color: COLORS.inkDim }}
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex gap-2">
-                    <Select value={openProductionShift.block} onChange={(e) => patchOpenProductionShift({ block: e.target.value })} className="flex-1">
-                      <option value="" disabled>Select block…</option>
-                      {blocks.map((b) => <option key={b} value={b}>{b}</option>)}
+                    <Select
+                      value=""
+                      onChange={(e) => {
+                        if (!e.target.value) return;
+                        const current = blocksForShift(openProductionShift);
+                        if (!current.includes(e.target.value)) {
+                          patchOpenProductionShift({ blocks: [...current, e.target.value], block: null });
+                        }
+                      }}
+                      className="flex-1"
+                    >
+                      <option value="" disabled>+ Add a block…</option>
+                      {blocks.filter((b) => !blocksForShift(openProductionShift).includes(b)).map((b) => <option key={b} value={b}>{b}</option>)}
                     </Select>
                   </div>
                   <div className="flex gap-2 mt-2">
                     <TextInput value={newBlockText} onChange={(e) => setNewBlockText(e.target.value)} placeholder="Add new block, e.g. 40-A" className="flex-1" />
-                    <Btn onClick={async () => { await addBlock(newBlockText); patchOpenProductionShift({ block: newBlockText.trim() }); setNewBlockText(''); }} disabled={!newBlockText.trim()}>Add</Btn>
+                    <Btn
+                      onClick={async () => {
+                        const trimmed = newBlockText.trim();
+                        await addBlock(trimmed);
+                        const current = blocksForShift(openProductionShift);
+                        if (!current.includes(trimmed)) {
+                          patchOpenProductionShift({ blocks: [...current, trimmed], block: null });
+                        }
+                        setNewBlockText('');
+                      }}
+                      disabled={!newBlockText.trim()}
+                    >
+                      Add
+                    </Btn>
                   </div>
                 </Section>
               )}
@@ -13242,7 +13312,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                                 <span className="underline text-xs" style={{ color: COLORS.accent }}>Edit</span>
                               </div>
                               <div className="flex items-center justify-between text-xs" style={{ color: COLORS.inkDim }}>
-                                <span>{s.machine}{s.block ? ` · Block ${s.block}` : ''}</span>
+                                <span>{s.machine}{blocksForShift(s).length > 0 ? ` · Block${blocksForShift(s).length > 1 ? 's' : ''} ${blocksForShift(s).join(', ')}` : ''}</span>
                                 <span className="font-mono">{fmtTime(s.start)} – {fmtTime(s.end)}</span>
                               </div>
                               {machineType(s.machine, unitTypes) === 'fuel' && s.fuelLog && Object.keys(s.fuelLog).length > 0 && (
