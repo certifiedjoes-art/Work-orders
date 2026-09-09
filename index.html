@@ -3762,6 +3762,7 @@ async function buildIncidentReportPdf(record) {
   drawChecks('Type of Occurrence', record.occurrenceTypes, record.occurrenceTypeOther);
   drawChecks('Contact With', record.contactWith, record.contactWithOther);
   drawField('Sequence of Events', record.sequenceDescription);
+  drawField('Potential Consequence (Near Miss)', record.potentialConsequence);
   drawField('Diagram/Picture Attached', record.diagramAttached);
   drawChecks('7.a Unsafe Acts', record.unsafeActs, record.unsafeActsOther);
   drawField('Safety Device Made Inoperable', record.safetyDeviceInoperable);
@@ -7219,6 +7220,70 @@ function CheckboxGroup({ label, options, selected, onChange, otherText, onOtherT
 // part(s) injured" text field, and per-witness statement checkboxes become
 // one witness list plus one overall "statement(s) provided" toggle —
 // everything else is a direct match, right down to the checkbox wording.
+// Quick Near Miss form — a fraction of the full Incident Investigation
+// Report, deliberately. A near miss is meant to be easy to flag ("this
+// almost happened") so people actually report them; the full root-cause
+// investigation apparatus can always be added later from the report's
+// detail view if it turns out to warrant one.
+function NewNearMissForm({ defaultReporter, submitting, onCancel, onSubmit }) {
+  const inputStyle = { background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
+  const [dateOfOccurrence, setDateOfOccurrence] = useState(() => new Date().toISOString().slice(0, 10));
+  const [timeOfOccurrence, setTimeOfOccurrence] = useState('');
+  const [exactLocation, setExactLocation] = useState('');
+  const [locationCategories, setLocationCategories] = useState([]);
+  const [sequenceDescription, setSequenceDescription] = useState('');
+  const [potentialConsequence, setPotentialConsequence] = useState('');
+  const [reportedBy, setReportedBy] = useState(defaultReporter);
+  const [signatureData, setSignatureData] = useState(null);
+
+  const canSubmit = exactLocation.trim() && sequenceDescription.trim() && reportedBy.trim() && signatureData && !submitting;
+
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <p className="font-display text-lg font-bold mb-1">Near Miss Report</p>
+      <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>A quick report — no fault, just what almost happened, so it can get fixed before it does.</p>
+
+      <div className="grid grid-cols-2 gap-2 mb-2">
+        <div>
+          <label className="block text-xs mb-1" style={{ color: COLORS.inkDim }}>Date</label>
+          <input type="date" value={dateOfOccurrence} onChange={(e) => setDateOfOccurrence(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+        </div>
+        <div>
+          <label className="block text-xs mb-1" style={{ color: COLORS.inkDim }}>Time</label>
+          <input type="time" value={timeOfOccurrence} onChange={(e) => setTimeOfOccurrence(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+        </div>
+      </div>
+      <input type="text" placeholder="Exact Location" value={exactLocation} onChange={(e) => setExactLocation(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      <CheckboxGroup label="Location" options={INCIDENT_LOCATION_OPTIONS} selected={locationCategories} onChange={setLocationCategories} />
+
+      <textarea placeholder="What happened?" value={sequenceDescription} onChange={(e) => setSequenceDescription(e.target.value)} rows={3} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      <textarea placeholder="What could have happened if things had gone differently?" value={potentialConsequence} onChange={(e) => setPotentialConsequence(e.target.value)} rows={2} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+
+      <input type="text" placeholder="Your name" value={reportedBy} onChange={(e) => setReportedBy(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Signature</p>
+      <div className="mb-4">
+        <SignaturePad onChange={setSignatureData} savedSignature={localStorage.getItem('savedSignature_' + defaultReporter)} />
+      </div>
+
+      <div className="flex gap-2">
+        <Btn
+          onClick={() => onSubmit({
+            dateOfOccurrence, timeOfOccurrence, exactLocation: exactLocation.trim(), locationCategories,
+            dateReported: new Date().toISOString().slice(0, 10),
+            sequenceDescription: sequenceDescription.trim(), potentialConsequence: potentialConsequence.trim(),
+            reportedBy: reportedBy.trim(),
+            reporterSignature: { name: reportedBy.trim(), role: 'Employee', dataUrl: signatureData, signedAt: Date.now() },
+          })}
+          disabled={!canSubmit}
+        >
+          {submitting ? 'Submitting…' : 'Submit Near Miss Report'}
+        </Btn>
+        <Btn variant="ghost" onClick={onCancel} disabled={submitting}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
 function NewIncidentReportForm({ defaultReporter, submitting, onCancel, onSubmit }) {
   const inputStyle = { background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
   const sectionHeading = (num, text) => (
@@ -7602,6 +7667,7 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
       {checks('Type of Occurrence', record.occurrenceTypes, record.occurrenceTypeOther)}
       {checks('Contact With', record.contactWith, record.contactWithOther)}
       {field('Sequence of Events', record.sequenceDescription)}
+      {field('Potential Consequence (Near Miss)', record.potentialConsequence)}
       {field('Diagram/Picture Attached', record.diagramAttached)}
       {checks('7.a Unsafe Acts', record.unsafeActs, record.unsafeActsOther)}
       {field('Safety Device Made Inoperable', record.safetyDeviceInoperable)}
@@ -8776,6 +8842,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const warmedSafetyDocIds = useRef(new Set());
   const [safetyInspections, setSafetyInspections] = useState(() => cacheGet('safetyInspections', []));
   const [incidentReports, setIncidentReports] = useState(() => cacheGet('incidentReports', []));
+  const [nearMissRequests, setNearMissRequests] = useState(() => cacheGet('nearMissRequests', []));
+  const [showRequestNearMiss, setShowRequestNearMiss] = useState(false);
+  const [requestNearMissTarget, setRequestNearMissTarget] = useState('');
+  const [sendingNearMissRequest, setSendingNearMissRequest] = useState(false);
+  const [fillingNearMissRequestId, setFillingNearMissRequestId] = useState(undefined); // undefined = not open; null = open but no specific request tied to it; else the request's id
+  const [submittingNearMiss, setSubmittingNearMiss] = useState(false);
   const [newIncidentReportOpen, setNewIncidentReportOpen] = useState(false);
   const [viewingIncidentReportId, setViewingIncidentReportId] = useState(null);
   const [submittingIncidentReport, setSubmittingIncidentReport] = useState(false);
@@ -9111,6 +9183,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = Object.values(snap.val() || {});
       setIncidentReports(val);
       cacheSet('incidentReports', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('nearMissRequests');
+    const on = ref.on('value', (snap) => {
+      const val = Object.values(snap.val() || {});
+      setNearMissRequests(val);
+      cacheSet('nearMissRequests', val);
     });
     return () => ref.off('value', on);
   }, []);
@@ -10756,6 +10838,28 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       used: false,
     });
     return `${window.location.origin}${window.location.pathname}?signToken=${token}`;
+  };
+  // Hands a specific person the quick Near Miss form, right inside the app
+  // — unlike the incident-report signing links (for people with no
+  // login), this is for someone who already has an account but doesn't
+  // have Safety-section access. They just see a "you've been asked to
+  // report a near miss" prompt the next time they open Safety.
+  const sendNearMissRequest = async (mechanicName) => {
+    const id = uid();
+    await firebase.database().ref('nearMissRequests/' + id).set({
+      id, forMechanic: mechanicName,
+      requestedBy: currentMechanic,
+      requestedAt: Date.now(),
+      completed: false,
+    });
+  };
+  const submitNearMissReport = async (record, requestId) => {
+    const full = { formType: 'nearMiss', incidentTypes: ['Near Miss'], ...record };
+    const saved = await submitIncidentReport(full);
+    if (requestId) {
+      await firebase.database().ref('nearMissRequests/' + requestId).update({ completed: true, completedReportId: saved.id, completedAt: Date.now() });
+    }
+    return saved;
   };
   // Adds a unit to the Fuel Tank Ledger's own extra list — the ledger
   // groups everything by prefix on display, so it'll land in its matching
@@ -16388,6 +16492,36 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             <p className="text-sm mt-1" style={{ color: COLORS.inkDim }}>Safety manuals, SDS sheets, and meeting minutes</p>
           </div>
 
+          {(() => {
+            const myPendingNearMiss = nearMissRequests.find((r) => r.forMechanic === currentMechanic && !r.completed);
+            if (fillingNearMissRequestId !== undefined) {
+              return (
+                <div className="mb-8">
+                  <NewNearMissForm
+                    defaultReporter={currentMechanic}
+                    submitting={submittingNearMiss}
+                    onCancel={() => setFillingNearMissRequestId(undefined)}
+                    onSubmit={async (record) => {
+                      setSubmittingNearMiss(true);
+                      await submitNearMissReport(record, fillingNearMissRequestId);
+                      setSubmittingNearMiss(false);
+                      setFillingNearMissRequestId(undefined);
+                    }}
+                  />
+                </div>
+              );
+            }
+            if (myPendingNearMiss) {
+              return (
+                <div className="rounded-lg p-4 mb-8" style={{ background: '#E07A5F22', border: '1px solid #E07A5F' }}>
+                  <p className="text-sm font-semibold mb-2" style={{ color: '#E07A5F' }}>🦺 You've been asked to file a Near Miss report.</p>
+                  <Btn onClick={() => setFillingNearMissRequestId(myPendingNearMiss.id)}>Fill it out</Btn>
+                </div>
+              );
+            }
+            return null;
+          })()}
+
           {SAFETY_CATEGORIES.map((category) => {
             const docs = safetyDocs.filter((d) => d.category === category);
             return (
@@ -16917,13 +17051,52 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 />
               ) : (
                 <div>
-                  <button
-                    onClick={() => setNewIncidentReportOpen(true)}
-                    className="text-xs font-semibold px-3 py-2 rounded-lg mb-4"
-                    style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-                  >
-                    + New Report
-                  </button>
+                  <div className="flex gap-2 mb-2">
+                    <button
+                      onClick={() => setNewIncidentReportOpen(true)}
+                      className="text-xs font-semibold px-3 py-2 rounded-lg"
+                      style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                    >
+                      + New Report
+                    </button>
+                    <button
+                      onClick={() => setShowRequestNearMiss(true)}
+                      className="text-xs font-semibold px-3 py-2 rounded-lg"
+                      style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                    >
+                      📨 Request Near Miss Report
+                    </button>
+                  </div>
+
+                  {showRequestNearMiss && (
+                    <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+                      <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>They'll see a prompt to fill out a quick Near Miss report next time they open Safety — no need for them to have Incident Reporting access.</p>
+                      <select
+                        value={requestNearMissTarget}
+                        onChange={(e) => setRequestNearMissTarget(e.target.value)}
+                        className="w-full mb-2 px-3 py-2 rounded-lg text-sm"
+                        style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                      >
+                        <option value="">Select a person…</option>
+                        {mechanics.map((m) => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                      <div className="flex gap-2">
+                        <Btn
+                          disabled={!requestNearMissTarget || sendingNearMissRequest}
+                          onClick={async () => {
+                            setSendingNearMissRequest(true);
+                            await sendNearMissRequest(requestNearMissTarget);
+                            setSendingNearMissRequest(false);
+                            setShowRequestNearMiss(false);
+                            setRequestNearMissTarget('');
+                          }}
+                        >
+                          {sendingNearMissRequest ? 'Sending…' : 'Send Request'}
+                        </Btn>
+                        <Btn variant="ghost" disabled={sendingNearMissRequest} onClick={() => { setShowRequestNearMiss(false); setRequestNearMissTarget(''); }}>Cancel</Btn>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     {incidentReports
