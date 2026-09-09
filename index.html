@@ -3164,6 +3164,56 @@ function cacheSet(key, value) {
 // once keep working with zero signal from then on, and what a map loaded
 // straight from an AirDropped/emailed PDF (never touching Firebase) is
 // backed by entirely — see addLocalMapFromFile / uploadMapPdf.
+function idbOpenDriverDocsDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('harderDriverDocs', 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains('docs')) req.result.createObjectStore('docs');
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbSetDriverDocBlob(docId, blob) {
+  try {
+    const db = await idbOpenDriverDocsDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('docs', 'readwrite');
+      tx.objectStore('docs').put(blob, docId);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    // IndexedDB unavailable — the document still works over the network
+    // while signal holds, it just won't be available fully offline
+  }
+}
+async function idbGetDriverDocBlob(docId) {
+  try {
+    const db = await idbOpenDriverDocsDB();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction('docs', 'readonly');
+      const req = tx.objectStore('docs').get(docId);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    return null;
+  }
+}
+async function idbDeleteDriverDocBlob(docId) {
+  try {
+    const db = await idbOpenDriverDocsDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('docs', 'readwrite');
+      tx.objectStore('docs').delete(docId);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    // nothing to clean up if it was never cached
+  }
+}
 function idbOpenMapDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open('harderMapImages', 1);
@@ -5407,15 +5457,96 @@ function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel }) {
 // at). Annual permits show a renewal warning once within 30 days of
 // expiring, or an "Expired" flag past that — same visual language as the
 // fuel tank ledger's due-soon warnings elsewhere in the app.
-function DriverDocumentsPanel({ driver, documents, canEdit, onAdd, onDelete, uploading, renewalStatus }) {
+// In-app viewer for a driver document — opens inline instead of a new
+// browser tab, and works fully offline once the file has been viewed (or
+// uploaded) at least once, since it's cached locally in IndexedDB rather
+// than re-fetched from Firebase Storage every time.
+function DriverDocViewer({ doc, onClose }) {
+  const [blobUrl, setBlobUrl] = useState(null);
+  const [error, setError] = useState(null);
+  const [isPdf, setIsPdf] = useState(false);
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let createdUrl = null;
+    (async () => {
+      let blob = await idbGetDriverDocBlob(doc.id);
+      if (!blob) {
+        // Not cached locally yet — needs a live fetch this one time. If
+        // there's no signal right now, this is exactly where it fails,
+        // which is the honest, expected outcome for a document nobody's
+        // opened on this device before.
+        try {
+          const res = await fetch(doc.url);
+          blob = await res.blob();
+          idbSetDriverDocBlob(doc.id, blob); // cache for next time, don't block on it
+        } catch (e) {
+          if (!cancelled) setError("Couldn't load this document — no signal, and it hasn't been viewed on this device before.");
+          return;
+        }
+      }
+      if (cancelled) return;
+      const pdf = blob.type === 'application/pdf' || /\.pdf$/i.test(doc.fileName || '');
+      setIsPdf(pdf);
+      createdUrl = URL.createObjectURL(blob);
+      setBlobUrl(createdUrl);
+    })();
+    return () => { cancelled = true; if (createdUrl) URL.revokeObjectURL(createdUrl); };
+  }, [doc.id]);
+
+  useEffect(() => {
+    if (!isPdf || !blobUrl || !canvasRef.current) return;
+    (async () => {
+      try {
+        if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
+        }
+        const pdf = await window.pdfjsLib.getDocument(blobUrl).promise;
+        const page = await pdf.getPage(1);
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = canvasRef.current;
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      } catch (e) {
+        setError("Couldn't render this PDF.");
+      }
+    })();
+  }, [isPdf, blobUrl]);
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 700, background: 'rgba(0,0,0,0.92)', display: 'flex', flexDirection: 'column' }}>
+      <div className="flex items-center justify-between p-4" style={{ paddingTop: 'calc(1rem + env(safe-area-inset-top, 0px))' }}>
+        <p className="text-white font-display font-bold truncate flex-1">{doc.title}</p>
+        <button onClick={onClose} className="text-white text-2xl px-3">✕</button>
+      </div>
+      <div className="flex-1 overflow-auto flex items-center justify-center p-4">
+        {error ? (
+          <p className="text-sm text-center" style={{ color: '#E07A5F' }}>{error}</p>
+        ) : !blobUrl ? (
+          <p className="text-sm" style={{ color: COLORS.inkDim }}>Loading…</p>
+        ) : isPdf ? (
+          <canvas ref={canvasRef} style={{ maxWidth: '100%', height: 'auto' }} />
+        ) : (
+          <img src={blobUrl} alt={doc.title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DriverDocumentsPanel({ driver, documents, canEdit, onAdd, onDelete, onRename, uploading, renewalStatus }) {
   const [addingCategory, setAddingCategory] = useState(null); // 'annual' | 'trip' | null
   const [titleDraft, setTitleDraft] = useState('');
   const [expiryDraft, setExpiryDraft] = useState('');
   const [fileDraft, setFileDraft] = useState(null);
+  const [viewingDoc, setViewingDoc] = useState(null);
+  const [renamingDocId, setRenamingDocId] = useState(null);
+  const [renameDraft, setRenameDraft] = useState('');
 
-  const myDocs = (documents || []).filter((d) => d.driver === driver);
-  const annualDocs = myDocs.filter((d) => d.category === 'annual');
-  const tripDocs = myDocs.filter((d) => d.category === 'trip');
+  const annualDocs = (documents || []).filter((d) => d.category === 'annual');
+  const tripDocs = (documents || []).filter((d) => d.category === 'trip');
 
   const resetForm = () => { setAddingCategory(null); setTitleDraft(''); setExpiryDraft(''); setFileDraft(null); };
 
@@ -5424,15 +5555,34 @@ function DriverDocumentsPanel({ driver, documents, canEdit, onAdd, onDelete, upl
       {docs.length === 0 && <p className="text-xs" style={{ color: COLORS.inkDim }}>None on file.</p>}
       {docs.map((d) => {
         const renewal = category === 'annual' ? renewalStatus(d.expiryDate) : null;
+        if (renamingDocId === d.id) {
+          return (
+            <div key={d.id} className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+              <TextInput value={renameDraft} onChange={(e) => setRenameDraft(e.target.value)} placeholder="Document name" className="w-full mb-2" />
+              <div className="flex gap-2">
+                <Btn
+                  onClick={async () => { if (renameDraft.trim()) await onRename(d.id, renameDraft.trim()); setRenamingDocId(null); }}
+                  disabled={!renameDraft.trim()}
+                >
+                  Save
+                </Btn>
+                <Btn variant="ghost" onClick={() => setRenamingDocId(null)}>Cancel</Btn>
+              </div>
+            </div>
+          );
+        }
         return (
           <div key={d.id} className="rounded-lg p-3 flex items-center justify-between gap-2" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
-            <a href={d.url} target="_blank" rel="noreferrer" className="text-sm underline flex-1 min-w-0 truncate" style={{ color: COLORS.accent }}>{d.title}</a>
+            <button onClick={() => setViewingDoc(d)} className="text-sm underline flex-1 min-w-0 truncate text-left" style={{ color: COLORS.accent }}>{d.title}</button>
             <div className="flex items-center gap-2 flex-shrink-0">
               {renewal && (
                 <span className="text-xs font-semibold px-2 py-1 rounded" style={{ background: renewal.color, color: '#1B1F19' }}>{renewal.label}</span>
               )}
               {canEdit && (
-                <button onClick={() => onDelete(d.id)} className="text-xs underline" style={{ color: '#E07A5F' }}>Remove</button>
+                <React.Fragment>
+                  <button onClick={() => { setRenamingDocId(d.id); setRenameDraft(d.title); }} className="text-xs underline" style={{ color: COLORS.inkDim }}>Edit</button>
+                  <button onClick={() => onDelete(d.id)} className="text-xs underline" style={{ color: '#E07A5F' }}>Remove</button>
+                </React.Fragment>
               )}
             </div>
           </div>
@@ -5442,6 +5592,8 @@ function DriverDocumentsPanel({ driver, documents, canEdit, onAdd, onDelete, upl
   );
 
   return (
+    <React.Fragment>
+    {viewingDoc && <DriverDocViewer doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
     <div className="rounded-lg p-4 mb-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <p className="font-display text-sm font-bold uppercase tracking-wide mb-3" style={{ color: COLORS.accent }}>📄 Documents</p>
 
@@ -5493,6 +5645,7 @@ function DriverDocumentsPanel({ driver, documents, canEdit, onAdd, onDelete, upl
         )
       )}
     </div>
+    </React.Fragment>
   );
 }
 
@@ -5690,7 +5843,7 @@ function DriverRecentLogsSection({ driver, allLogs, onBackfillOffDuty }) {
   );
 }
 
-function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEnd, onUpdateStatusChange, hasValidInspection, inspectionHoursRemaining, onOpenPreTrip, onOpenInspectionMode, isAdmin, documents, onAddDocument, onDeleteDocument, uploadingDocument, renewalStatus }) {
+function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEnd, onUpdateStatusChange, hasValidInspection, inspectionHoursRemaining, onOpenPreTrip, onOpenInspectionMode, isAdmin, documents, onAddDocument, onDeleteDocument, onRenameDocument, uploadingDocument, renewalStatus }) {
   const [startingLog, setStartingLog] = useState(false);
   const [odometerStartDraft, setOdometerStartDraft] = useState('');
   const [pendingStatus, setPendingStatus] = useState(null);
@@ -5745,6 +5898,7 @@ function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEn
           canEdit={true}
           onAdd={onAddDocument}
           onDelete={onDeleteDocument}
+          onRename={onRenameDocument}
           uploading={uploadingDocument}
           renewalStatus={renewalStatus}
         />
@@ -7596,7 +7750,7 @@ function DriverLogDayGrid({ dayStart, dayEnd, points, startCumDriving, startCumO
   const [draftTime, setDraftTime] = useState(null);
   const [debugBounds, setDebugBounds] = useState(null);
   const viewWidth = 1200;
-  const rowsHeight = compact ? 90 : 160;
+  const rowsHeight = compact ? 90 : 176;
   const axisHeight = compact ? 16 : 26;
   const height = rowsHeight + axisHeight;
   const rowHeight = rowsHeight / DUTY_STATUS_ROWS.length;
@@ -7634,6 +7788,7 @@ function DriverLogDayGrid({ dayStart, dayEnd, points, startCumDriving, startCumO
     segments.push({
       id: effective[i].id,
       status: effective[i].status,
+      note: effective[i].note || '',
       startX: timeToX(segStart),
       endX: timeToX(segEnd),
       y: rowY(effective[i].status),
@@ -7757,6 +7912,19 @@ function DriverLogDayGrid({ dayStart, dayEnd, points, startCumDriving, startCumO
 
       {segments.map((seg) => (
         <line key={seg.id + '-seg'} x1={seg.startX} y1={seg.y} x2={seg.endX} y2={seg.y} stroke={seg.overLimit ? '#E07A5F' : '#1B1F19'} strokeWidth={compact ? 2 : 4} />
+      ))}
+
+      {!compact && segments.filter((seg) => seg.status === 'onDuty' && seg.note).map((seg) => (
+        <text
+          key={seg.id + '-note'}
+          x={(seg.startX + seg.endX) / 2}
+          y={seg.y + 16}
+          fontSize={10}
+          fill="#666"
+          textAnchor="middle"
+        >
+          {seg.note.length > 40 ? seg.note.slice(0, 40) + '…' : seg.note}
+        </text>
       ))}
 
       {segments.slice(1).map((seg, i) => (
@@ -10417,13 +10585,21 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         addedAt: Date.now(),
       };
       await saveDriverDocumentRecord(doc);
+      // Cache the file locally right away, on the device that uploaded
+      // it — so it's available offline immediately rather than only
+      // after someone happens to view it once while online.
+      idbSetDriverDocBlob(doc.id, file);
     } catch (e) {
       alert("Couldn't upload that document — " + (e.message || 'check your signal and try again.'));
     }
     setUploadingDriverDoc(false);
   };
+  const renameDriverDocument = async (docId, newTitle) => {
+    await firebase.database().ref('driverDocumentRecords/' + docId + '/title').set(newTitle);
+  };
   const deleteDriverDocument = async (docId) => {
     await deleteDriverDocumentRecord(docId);
+    idbDeleteDriverDocBlob(docId);
   };
   // Under 30 days left counts as "due soon" — matches the same threshold
   // already used for the fuel tank ledger, for consistency across the app.
@@ -11317,6 +11493,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await deleteOneDriverLog(logId);
     setEditingDriverLogId(null);
     if (log) await syncTimesheetToLogBook(log.driver, localDateStr(new Date(log.start)), null);
+  };
+  // Removes every log on file for a driver entirely — for cleaning up
+  // test data, or someone who's genuinely gone and shouldn't keep
+  // showing up in the Log Book. Documents are shared company-wide now
+  // (they belong to the truck, not the individual), so this only ever
+  // touches logs, never documents.
+  const removeDriverEntirely = async (driverName) => {
+    const logsToRemove = driverLogs.filter((l) => l.driver === driverName);
+    await Promise.all(logsToRemove.map((l) => deleteOneDriverLog(l.id)));
   };
   // For a status change that was genuinely missed in the moment — a real
   // break he took but forgot to log — admin needs to backfill it with
@@ -13246,6 +13431,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               documents={driverDocuments}
               onAddDocument={addDriverDocument}
               onDeleteDocument={deleteDriverDocument}
+              onRenameDocument={renameDriverDocument}
               uploadingDocument={uploadingDriverDoc}
               renewalStatus={permitRenewalStatus}
             />
@@ -14748,22 +14934,32 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               </div>
             );
           })()}
+          <div className="mb-4">
+            <DriverDocumentsPanel
+              driver={currentMechanic}
+              documents={driverDocuments}
+              canEdit={true}
+              onAdd={addDriverDocument}
+              onDelete={deleteDriverDocument}
+              onRename={renameDriverDocument}
+              uploading={uploadingDriverDoc}
+              renewalStatus={permitRenewalStatus}
+            />
+          </div>
           {driverNames.length > 0 && (
             <div className="mb-4">
-              <p className="font-display text-xs font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Documents by driver</p>
-              <div className="space-y-2">
+              <p className="font-display text-xs font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Drivers</p>
+              <div className="space-y-1">
                 {driverNames.map((name) => (
-                  <div key={name}>
-                    <p className="text-sm font-semibold mb-1">{name}</p>
-                    <DriverDocumentsPanel
-                      driver={name}
-                      documents={driverDocuments}
-                      canEdit={true}
-                      onAdd={addDriverDocument}
-                      onDelete={deleteDriverDocument}
-                      uploading={uploadingDriverDoc}
-                      renewalStatus={permitRenewalStatus}
-                    />
+                  <div key={name} className="flex items-center justify-between text-sm rounded-lg p-2" style={{ background: COLORS.surfaceRaised }}>
+                    <span>{name}</span>
+                    <button
+                      onClick={() => { if (confirm(`Remove ${name} entirely — all their logs? This can't be undone.`)) removeDriverEntirely(name); }}
+                      className="text-xs underline"
+                      style={{ color: '#E07A5F' }}
+                    >
+                      Remove driver
+                    </button>
                   </div>
                 ))}
               </div>
