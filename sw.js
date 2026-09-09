@@ -1,6 +1,6 @@
 // Bump this version string every time index.html changes, so phones
 // reliably pick up the new version instead of getting stuck on an old one.
-const CACHE_NAME = 'harder-work-orders-v197';
+const CACHE_NAME = 'harder-work-orders-v198';
 
 // Handles push notifications arriving while the app isn't open — separate
 // from the caching logic below, using Firebase Cloud Messaging's own
@@ -43,13 +43,20 @@ const APP_SHELL = [
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
+  // Babel used to be a CDN asset (see CDN_ASSETS below, and the retry logic
+  // wrapped around fetching those) — moved to same-origin because the very
+  // first time anyone loads this app, before this service worker has ever
+  // installed, there's no retry safety net at all: it's just a plain
+  // <script src> tag on a page with (for some people, like a signing-link
+  // recipient on their own phone) potentially weak signal. Same-origin
+  // means one fewer external host that first load depends on.
+  './babel.min.js',
 ];
 
 const CDN_ASSETS = [
   'https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css',
   'https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js',
   'https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js',
-  'https://cdn.jsdelivr.net/npm/@babel/standalone@7.25.6/babel.min.js',
   'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js',
   'https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js',
   'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js',
