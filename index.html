@@ -3587,6 +3587,30 @@ function ClockInPromptOverlay({ show, mechanic, onClockIn, onSkip, t }) {
   );
 }
 
+// Ending the HOS log book and clocking out of the shift are two separate
+// actions (the log book tracks on-duty status for compliance; clocking out
+// ends the paid shift itself) — closing the log book used to leave the
+// shift open with nothing prompting the driver to also end it. This asks
+// right at the moment the log book closes, while it's still top of mind.
+function ClockOutAfterLogBookPromptOverlay({ show, onClockOut, onSkip }) {
+  if (!show) return null;
+  return (
+    <div className="fixed inset-0 z-50 p-6" style={{ background: 'rgba(0,0,0,0.75)', minHeight: '100vh' }}>
+      <div className="w-full max-w-xs mx-auto my-8 rounded-2xl p-6 text-center overflow-y-auto" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}`, maxHeight: '85vh' }}>
+        <p className="text-4xl mb-3">📕</p>
+        <p className="font-display text-lg font-bold mb-2">Log book closed</p>
+        <p className="text-sm mb-5" style={{ color: COLORS.inkDim }}>
+          Do you also want to clock out of your shift now?
+        </p>
+        <div className="flex flex-col gap-2">
+          <Btn onClick={onClockOut}>Clock Out Now</Btn>
+          <Btn variant="ghost" onClick={onSkip}>Not Yet — Still Working</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function statusColor(s) {
   if (s === 'Open') return COLORS.open;
   if (s === 'In Progress') return COLORS.progress;
@@ -9301,6 +9325,12 @@ function PrintableWorkOrder({ order, activeUnit, t, lang, getAssignedMechanics, 
 
 function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, onDelete, isAdmin }) {
   const [block, setBlock] = useState(shift.block || '');
+  // Same datetime-local pattern already used for driver status changes —
+  // this was the actual gap: nothing anywhere let you fix a production
+  // shift's clock-in/clock-out, only machine-hour-meter readings (a
+  // different thing entirely), so a wrong time had no way to get corrected.
+  const [startTime, setStartTime] = useState(() => shift.start ? new Date(shift.start).toISOString().slice(0, 16) : '');
+  const [endTime, setEndTime] = useState(() => shift.end ? new Date(shift.end).toISOString().slice(0, 16) : '');
   const [startHours, setStartHours] = useState(shift.startHours || '');
   const [endHours, setEndHours] = useState(shift.endHours || '');
   const [spruce, setSpruce] = useState(shift.spruce || '');
@@ -9344,6 +9374,28 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
           <PrintableProductionShift shift={shift} unitTypes={unitTypes} />
         </PrintPortal>
       )}
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <label className="block">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock In</span>
+          <input
+            type="datetime-local"
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+            className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
+            style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+        </label>
+        <label className="block">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock Out</span>
+          <input
+            type="datetime-local"
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+            className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
+            style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+        </label>
+      </div>
       {activeType !== 'fuel' && activeType !== 'winch' && (
         <label className="block mb-3">
           <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Block</span>
@@ -9431,7 +9483,11 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
         </div>
       ) : (
         <div className="flex gap-2 flex-wrap">
-          <Btn onClick={() => onSave({ block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes })}>Save changes</Btn>
+          <Btn onClick={() => onSave({
+            block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes,
+            start: startTime ? new Date(startTime).toISOString() : shift.start,
+            end: endTime ? new Date(endTime).toISOString() : shift.end,
+          })}>Save changes</Btn>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
           <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>Delete shift</button>
         </div>
@@ -9810,6 +9866,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [tsFilterEnd, setTsFilterEnd] = useState('');
   const [tsEmailDraft, setTsEmailDraft] = useState(null);
   const [showClockInPrompt, setShowClockInPrompt] = useState(false);
+  const [showClockOutAfterLogBookPrompt, setShowClockOutAfterLogBookPrompt] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState(null);
   const [editingOrderChecklistId, setEditingOrderChecklistId] = useState(null);
   const [showFireworks, setShowFireworks] = useState(false);
@@ -12435,6 +12492,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       statusChanges: nextChanges,
     });
     await syncTimesheetToLogBook(currentMechanic, localDateStr(new Date(openDriverLog.start)), { ...openDriverLog, end: now, statusChanges: nextChanges });
+    // Ending the log book doesn't touch the shift itself — ask right now,
+    // while it's still on screen, rather than leaving the shift open with
+    // nothing pointing that out.
+    if (openProductionShift) setShowClockOutAfterLogBookPrompt(true);
   };
 
   // Fills in any of the last 14 calendar days that have no log at all, as a
@@ -14206,6 +14267,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
+        <ClockOutAfterLogBookPromptOverlay
+          show={showClockOutAfterLogBookPrompt}
+          onClockOut={() => { setShowClockOutAfterLogBookPrompt(false); attemptProductionClockOut(); }}
+          onSkip={() => setShowClockOutAfterLogBookPrompt(false)}
+        />
         <SidebarMenu
           show={showSidebar}
           onClose={() => setShowSidebar(false)}
