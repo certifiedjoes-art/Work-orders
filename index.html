@@ -3762,9 +3762,16 @@ function PrintPortal({ children }) {
   return ReactDOM.createPortal(children, target);
 }
 
+// Accepts either a plain date (YYYY-MM-DD, what regular timesheet entries
+// store) or a full ISO timestamp (what production shifts store, e.g. for
+// winch truck / machine operators) — mixing the two used to mean a
+// machine operator's shift date silently fell back to showing the raw,
+// unformatted timestamp instead of a real date, which is exactly the
+// "looks different for winch truck/machine shifts" bug this fixes.
 function fmtDate(d) {
   if (!d) return '';
-  const dt = new Date(d + 'T00:00:00');
+  const isPlainDate = /^\d{4}-\d{2}-\d{2}$/.test(d);
+  const dt = isPlainDate ? new Date(d + 'T00:00:00') : new Date(d);
   if (isNaN(dt)) return d;
   return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
@@ -15828,32 +15835,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                               isAdmin={isAdmin}
                             />
                           ) : (
-                            <button
+                            <ProductionShiftRow
                               key={s.id}
-                              onClick={() => setEditingShiftId(s.id)}
-                              className="w-full text-left rounded-lg p-3"
-                              style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}
-                            >
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="font-semibold text-sm">{fmtDate(s.end)}</span>
-                                <span className="underline text-xs" style={{ color: COLORS.accent }}>Edit</span>
-                              </div>
-                              <div className="flex items-center justify-between text-xs" style={{ color: COLORS.inkDim }}>
-                                <span>{s.machine}{s.block ? ` · Block ${s.block}` : ''}</span>
-                                <span className="font-mono">{fmtTime(s.start)} – {fmtTime(s.end)}</span>
-                              </div>
-                              {machineType(s.machine, unitTypes) === 'fuel' && s.fuelLog && Object.keys(s.fuelLog).length > 0 && (
-                                <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>
-                                  ⛽ {Object.values(s.fuelLog).flat().reduce((sum, v) => sum + (parseFloat(v) || 0), 0)} L across {Object.keys(s.fuelLog).length} unit{Object.keys(s.fuelLog).length > 1 ? 's' : ''}
-                                </p>
-                              )}
-                              {s.downtimeLog && s.downtimeLog.length > 0 && (
-                                <p className="text-xs mt-1" style={{ color: '#E07A5F' }}>⚠ {s.downtimeLog.length} downtime report{s.downtimeLog.length > 1 ? 's' : ''}</p>
-                              )}
-                              {s.signature && (
-                                <p className="text-xs mt-1" style={{ color: COLORS.done }}>✓ Signed</p>
-                              )}
-                            </button>
+                              shift={s}
+                              unitTypes={unitTypes}
+                              isAdmin={isAdmin}
+                              onEdit={() => setEditingShiftId(s.id)}
+                            />
                           )
                         ))}
                       </div>
@@ -18860,8 +18848,87 @@ function TimesheetJobsEditor({ entry, onAdd, onRemove }) {
   );
 }
 
-// Paper-friendly rendering of a single day's timesheet entry — clock
-// in/out, break, jobs breakdown, paid hours, and signature.
+// Read-only row for one machine/winch truck shift — same buttons as
+// TimesheetEntryCard (Print, Show raw data, Signed (view)), same styling,
+// same behavior, just pointed at a production shift's fields instead of a
+// regular timesheet entry's. Tapping the row itself (not one of the
+// buttons) opens the edit form, same as a regular entry.
+function ProductionShiftRow({ shift, onEdit, unitTypes, isAdmin }) {
+  const [showSignature, setShowSignature] = useState(false);
+  const [showRawData, setShowRawData] = useState(false);
+  const hours = shift.end ? (new Date(shift.end) - new Date(shift.start)) / 1000 / 60 / 60 : 0;
+
+  return (
+    <div className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+      <div className="flex items-center justify-between mb-1">
+        <span className="font-semibold text-sm">{fmtDate(shift.end)}</span>
+        <div className="flex items-center gap-3">
+          {isAdmin && (
+            <button onClick={() => window.print()} className="text-xs underline" style={{ color: COLORS.inkDim }}>🖨️ Print</button>
+          )}
+          <button onClick={onEdit} className="text-xs underline" style={{ color: COLORS.accent }}>Edit</button>
+        </div>
+      </div>
+      {isAdmin && (
+        <PrintPortal>
+          <PrintableProductionShift shift={shift} unitTypes={unitTypes} />
+        </PrintPortal>
+      )}
+      <div className="flex items-center justify-between text-xs" style={{ color: COLORS.inkDim }}>
+        <span>{shift.machine}{shift.block ? ` · Block ${shift.block}` : ''}</span>
+        <span className="font-mono">{fmtTime(shift.start)} – {fmtTime(shift.end)}</span>
+      </div>
+      {shift.end && (
+        <p className="text-xs font-mono mt-1" style={{ color: COLORS.accent }}>
+          Total for the day: <span className="font-bold">{fmtHours(hours)}</span>
+        </p>
+      )}
+      {machineType(shift.machine, unitTypes) === 'fuel' && shift.fuelLog && Object.keys(shift.fuelLog).length > 0 && (
+        <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>
+          ⛽ {Object.values(shift.fuelLog).flat().reduce((sum, v) => sum + (parseFloat(v) || 0), 0)} L across {Object.keys(shift.fuelLog).length} unit{Object.keys(shift.fuelLog).length > 1 ? 's' : ''}
+        </p>
+      )}
+      {shift.downtimeLog && shift.downtimeLog.length > 0 && (
+        <p className="text-xs mt-1" style={{ color: '#E07A5F' }}>⚠ {shift.downtimeLog.length} downtime report{shift.downtimeLog.length > 1 ? 's' : ''}</p>
+      )}
+
+      {isAdmin && (
+        <div className="mt-2">
+          <button onClick={() => setShowRawData((s) => !s)} className="text-xs underline" style={{ color: COLORS.line }}>
+            {showRawData ? 'Hide raw data' : '🔍 Show raw data'}
+          </button>
+          {showRawData && (
+            <div className="mt-2 rounded-lg p-3 font-mono text-xs" style={{ background: COLORS.surface, color: COLORS.inkDim }}>
+              <p className="mb-2">employee: {shift.employee}</p>
+              <p className="mb-2">machine: {shift.machine}</p>
+              <p className="mb-2">id: {shift.id}</p>
+              <p className="mb-2">start: {shift.start}</p>
+              <p className="mb-2">end: {shift.end || '—'}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {shift.signature && (
+        <div className="mt-2">
+          <button
+            onClick={() => setShowSignature((s) => !s)}
+            className="text-xs underline"
+            style={{ color: COLORS.done }}
+          >
+            ✓ Signed {showSignature ? '(hide)' : '(view)'}
+          </button>
+          {showSignature && (
+            <div className="mt-2 rounded-lg p-2 inline-block" style={{ background: '#fff' }}>
+              <img src={shift.signature} alt="Signature" style={{ height: 60, display: 'block' }} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PrintableTimesheetEntry({ entry }) {
   const hours = entryHours(entry);
   return (
