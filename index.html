@@ -15928,6 +15928,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                               unitTypes={unitTypes}
                               isAdmin={isAdmin}
                               onEdit={() => setEditingShiftId(s.id)}
+                              onQuickPatch={(id, patch) => updateProductionShift(id, patch)}
                             />
                           )
                         ))}
@@ -18940,10 +18941,27 @@ function TimesheetJobsEditor({ entry, onAdd, onRemove }) {
 // same behavior, just pointed at a production shift's fields instead of a
 // regular timesheet entry's. Tapping the row itself (not one of the
 // buttons) opens the edit form, same as a regular entry.
-function ProductionShiftRow({ shift, onEdit, unitTypes, isAdmin }) {
+function ProductionShiftRow({ shift, onEdit, onQuickPatch, unitTypes, isAdmin }) {
   const [showSignature, setShowSignature] = useState(false);
   const [showRawData, setShowRawData] = useState(false);
+  const [fixDraft, setFixDraft] = useState({});
   const hours = shift.end ? (new Date(shift.end) - new Date(shift.start)) / 1000 / 60 / 60 : 0;
+  const getLocalDatePart = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+  const toLocalTime = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const combineDateTime = (datePart, time) => {
+    if (!time || !datePart) return null;
+    return new Date(`${datePart}T${time}`).toISOString();
+  };
 
   return (
     <div className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
@@ -18989,8 +19007,37 @@ function ProductionShiftRow({ shift, onEdit, unitTypes, isAdmin }) {
               <p className="mb-2">employee: {shift.employee}</p>
               <p className="mb-2">machine: {shift.machine}</p>
               <p className="mb-2">id: {shift.id}</p>
-              <p className="mb-2">start: {shift.start}</p>
-              <p className="mb-2">end: {shift.end || '—'}</p>
+              {['start', 'end'].map((field) => {
+                const iso = shift[field];
+                if (!iso) return <p key={field} className="mb-2">{field}: —</p>;
+                const storedDate = getLocalDatePart(iso);
+                const time = toLocalTime(iso);
+                const draftDate = fixDraft[field] !== undefined ? fixDraft[field] : storedDate;
+                return (
+                  <div key={field} className="mb-3">
+                    <p>{field}: {iso}</p>
+                    {onQuickPatch && (
+                      <div className="flex items-center gap-2 mt-1">
+                        <input
+                          type="date"
+                          value={draftDate}
+                          onChange={(e) => setFixDraft((d) => ({ ...d, [field]: e.target.value }))}
+                          className="rounded px-2 py-1 text-xs"
+                          style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                        />
+                        <button
+                          onClick={() => onQuickPatch(shift.id, { [field]: combineDateTime(draftDate, time) })}
+                          disabled={draftDate === storedDate}
+                          className="text-xs underline"
+                          style={{ color: draftDate === storedDate ? COLORS.line : COLORS.accent }}
+                        >
+                          Fix date (keeps {time} as the time)
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
