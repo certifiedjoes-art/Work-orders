@@ -9379,7 +9379,7 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
       <div className="flex items-center justify-between mb-3 no-print">
-        <p className="font-display font-semibold">{fmtDate(shift.start)} — {shift.machine}</p>
+        <p className="font-display font-semibold">{fmtDate(shift.end || shift.start)} — {shift.machine}</p>
         {isAdmin && (
           <button
             onClick={() => window.print()}
