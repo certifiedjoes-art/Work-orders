@@ -9325,12 +9325,33 @@ function PrintableWorkOrder({ order, activeUnit, t, lang, getAssignedMechanics, 
 
 function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, onDelete, isAdmin }) {
   const [block, setBlock] = useState(shift.block || '');
-  // Same datetime-local pattern already used for driver status changes —
-  // this was the actual gap: nothing anywhere let you fix a production
-  // shift's clock-in/clock-out, only machine-hour-meter readings (a
-  // different thing entirely), so a wrong time had no way to get corrected.
-  const [startTime, setStartTime] = useState(() => shift.start ? new Date(shift.start).toISOString().slice(0, 16) : '');
-  const [endTime, setEndTime] = useState(() => shift.end ? new Date(shift.end).toISOString().slice(0, 16) : '');
+  // Same time-only pattern the mechanic timesheet edit already uses —
+  // NOT a full date+time picker. Each keeps its own original calendar day
+  // locked in behind the scenes (so a shift that genuinely crosses
+  // midnight still saves correctly) rather than letting the date be
+  // changed here at all, which isn't something this needs and was also
+  // the earlier version's actual bug: building the field from
+  // toISOString() (always UTC) showed the wrong day for anyone not in UTC.
+  const getLocalDatePart = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+  const toLocalTime = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const combineDateTime = (datePart, time) => {
+    if (!time || !datePart) return null;
+    return new Date(`${datePart}T${time}`).toISOString();
+  };
+  const startDatePart = getLocalDatePart(shift.start);
+  const endDatePart = getLocalDatePart(shift.end) || startDatePart;
+  const [startTime, setStartTime] = useState(toLocalTime(shift.start));
+  const [endTime, setEndTime] = useState(toLocalTime(shift.end));
   const [startHours, setStartHours] = useState(shift.startHours || '');
   const [endHours, setEndHours] = useState(shift.endHours || '');
   const [spruce, setSpruce] = useState(shift.spruce || '');
@@ -9378,7 +9399,7 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
         <label className="block">
           <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock In</span>
           <input
-            type="datetime-local"
+            type="time"
             value={startTime}
             onChange={(e) => setStartTime(e.target.value)}
             className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
@@ -9388,7 +9409,7 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
         <label className="block">
           <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock Out</span>
           <input
-            type="datetime-local"
+            type="time"
             value={endTime}
             onChange={(e) => setEndTime(e.target.value)}
             className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
@@ -9485,8 +9506,8 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
         <div className="flex gap-2 flex-wrap">
           <Btn onClick={() => onSave({
             block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes,
-            start: startTime ? new Date(startTime).toISOString() : shift.start,
-            end: endTime ? new Date(endTime).toISOString() : shift.end,
+            start: combineDateTime(startDatePart, startTime) || shift.start,
+            end: combineDateTime(endDatePart, endTime) || shift.end,
           })}>Save changes</Btn>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
           <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>Delete shift</button>
