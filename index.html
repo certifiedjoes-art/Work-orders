@@ -1317,6 +1317,34 @@ function OfflineBanner({ isOnline }) {
   );
 }
 
+// Shows on every landing screen an admin/safety coordinator sees right
+// after logging in — the Training Matrix itself is buried a couple taps
+// deep in Safety, which meant an expired cert could go unnoticed for
+// weeks unless someone happened to open it. This surfaces the same
+// expired/expiring-soon count up front instead, with a tap straight
+// through to the list.
+function TrainingMatrixAlertBanner({ trainingMatrix, onOpen }) {
+  const flagged = trainingMatrix.filter((p) => {
+    const s = trainingPersonStatus(p);
+    return s === 'expired' || s === 'expiringSoon';
+  });
+  if (flagged.length === 0) return null;
+  const expiredCount = flagged.filter((p) => trainingPersonStatus(p) === 'expired').length;
+  return (
+    <button
+      onClick={onOpen}
+      className="w-full text-left rounded-lg p-3 mb-6"
+      style={{ background: '#E07A5F22', border: '1px solid #E07A5F' }}
+    >
+      <p className="text-sm font-bold" style={{ color: '#E07A5F' }}>
+        🎓 Training Matrix — {flagged.length} {flagged.length === 1 ? 'person needs' : 'people need'} attention
+        {expiredCount > 0 ? ` (${expiredCount} expired)` : ''}
+      </p>
+      <p className="text-xs mt-0.5" style={{ color: COLORS.inkDim }}>Tap to review</p>
+    </button>
+  );
+}
+
 function PinModalOverlay({ pinModal, pinInput, setPinInput, pinError, onSubmit, onCancel, onForgot, t }) {
   const tr = t || ((k) => translations.en[k] || k);
   if (!pinModal) return null;
@@ -7802,6 +7830,8 @@ function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete 
     TRAINING_MATRIX_FIELDS.forEach((f) => { v[f.key] = (initial && initial[f.key]) || ''; });
     return v;
   });
+  const [keptCertPhotos, setKeptCertPhotos] = useState((initial && initial.certPhotos) || []);
+  const [newCertPhotos, setNewCertPhotos] = useState([]);
 
   const canSubmit = name.trim() && !submitting;
   const statusColor = (field) => {
@@ -7846,12 +7876,33 @@ function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete 
         </div>
       ))}
 
+      {keptCertPhotos.length > 0 && (
+        <div className="flex gap-2 mb-2 overflow-x-auto">
+          {keptCertPhotos.map((p) => (
+            <div key={p.id} className="relative flex-shrink-0">
+              <a href={p.url} target="_blank" rel="noopener noreferrer">
+                <img src={p.url} alt="Certificate" className="rounded" style={{ width: 72, height: 72, objectFit: 'cover', border: `1px solid ${COLORS.line}` }} />
+              </a>
+              <button
+                type="button"
+                onClick={() => setKeptCertPhotos((prev) => prev.filter((x) => x.id !== p.id))}
+                className="absolute -top-1 -right-1 rounded-full text-xs w-5 h-5 flex items-center justify-center"
+                style={{ background: '#E07A5F', color: '#1B1F19' }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <PhotoCapture photos={newCertPhotos} onChange={setNewCertPhotos} />
+
       <textarea placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full mt-2 mb-4 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
 
       <div className="flex items-center justify-between">
         <div className="flex gap-2">
           <Btn
-            onClick={() => onSubmit({ ...(initial ? { id: initial.id } : {}), name: name.trim(), role: role.trim(), category, notes: notes.trim(), ...values })}
+            onClick={() => onSubmit({ ...(initial ? { id: initial.id } : {}), name: name.trim(), role: role.trim(), category, notes: notes.trim(), certPhotos: keptCertPhotos, pendingCertPhotos: newCertPhotos, ...values })}
             disabled={!canSubmit}
           >
             {submitting ? 'Saving…' : 'Save'}
@@ -11527,7 +11578,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await queueWrite('incidentReports', { kind: 'save', entry: updated });
   };
   const saveTrainingPerson = async (person) => {
-    const full = person.id ? person : { ...person, id: uid(), createdBy: currentMechanic, createdAt: Date.now() };
+    const { pendingCertPhotos, ...rest } = person;
+    const id = rest.id || uid();
+    let certPhotos = rest.certPhotos || [];
+    // Same pattern as incident report photos — upload happens here, once
+    // there's a real id to file them under, not inside the form itself.
+    if (pendingCertPhotos && pendingCertPhotos.length > 0) {
+      const uploaded = await Promise.all(pendingCertPhotos.map(async (p) => {
+        const storageRef = firebase.storage().ref(`trainingCertPhotos/${id}/${Date.now()}-${p.blob.name || 'cert.jpg'}`);
+        await storageRef.put(p.blob);
+        const url = await storageRef.getDownloadURL();
+        return { id: uid(), url, fileName: p.blob.name || 'cert.jpg', addedBy: currentMechanic, addedAt: Date.now() };
+      }));
+      certPhotos = [...certPhotos, ...uploaded];
+    }
+    const full = rest.id
+      ? { ...rest, id, certPhotos }
+      : { ...rest, id, certPhotos, createdBy: currentMechanic, createdAt: Date.now() };
     const next = trainingMatrix.some((p) => p.id === full.id)
       ? trainingMatrix.map((p) => (p.id === full.id ? full : p))
       : [...trainingMatrix, full];
@@ -13724,6 +13791,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </button>
           </div>
 
+          {(isAdmin || isSafety) && (
+            <TrainingMatrixAlertBanner
+              trainingMatrix={trainingMatrix}
+              onOpen={() => { setScreen('safety'); setTrainingMatrixExpanded(true); setEditingTrainingPersonId(null); }}
+            />
+          )}
+
           <SidebarMenu
             show={showSidebar}
             onClose={() => setShowSidebar(false)}
@@ -14162,6 +14236,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </div>
             <button onClick={() => setShowSidebar(true)} className="text-3xl leading-none px-3 py-2 rounded-lg" style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>☰</button>
           </div>
+
+          {(isAdmin || isSafety) && (
+            <TrainingMatrixAlertBanner
+              trainingMatrix={trainingMatrix}
+              onOpen={() => { setScreen('safety'); setTrainingMatrixExpanded(true); setEditingTrainingPersonId(null); }}
+            />
+          )}
 
           {!openProductionShift ? (
             <div className="rounded-lg p-8 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
@@ -15053,6 +15134,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </button>
           )}
           <h1 className="font-display text-3xl font-bold mb-2">Admin</h1>
+
+          {(isAdmin || isSafety) && (
+            <TrainingMatrixAlertBanner
+              trainingMatrix={trainingMatrix}
+              onOpen={() => { setScreen('safety'); setTrainingMatrixExpanded(true); setEditingTrainingPersonId(null); }}
+            />
+          )}
 
           {isAdmin && (
           <button
