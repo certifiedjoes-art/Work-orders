@@ -830,6 +830,418 @@ function incidentReportEmployees(record) {
   }
   return [];
 }
+// Matches the columns on Harder Contracting's paper training matrix
+// exactly, in the same order. `tracked: true` means the field IS an
+// expiry date to color-code directly; `renewalYears` means it's a
+// completion date with an implied re-training interval (H&S Orientation
+// annually, WHMIS every 3 years per the form's own note) — the due date
+// gets computed from it rather than stored separately. Fields with
+// neither just display plainly, since the paper form doesn't say those
+// ones expire on any schedule.
+const TRAINING_MATRIX_FIELDS = [
+  { key: 'dateOfHire', label: 'Date of Hire', type: 'date' },
+  { key: 'licenseClass', label: "Driver's License — Class", type: 'text' },
+  { key: 'licenseNumber', label: "Driver's License — Number", type: 'text' },
+  { key: 'licenseExpiry', label: "Driver's License — Expiry", type: 'date', tracked: true },
+  { key: 'driversAbstract', label: 'Drivers Abstract', type: 'text' },
+  { key: 'orientationDate', label: 'H&S Orientation — Completion Date', type: 'date', renewalYears: 1 },
+  { key: 'onJobTrainingDate', label: 'On-the-Job Training — Completion Date', type: 'date' },
+  { key: 'firstAidExpiry', label: 'First Aid/CPR — Expiry Date', type: 'date', tracked: true },
+  { key: 'tdgExpiry', label: 'TDG — Expiry Date', type: 'date', tracked: true },
+  { key: 'whmisDate', label: 'WHMIS — Completion Date', type: 'date', renewalYears: 3 },
+  { key: 'hazardIdDate', label: 'Hazard ID & Assessment Training — Completion Date', type: 'date' },
+  { key: 'incidentInvestigationDate', label: 'Incident Investigation Training — Completion Date', type: 'date' },
+  { key: 'inspectionTrainingDate', label: 'Inspection Training — Completion Date', type: 'date' },
+];
+const TRAINING_MATRIX_CATEGORIES = [
+  'Management and Supervisory', 'Administrative/Sales',
+  'Heavy Equipment — Bunchers', 'Heavy Equipment — Skidders', 'Heavy Equipment — Processors', 'Heavy Equipment — Log Loaders',
+  'Other Personnel', 'Sub-Contractors',
+];
+// "Getting close to running out" = 60 days out — same heads-up window
+// already used for the Fuel Tank Ledger reminders, for consistency.
+function trainingFieldStatus(field, record) {
+  const raw = record[field.key];
+  if (!raw) return { status: 'none', dueDate: null };
+  if (!field.tracked && !field.renewalYears) return { status: 'none', dueDate: raw };
+  let dueDateStr = raw;
+  if (field.renewalYears) {
+    const d = new Date(raw);
+    if (isNaN(d)) return { status: 'none', dueDate: raw };
+    d.setFullYear(d.getFullYear() + field.renewalYears);
+    dueDateStr = d.toISOString().slice(0, 10);
+  }
+  const due = new Date(dueDateStr);
+  if (isNaN(due)) return { status: 'none', dueDate: raw };
+  const days = (due.getTime() - Date.now()) / 86400000;
+  if (days < 0) return { status: 'expired', dueDate: dueDateStr };
+  if (days <= 60) return { status: 'expiringSoon', dueDate: dueDateStr };
+  return { status: 'ok', dueDate: dueDateStr };
+}
+function trainingPersonStatus(record) {
+  const statuses = TRAINING_MATRIX_FIELDS.filter((f) => f.tracked || f.renewalYears).map((f) => trainingFieldStatus(f, record).status);
+  if (statuses.includes('expired')) return 'expired';
+  if (statuses.includes('expiringSoon')) return 'expiringSoon';
+  if (statuses.every((s) => s === 'none')) return 'none';
+  return 'ok';
+}
+const TRAINING_STATUS_COLORS = { expired: '#E07A5F', expiringSoon: '#D9A441', ok: null, none: null };
+// One-time seed from Harder Contracting's existing training matrix PDF —
+// name, role, category, license info, and date of hire came through
+// clean. The rest of each person's certification dates (orientation,
+// first aid, TDG, WHMIS, etc.) could NOT be reliably matched to the right
+// column from that PDF — the source data has a different number of
+// populated columns per person with no way to tell which ones were
+// skipped, so guessing risked putting the wrong expiry date on the wrong
+// certification. Those raw dates are preserved in each person's Notes
+// field instead, to be sorted into the correct fields by hand once,
+// rather than trusted automatically. A few entries also had dates that
+// don't parse against the header's stated format at all (day-of-month or
+// month values that don't exist) — noted in Notes for those people too.
+const TRAINING_MATRIX_IMPORT_SEED = [
+  {
+    "name": "Harder, Edward",
+    "role": "OWNER/Senior Manager",
+    "category": "Management and Supervisory",
+    "licenseClass": "5",
+    "licenseNumber": "140251-117",
+    "licenseExpiry": "2028-11-22",
+    "notes": "Hire date from PDF (unparsed): 06/2014 | Unverified training/cert dates from PDF import (assign to correct fields above): 09/24/2027, 01/2024, 02/27/2025, 02/27/2025, 02/27/2025"
+  },
+  {
+    "name": "Wolfe, Joseph",
+    "role": "Supervisor",
+    "category": "Management and Supervisory",
+    "licenseClass": "1",
+    "licenseNumber": "148400-559",
+    "dateOfHire": "2022-10-01",
+    "licenseExpiry": "2027-04-02",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/01/2022, 09/24/2027, 11/24/2025, 01/2024, 02/27/2025, 02/27/2025, 02/27/2025"
+  },
+  {
+    "name": "Neufeld, Joey",
+    "role": "Health and Safety Coordinator",
+    "category": "Management and Supervisory",
+    "licenseClass": "1",
+    "licenseNumber": "153416-342",
+    "dateOfHire": "2023-01-02",
+    "licenseExpiry": "2026-03-30",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 01/02/2023, 01/02/2023, 08/19/2028, 7/1/2025, 08/05/2025, 12/16/2024, 01/07/2025, 12/16/2024"
+  },
+  {
+    "name": "Neudorf, Ernest",
+    "role": "Truck Supervisor",
+    "category": "Management and Supervisory",
+    "licenseClass": "5",
+    "licenseNumber": "155321-946",
+    "dateOfHire": "2025-11-17",
+    "licenseExpiry": "2026-06-08",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 11/17/2025, 11/17/2025, 01/28/2026"
+  },
+  {
+    "name": "Harder, Anna",
+    "role": "Office Admin/Payroll",
+    "category": "Administrative/Sales",
+    "licenseClass": "5",
+    "licenseNumber": "142781-491",
+    "dateOfHire": "2023-04-01",
+    "licenseExpiry": "2029-05-28"
+  },
+  {
+    "name": "Martens, Abram",
+    "role": "",
+    "category": "Heavy Equipment — Bunchers",
+    "licenseClass": "5",
+    "licenseNumber": "168930-212",
+    "dateOfHire": "2026-02-16",
+    "licenseExpiry": "2028-01-06",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 2/19/2026, 2/19/2026, 02/14/2026"
+  },
+  {
+    "name": "Neufeld, Wayne",
+    "role": "",
+    "category": "Heavy Equipment — Bunchers",
+    "licenseClass": "5",
+    "licenseNumber": "149751-703",
+    "dateOfHire": "2024-10-16",
+    "licenseExpiry": "2027-09-01",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/14/2024, 10/14/2024"
+  },
+  {
+    "name": "Wall, Kevin",
+    "role": "",
+    "category": "Heavy Equipment — Bunchers",
+    "licenseClass": "5",
+    "licenseNumber": "160660-270",
+    "dateOfHire": "2023-10-16",
+    "licenseExpiry": "2028-06-03",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/23/2023, 10/23/2023"
+  },
+  {
+    "name": "Friesen, Heinrich",
+    "role": "",
+    "category": "Heavy Equipment — Bunchers",
+    "licenseClass": "5",
+    "licenseNumber": "179247-754",
+    "dateOfHire": "2026-02-16",
+    "licenseExpiry": "2029-04-04",
+    "notes": "Language Barrier | Unverified training/cert dates from PDF import (assign to correct fields above): 2/16/2026, 2/16/2026"
+  },
+  {
+    "name": "Friesen, Ivan",
+    "role": "",
+    "category": "Heavy Equipment — Skidders",
+    "licenseClass": "5",
+    "licenseNumber": "147283-840",
+    "dateOfHire": "2023-10-16",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/30/2023, 10/30/2023, 01/2024"
+  },
+  {
+    "name": "Wall, Paul",
+    "role": "",
+    "category": "Heavy Equipment — Skidders",
+    "licenseClass": "5",
+    "licenseNumber": "174285-791",
+    "dateOfHire": "2024-12-19",
+    "licenseExpiry": "2026-10-27",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/19/2024, 12/19/2024, 01/28/2026"
+  },
+  {
+    "name": "Wall, P Martin",
+    "role": "",
+    "category": "Heavy Equipment — Skidders",
+    "licenseClass": "5",
+    "licenseNumber": "171356-140",
+    "dateOfHire": "2025-10-30",
+    "licenseExpiry": "2029-12-16",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/30/2025, 10/30/2025, 10/28/2028"
+  },
+  {
+    "name": "Friesen, Corny W",
+    "role": "",
+    "category": "Heavy Equipment — Skidders",
+    "licenseClass": "3",
+    "licenseNumber": "168517-472",
+    "dateOfHire": "2025-12-09",
+    "licenseExpiry": "2028-01-03",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/9/2025, 12/9/2025, 12/9/2028"
+  },
+  {
+    "name": "Dyck, Jerome",
+    "role": "",
+    "category": "Heavy Equipment — Skidders",
+    "licenseClass": "5",
+    "licenseNumber": "175551-944",
+    "dateOfHire": "2025-12-01",
+    "licenseExpiry": "2027-10-21",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/1/2025, 12/1/2025, 11/30/2028"
+  },
+  {
+    "name": "Friesen, Raymond",
+    "role": "",
+    "category": "Heavy Equipment — Skidders",
+    "licenseClass": "5",
+    "licenseNumber": "170312-714",
+    "dateOfHire": "2023-12-04",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/7/2023, 12/7/2023, 9/24/2027, 01/2024"
+  },
+  {
+    "name": "Letkeman, David JR",
+    "role": "",
+    "category": "Heavy Equipment — Processors",
+    "licenseClass": "5",
+    "licenseNumber": "164294-662",
+    "dateOfHire": "2025-10-07",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/7/2025, 10/7/2025, 1/11/2027"
+  },
+  {
+    "name": "Friesen, David",
+    "role": "",
+    "category": "Heavy Equipment — Processors",
+    "licenseClass": "5",
+    "licenseNumber": "174194-829",
+    "dateOfHire": "2025-10-01",
+    "licenseExpiry": "2030-08-08",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/01/2025, 10/01/2025"
+  },
+  {
+    "name": "Frissen, Jaren",
+    "role": "",
+    "category": "Heavy Equipment — Processors",
+    "licenseClass": "5",
+    "licenseNumber": "174130-765",
+    "dateOfHire": "2026-02-16",
+    "licenseExpiry": "2027-08-30",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 02/16/2026, 02/16/2026"
+  },
+  {
+    "name": "Wall, Simon",
+    "role": "",
+    "category": "Heavy Equipment — Log Loaders",
+    "licenseClass": "1",
+    "licenseNumber": "10007221139535",
+    "dateOfHire": "2024-10-29",
+    "notes": "License expiry from PDF (unparsed): 9/13/2034 | Unverified training/cert dates from PDF import (assign to correct fields above): 10/29/2024, 10/29/0202, 08/27/2028"
+  },
+  {
+    "name": "Peters, Jonathon",
+    "role": "",
+    "category": "Heavy Equipment — Log Loaders",
+    "licenseClass": "5",
+    "licenseNumber": "149157-596",
+    "dateOfHire": "2025-12-15",
+    "licenseExpiry": "2026-04-28",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/15/1025, 12/15/2025, 01/13/2029"
+  },
+  {
+    "name": "Wolfe, Matthew",
+    "role": "",
+    "category": "Heavy Equipment — Log Loaders",
+    "licenseClass": "5",
+    "licenseNumber": "166695-643",
+    "dateOfHire": "2026-01-20",
+    "notes": "License expiry from PDF (unparsed): 1/20/2026 | Unverified training/cert dates from PDF import (assign to correct fields above): 1/20/2026, 01/23/2029"
+  },
+  {
+    "name": "Driedger, Ronnie",
+    "role": "",
+    "category": "Heavy Equipment — Log Loaders",
+    "licenseClass": "5",
+    "licenseNumber": "149238-792",
+    "dateOfHire": "2026-01-20",
+    "licenseExpiry": "2027-08-13",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 1/20/2026, 1/20/2026, 01/16/2029"
+  },
+  {
+    "name": "Wolfe, Willy",
+    "role": "Mechanic",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "160551-339",
+    "dateOfHire": "2023-10-16",
+    "notes": "License expiry from PDF (unparsed): 01/27/2027 | Unverified training/cert dates from PDF import (assign to correct fields above): 10/05/2023, 11/27/2024, 9/24/2027, 01/2024"
+  },
+  {
+    "name": "Schmidt, Philip",
+    "role": "Cat",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "155936-230",
+    "dateOfHire": "2022-09-12",
+    "licenseExpiry": "2028-11-06",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 09/12/2022, 09/12/2022, 9/24/2027, 01/2024"
+  },
+  {
+    "name": "Harder, Mason",
+    "role": "Fuel up guy",
+    "category": "Other Personnel",
+    "licenseClass": "1",
+    "licenseNumber": "173833-542",
+    "dateOfHire": "2023-04-01",
+    "licenseExpiry": "2027-03-08",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 01/07/2025, 01/07/2025, 5/11/2027, 11/23/2028, 11/23/2028"
+  },
+  {
+    "name": "Friesen, George",
+    "role": "Mechanic",
+    "category": "Other Personnel",
+    "licenseClass": "1",
+    "licenseNumber": "151508-876",
+    "dateOfHire": "2025-11-17",
+    "licenseExpiry": "2030-06-05",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 11/17/2025, 11/07/2025, 2/1/2028, 11/17/2028"
+  },
+  {
+    "name": "Enns, Melissa",
+    "role": "Cook",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "169217-486",
+    "dateOfHire": "2024-11-02",
+    "notes": "License expiry from PDF (unparsed): 7/28/2028 | Unverified training/cert dates from PDF import (assign to correct fields above): 11/02/2024, 11/02/2024, 5/5/2027"
+  },
+  {
+    "name": "Enns, Rosalee",
+    "role": "Cook",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "170487-409",
+    "dateOfHire": "2024-11-02",
+    "licenseExpiry": "2029-12-09",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 11/02/2024, 11/02/2024"
+  },
+  {
+    "name": "Bergen, David",
+    "role": "Grader",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "164419-756",
+    "dateOfHire": "2026-03-02",
+    "licenseExpiry": "2029-10-17",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 03/02/2026, 03/02/2026"
+  },
+  {
+    "name": "Peters, Mark",
+    "role": "Mechanic",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "167403-229",
+    "dateOfHire": "2025-12-10",
+    "licenseExpiry": "2028-03-07",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/10/2025, 12/10/2025, 12/10/2028"
+  },
+  {
+    "name": "Friesen, Justin",
+    "role": "Excavator",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "168477-446",
+    "dateOfHire": "2025-01-07",
+    "licenseExpiry": "2029-01-26",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 01/07/2025, 01/07/2025, 1/6/2029"
+  },
+  {
+    "name": "Martens, Keith",
+    "role": "CAT",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "174743-765",
+    "dateOfHire": "2025-11-24",
+    "licenseExpiry": "2027-03-13",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 11/24/2025, 11/24/2025, 11/23/2028"
+  },
+  {
+    "name": "Zacharias, Ernie",
+    "role": "Processor",
+    "category": "Sub-Contractors",
+    "licenseClass": "5",
+    "licenseNumber": "167497-320",
+    "dateOfHire": "2025-11-24",
+    "licenseExpiry": "2026-12-01",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 11/24/2025, 11/28/2025"
+  },
+  {
+    "name": "Jeff Teichroeb",
+    "role": "Jeff Zacharias - Processor",
+    "category": "Sub-Contractors",
+    "licenseClass": "1",
+    "licenseNumber": "167478-346",
+    "dateOfHire": "2024-10-15",
+    "licenseExpiry": "2027-03-29",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/15/2023, 10/15/2023, 9/24/2027"
+  },
+  {
+    "name": "Jeff Teichroeb",
+    "role": "Paul Banman - Processor",
+    "category": "Sub-Contractors",
+    "licenseClass": "5",
+    "licenseNumber": "175530-229",
+    "dateOfHire": "2024-10-15",
+    "licenseExpiry": "2028-05-17",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/15/2024, 10/15/2024"
+  }
+];
+
 // Matches Harder Contracting's paper "Work Site Inspection Form" exactly —
 // same section order, same item wording, so a filled-out digital copy reads
 // the same as the paper one it replaces. Every item gets an OK / Req. Att.
@@ -4167,6 +4579,15 @@ async function saveIncidentReportRecord(record) {
 async function deleteIncidentReportRecord(recordId) {
   await firebase.database().ref('incidentReportRecords/' + recordId).remove();
 }
+// One record per person on the training matrix — a full save (not just
+// on-create), since editing an existing person's dates is the normal way
+// this gets used, not just adding new people.
+async function saveTrainingMatrixRecord(record) {
+  await firebase.database().ref('trainingMatrixRecords/' + record.id).set(stripUndefined(record));
+}
+async function deleteTrainingMatrixRecord(recordId) {
+  await firebase.database().ref('trainingMatrixRecords/' + recordId).remove();
+}
 async function migrateMapsToPerRecord() {
   return migrateArrayCollectionToPerRecord('maps', 'mapRecords', 'maps');
 }
@@ -4298,6 +4719,7 @@ const OFFLINE_QUEUE_HANDLERS = {
   safetyDocs: { save: saveSafetyDocRecord, delete: deleteSafetyDocRecord },
   safetyInspections: { save: saveSafetyInspectionRecord, delete: deleteSafetyInspectionRecord },
   incidentReports: { save: saveIncidentReportRecord, delete: deleteIncidentReportRecord },
+  trainingMatrix: { save: saveTrainingMatrixRecord, delete: deleteTrainingMatrixRecord },
   mapPins: { save: saveMapPinRecord, patch: patchMapPinRecord, delete: deleteMapPinRecord },
   mapLines: { save: saveMapLineRecord, patch: patchMapLineRecord, delete: deleteMapLineRecord },
   machineTracks: { save: saveMachineTrackRecord, patch: patchMachineTrackRecord },
@@ -4382,6 +4804,28 @@ async function saveMilestonesCelebrated(data) {
 // used for weekly backups, just with a different (separate) secret key.
 const CLOUD_FUNCTION_URL = 'https://weekly-backup-and-email-337605513419.northamerica-northeast1.run.app';
 const APP_SECRET = '7606b2344e4100126f3eb1ac';
+
+// Looks up one unit's live Samsara reading (odometer km for a vehicle,
+// engine hours for equipment) by matching its name against Samsara's
+// vehicle/asset list — same name-matching the Samsara map already relies
+// on, so it only works if the unit is named the same way in both places.
+// Returns null on any failure (no signal, no match, nothing tracked for
+// that unit) rather than throwing, since this is a convenience prefill,
+// never something that should block filling out an inspection.
+async function fetchSamsaraStat(unitName) {
+  try {
+    const res = await fetch(CLOUD_FUNCTION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: APP_SECRET, mode: 'samsaraStats' }),
+    });
+    const data = await res.json();
+    const match = (data.stats || []).find((s) => s.name && s.name.trim().toLowerCase() === unitName.trim().toLowerCase());
+    return match || null;
+  } catch (e) {
+    return null;
+  }
+}
 
 // Generate this in Firebase Console → Project Settings → Cloud Messaging →
 // Web configuration → Web Push certificates → Generate key pair, then
@@ -6767,10 +7211,32 @@ function NewVehicleInspectionForm({ knownUnits, defaultInspector, submitting, on
   const [inspectedBy, setInspectedBy] = useState(defaultInspector);
   const [items, setItems] = useState({});
   const [signature, setSignature] = useState('');
+  const [samsaraFetching, setSamsaraFetching] = useState(false);
+  const [samsaraFilled, setSamsaraFilled] = useState(false);
 
   const effectiveUnit = addingNewUnit ? newUnitName.trim() : unit;
   const answeredItems = Object.values(items).filter((v) => v && v.status).length;
   const canSubmit = effectiveUnit && inspectedBy.trim() && signature.trim() && answeredItems === VEHICLE_INSPECTION_ITEMS.length && !submitting;
+
+  // Pulls the live odometer reading the moment a unit is picked — this is
+  // "when inspection gets started" — so Km shows up filled in already
+  // rather than someone having to go check Samsara separately. Still just
+  // a starting point: they can overwrite it if it looks wrong.
+  useEffect(() => {
+    if (!unit || addingNewUnit) return;
+    let cancelled = false;
+    setSamsaraFetching(true);
+    setSamsaraFilled(false);
+    fetchSamsaraStat(unit).then((stat) => {
+      if (cancelled) return;
+      setSamsaraFetching(false);
+      if (stat && typeof stat.odometerKm === 'number') {
+        setKm(String(stat.odometerKm));
+        setSamsaraFilled(true);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [unit, addingNewUnit]);
 
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
@@ -6836,10 +7302,12 @@ function NewVehicleInspectionForm({ knownUnits, defaultInspector, submitting, on
             type="number"
             inputMode="numeric"
             value={km}
-            onChange={(e) => setKm(e.target.value)}
+            onChange={(e) => { setKm(e.target.value); setSamsaraFilled(false); }}
             className="w-full px-3 py-2 rounded-lg text-sm"
             style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
           />
+          {samsaraFetching && <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>📡 Checking Samsara…</p>}
+          {samsaraFilled && !samsaraFetching && <p className="text-xs mt-1" style={{ color: COLORS.accent }}>📡 From Samsara</p>}
         </div>
         <div>
           <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Inspected By</label>
@@ -6964,10 +7432,34 @@ function NewEquipmentInspectionForm({ knownUnits, defaultInspector, submitting, 
   const [items, setItems] = useState({});
   const [comments, setComments] = useState('');
   const [signature, setSignature] = useState('');
+  const [samsaraFetching, setSamsaraFetching] = useState(false);
+  const [samsaraFilled, setSamsaraFilled] = useState(false);
 
   const effectiveUnit = addingNewUnit ? newUnitName.trim() : unit;
   const answeredItems = Object.values(items).filter((v) => v && v.status).length;
   const canSubmit = effectiveUnit && machine.trim() && inspectedBy.trim() && signature.trim() && answeredItems === EQUIPMENT_INSPECTION_ITEMS.length && !submitting;
+
+  // Same idea as the vehicle form's Km prefill, but engine hours instead —
+  // see the CONFIDENCE NOTE on the samsaraStats Cloud Function mode: this
+  // is less certain to actually return data for equipment specifically,
+  // since Samsara's Asset tracking is primarily location-only. It'll just
+  // silently stay blank if nothing comes back, same as any unit with no
+  // Samsara device at all.
+  useEffect(() => {
+    if (!unit || addingNewUnit) return;
+    let cancelled = false;
+    setSamsaraFetching(true);
+    setSamsaraFilled(false);
+    fetchSamsaraStat(unit).then((stat) => {
+      if (cancelled) return;
+      setSamsaraFetching(false);
+      if (stat && typeof stat.engineHours === 'number') {
+        setHourMeter(String(stat.engineHours));
+        setSamsaraFilled(true);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [unit, addingNewUnit]);
 
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
@@ -7034,10 +7526,12 @@ function NewEquipmentInspectionForm({ knownUnits, defaultInspector, submitting, 
             type="text"
             inputMode="numeric"
             value={hourMeter}
-            onChange={(e) => setHourMeter(e.target.value)}
+            onChange={(e) => { setHourMeter(e.target.value); setSamsaraFilled(false); }}
             className="w-full px-3 py-2 rounded-lg text-sm"
             style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
           />
+          {samsaraFetching && <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>📡 Checking Samsara…</p>}
+          {samsaraFilled && !samsaraFetching && <p className="text-xs mt-1" style={{ color: COLORS.accent }}>📡 From Samsara</p>}
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2 mb-4">
@@ -7292,6 +7786,92 @@ function CheckboxGroup({ label, options, selected, onChange, otherText, onOtherT
 // almost happened") so people actually report them; the full root-cause
 // investigation apparatus can always be added later from the report's
 // detail view if it turns out to warrant one.
+// Add/Edit form for one person on the training matrix — same component
+// either way, just pre-filled when editing. Each tracked date field's
+// label changes color live as you type, so the warning is visible right
+// where you're editing it, not just on the summary list.
+function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete }) {
+  const inputStyle = { background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
+  const [name, setName] = useState((initial && initial.name) || '');
+  const [role, setRole] = useState((initial && initial.role) || '');
+  const [category, setCategory] = useState((initial && initial.category) || TRAINING_MATRIX_CATEGORIES[0]);
+  const [customCategory, setCustomCategory] = useState(!!(initial && initial.category && !TRAINING_MATRIX_CATEGORIES.includes(initial.category)));
+  const [notes, setNotes] = useState((initial && initial.notes) || '');
+  const [values, setValues] = useState(() => {
+    const v = {};
+    TRAINING_MATRIX_FIELDS.forEach((f) => { v[f.key] = (initial && initial[f.key]) || ''; });
+    return v;
+  });
+
+  const canSubmit = name.trim() && !submitting;
+  const statusColor = (field) => {
+    const s = trainingFieldStatus(field, values).status;
+    return TRAINING_STATUS_COLORS[s] || COLORS.inkDim;
+  };
+
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <p className="font-display text-lg font-bold mb-3">{initial ? 'Edit Person' : 'Add Person'}</p>
+
+      <input type="text" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      <input type="text" placeholder="Role/Position" value={role} onChange={(e) => setRole(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+
+      {customCategory ? (
+        <div className="flex gap-2 mb-3">
+          <input type="text" placeholder="Category" value={category} onChange={(e) => setCategory(e.target.value)} className="flex-1 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+          <button type="button" onClick={() => { setCustomCategory(false); setCategory(TRAINING_MATRIX_CATEGORIES[0]); }} className="text-xs" style={{ color: COLORS.inkDim }}>Pick from list</button>
+        </div>
+      ) : (
+        <select
+          value={category}
+          onChange={(e) => { if (e.target.value === '__other__') { setCustomCategory(true); setCategory(''); } else setCategory(e.target.value); }}
+          className="w-full mb-3 px-3 py-2 rounded-lg text-sm"
+          style={inputStyle}
+        >
+          {TRAINING_MATRIX_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          <option value="__other__">Other…</option>
+        </select>
+      )}
+
+      {TRAINING_MATRIX_FIELDS.map((f) => (
+        <div key={f.key} className="mb-2">
+          <label className="block text-xs font-semibold mb-1" style={{ color: statusColor(f) }}>{f.label}</label>
+          <input
+            type={f.type}
+            value={values[f.key]}
+            onChange={(e) => setValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+            className="w-full px-3 py-2 rounded-lg text-sm"
+            style={inputStyle}
+          />
+        </div>
+      ))}
+
+      <textarea placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full mt-2 mb-4 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+
+      <div className="flex items-center justify-between">
+        <div className="flex gap-2">
+          <Btn
+            onClick={() => onSubmit({ ...(initial ? { id: initial.id } : {}), name: name.trim(), role: role.trim(), category, notes: notes.trim(), ...values })}
+            disabled={!canSubmit}
+          >
+            {submitting ? 'Saving…' : 'Save'}
+          </Btn>
+          <Btn variant="ghost" onClick={onCancel} disabled={submitting}>Cancel</Btn>
+        </div>
+        {initial && onDelete && (
+          <button
+            onClick={() => { if (confirm(`Remove ${name} from the training matrix?`)) onDelete(initial.id); }}
+            className="text-xs"
+            style={{ color: '#E07A5F' }}
+          >
+            🗑️ Remove
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function NewNearMissForm({ defaultReporter, submitting, onCancel, onSubmit }) {
   const inputStyle = { background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
   const [dateOfOccurrence, setDateOfOccurrence] = useState(() => new Date().toISOString().slice(0, 10));
@@ -8963,6 +9543,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const warmedSafetyDocIds = useRef(new Set());
   const [safetyInspections, setSafetyInspections] = useState(() => cacheGet('safetyInspections', []));
   const [incidentReports, setIncidentReports] = useState(() => cacheGet('incidentReports', []));
+  const [trainingMatrix, setTrainingMatrix] = useState(() => cacheGet('trainingMatrix', []));
+  const [trainingMatrixExpanded, setTrainingMatrixExpanded] = useState(false);
+  const [editingTrainingPersonId, setEditingTrainingPersonId] = useState(null); // null = list view; 'new' = add form; else a person's id
+  const [submittingTrainingPerson, setSubmittingTrainingPerson] = useState(false);
+  const [importingTrainingMatrix, setImportingTrainingMatrix] = useState(false);
   const [nearMissRequests, setNearMissRequests] = useState(() => cacheGet('nearMissRequests', []));
   const [showRequestNearMiss, setShowRequestNearMiss] = useState(false);
   const [requestNearMissTarget, setRequestNearMissTarget] = useState('');
@@ -9304,6 +9889,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = Object.values(snap.val() || {});
       setIncidentReports(val);
       cacheSet('incidentReports', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('trainingMatrixRecords');
+    const on = ref.on('value', (snap) => {
+      const val = Object.values(snap.val() || {});
+      setTrainingMatrix(val);
+      cacheSet('trainingMatrix', val);
     });
     return () => ref.off('value', on);
   }, []);
@@ -10930,6 +11525,21 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setIncidentReports(next);
     cacheSet('incidentReports', next);
     await queueWrite('incidentReports', { kind: 'save', entry: updated });
+  };
+  const saveTrainingPerson = async (person) => {
+    const full = person.id ? person : { ...person, id: uid(), createdBy: currentMechanic, createdAt: Date.now() };
+    const next = trainingMatrix.some((p) => p.id === full.id)
+      ? trainingMatrix.map((p) => (p.id === full.id ? full : p))
+      : [...trainingMatrix, full];
+    setTrainingMatrix(next);
+    cacheSet('trainingMatrix', next);
+    await queueWrite('trainingMatrix', { kind: 'save', entry: full });
+  };
+  const deleteTrainingPerson = async (personId) => {
+    const next = trainingMatrix.filter((p) => p.id !== personId);
+    setTrainingMatrix(next);
+    cacheSet('trainingMatrix', next);
+    await queueWrite('trainingMatrix', { kind: 'delete', entryId: personId });
   };
   // Signatures accumulate over time — the reporter signs at filing, an
   // investigator or an involved party may not sign until days later once
@@ -16898,7 +17508,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     />
                   ) : newVehicleInspectionOpen ? (
                     <NewVehicleInspectionForm
-                      knownUnits={[...new Set(safetyInspections.filter((r) => r.type === 'vehicle').map((r) => r.unit))].sort((a, b) => a.localeCompare(b))}
+                      knownUnits={units.filter((u) => { const t = unitTypes[slugForUnit(u)]; return t === 'truck' || t === 'pickup'; }).sort((a, b) => a.localeCompare(b))}
                       defaultInspector={currentMechanic}
                       submitting={submittingSafetyInspection}
                       onCancel={() => setNewVehicleInspectionOpen(false)}
@@ -16976,12 +17586,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   ) : newEquipmentInspectionOpen ? (
                     <NewEquipmentInspectionForm
                       knownUnits={
-                        [...new Map(
-                          safetyInspections
-                            .filter((r) => r.type === 'equipment')
-                            .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
-                            .map((r) => [r.unit, { unit: r.unit, machine: r.machine }])
-                        ).values()]
+                        units
+                          .filter((u) => MACHINE_TYPE_LABELS[unitTypes[slugForUnit(u)]])
+                          .sort((a, b) => a.localeCompare(b))
+                          .map((u) => ({ unit: u, machine: MACHINE_TYPE_LABELS[unitTypes[slugForUnit(u)]] }))
                       }
                       defaultInspector={currentMechanic}
                       submitting={submittingSafetyInspection}
@@ -17280,6 +17888,94 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
                   {incidentReports.length === 0 && (
                     <p className="text-sm" style={{ color: COLORS.inkDim }}>No reports on file yet.</p>
+                  )}
+                </div>
+              )}
+            </AdminSection>
+          )}
+
+          {(isAdmin || isSafety) && (
+            <AdminSection
+              icon="🎓"
+              title="Training Matrix"
+              expanded={trainingMatrixExpanded}
+              onToggle={() => setTrainingMatrixExpanded((x) => !x)}
+            >
+              {editingTrainingPersonId ? (
+                <TrainingPersonForm
+                  initial={editingTrainingPersonId === 'new' ? null : trainingMatrix.find((p) => p.id === editingTrainingPersonId)}
+                  submitting={submittingTrainingPerson}
+                  onCancel={() => setEditingTrainingPersonId(null)}
+                  onDelete={async (id) => { await deleteTrainingPerson(id); setEditingTrainingPersonId(null); }}
+                  onSubmit={async (person) => {
+                    setSubmittingTrainingPerson(true);
+                    await saveTrainingPerson(person);
+                    setSubmittingTrainingPerson(false);
+                    setEditingTrainingPersonId(null);
+                  }}
+                />
+              ) : (
+                <div>
+                  <div className="flex gap-2 mb-4">
+                    <button
+                      onClick={() => setEditingTrainingPersonId('new')}
+                      className="text-xs font-semibold px-3 py-2 rounded-lg"
+                      style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                    >
+                      + Add Person
+                    </button>
+                    {trainingMatrix.length === 0 && (
+                      <button
+                        disabled={importingTrainingMatrix}
+                        onClick={async () => {
+                          if (!confirm(`Import ${TRAINING_MATRIX_IMPORT_SEED.length} people from the training matrix PDF? Only run this once.`)) return;
+                          setImportingTrainingMatrix(true);
+                          for (const person of TRAINING_MATRIX_IMPORT_SEED) {
+                            await saveTrainingPerson({ ...person, id: uid(), createdBy: currentMechanic, createdAt: Date.now() });
+                          }
+                          setImportingTrainingMatrix(false);
+                        }}
+                        className="text-xs font-semibold px-3 py-2 rounded-lg"
+                        style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                      >
+                        {importingTrainingMatrix ? `Importing… (${TRAINING_MATRIX_IMPORT_SEED.length})` : `📥 Import ${TRAINING_MATRIX_IMPORT_SEED.length} From PDF`}
+                      </button>
+                    )}
+                  </div>
+
+                  {[...TRAINING_MATRIX_CATEGORIES, ...new Set(trainingMatrix.map((p) => p.category).filter((c) => c && !TRAINING_MATRIX_CATEGORIES.includes(c)))].map((cat) => {
+                    const people = trainingMatrix.filter((p) => (p.category || TRAINING_MATRIX_CATEGORIES[0]) === cat);
+                    if (people.length === 0) return null;
+                    return (
+                      <div key={cat} className="mb-4">
+                        <p className="font-display text-sm font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>{cat}</p>
+                        <div className="space-y-2">
+                          {people.map((p) => {
+                            const status = trainingPersonStatus(p);
+                            const statusLabel = status === 'expired' ? 'Expired' : status === 'expiringSoon' ? 'Due Soon' : '';
+                            return (
+                              <button
+                                key={p.id}
+                                onClick={() => setEditingTrainingPersonId(p.id)}
+                                className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                                style={{ background: COLORS.surfaceRaised }}
+                              >
+                                <span className="text-sm">{p.name}{p.role ? ` — ${p.role}` : ''}</span>
+                                {statusLabel && (
+                                  <span className="text-xs font-bold flex-shrink-0 ml-2" style={{ color: TRAINING_STATUS_COLORS[status] }}>
+                                    {statusLabel}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {trainingMatrix.length === 0 && (
+                    <p className="text-sm" style={{ color: COLORS.inkDim }}>No one on the training matrix yet.</p>
                   )}
                 </div>
               )}
