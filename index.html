@@ -806,14 +806,28 @@ const PERSONAL_FACTORS_OPTIONS = ['Inadequate Physical Capability', 'Inadequate 
 const JOB_FACTORS_OPTIONS = ['Inadequate Leadership or Supervision', 'Inadequate Engineering Controls', 'Inadequate Purchasing', 'Inadequate Maintenance', 'Inadequate Tools or Equipment', 'Inadequate Work Standards', 'Wear and Tear', 'Other'];
 const ROOT_CAUSES_OPTIONS = ['Management Commitment', 'Leadership Training', 'Planned Inspections', 'Preventive Maintenance', 'Hazard Identification', 'Safe Work Practices and Procedures', 'Inadequate Previous Investigation', 'Emergency Preparedness and Response', 'Company Safety Rules', 'Worker Knowledge & Skill Training', 'Personal Protective Equipment (PPE)', 'Personal or Group Communications', 'Hygiene and Sanitation', 'Hiring & Placement Standards'];
 const PREVENTION_OPTIONS = ['Training/Retraining', 'Job procedure/design changes', 'Equipment repair or replacement', 'Hazard Identification and Analysis', 'Improved Hazard Controls', 'Supervisory Communication', 'Improve Safety Inspection Process', 'Reassignment of Involved Worker', 'Facilities Layout Review and Redesign', 'Installation of Safety Guards/Barriers', 'Safe work procedure reviewed and revised', 'Other'];
-// Matches the sign-off table at the bottom of the reference form exactly.
-// The reporter's own signature is auto-tagged 'Employee' at submission, so
-// that one's usually already checked off by the time anyone looks.
+// Role labels offered when adding a signature (RoleSelect's dropdown) —
+// just labels for who's signing, not a fixed list of who's required to.
 const INCIDENT_EXPECTED_SIGNERS = ['Employee', 'Supervisor', 'Management', 'H&S Coordinator'];
+// Who actually needs to sign a given report: whoever filed it, plus
+// whoever's listed as involved in Section 1 — not a fixed role checklist.
+// A routine incident with one person involved only ever needs two
+// signatures; nothing here requires a supervisor or management sign-off
+// unless someone deliberately adds one via "Add a Signature."
+function incidentReportExpectedSigners(record) {
+  const names = new Set();
+  if (record.reportedBy && record.reportedBy.trim()) names.add(record.reportedBy.trim());
+  incidentReportEmployees(record).forEach((emp) => {
+    const fullName = [emp.firstName, emp.lastName].filter(Boolean).join(' ').trim();
+    if (fullName) names.add(fullName);
+  });
+  return [...names];
+}
 function incidentSignersStatus(record) {
-  const signedRoles = (record.signatures || []).map((s) => (s.role || '').trim().toLowerCase());
-  const missing = INCIDENT_EXPECTED_SIGNERS.filter((role) => !signedRoles.includes(role.toLowerCase()));
-  return { total: INCIDENT_EXPECTED_SIGNERS.length, signedCount: INCIDENT_EXPECTED_SIGNERS.length - missing.length, missing, complete: missing.length === 0 };
+  const expected = incidentReportExpectedSigners(record);
+  const signedNames = (record.signatures || []).map((s) => (s.name || '').trim().toLowerCase());
+  const missing = expected.filter((name) => !signedNames.includes(name.toLowerCase()));
+  return { total: expected.length, signedCount: expected.length - missing.length, missing, complete: expected.length > 0 && missing.length === 0 };
 }
 // Reports saved before multi-person support only have the old flat fields
 // (record.lastName, record.department, etc.) rather than an employees
