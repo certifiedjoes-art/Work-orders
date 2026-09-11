@@ -844,6 +844,17 @@ function incidentReportEmployees(record) {
   }
   return [];
 }
+// Reports saved before per-witness statements only have a combined
+// witnesses string plus a separate "statement(s) provided?" string —
+// wrapped into the same {name, contactInfo, statement} shape so older
+// reports still display fine instead of showing blank.
+function incidentReportWitnesses(record) {
+  if (Array.isArray(record.witnesses)) return record.witnesses;
+  if (typeof record.witnesses === 'string' && record.witnesses.trim()) {
+    return [{ name: record.witnesses, contactInfo: '', statement: record.witnessStatementProvided || '' }];
+  }
+  return [];
+}
 // Matches the columns on Harder Contracting's paper training matrix
 // exactly, in the same order. `tracked: true` means the field IS an
 // expiry date to color-code directly; `renewalYears` means it's a
@@ -4240,8 +4251,12 @@ async function buildIncidentReportPdf(record) {
   }
 
   drawHeading('6. Witness Information');
-  drawField('Witnesses', record.witnesses);
-  drawField('Statement(s) Provided', record.witnessStatementProvided);
+  const pdfWitnesses = incidentReportWitnesses(record);
+  pdfWitnesses.forEach((w, idx) => {
+    if (pdfWitnesses.length > 1) drawField('Witness', String(idx + 1));
+    drawField('Name / Contact', [w.name, w.contactInfo].filter(Boolean).join(' · '));
+    drawField('Statement', w.statement);
+  });
 
   drawHeading('7. Incident Information');
   drawChecks('Type of Occurrence', record.occurrenceTypes, record.occurrenceTypeOther);
@@ -8071,8 +8086,7 @@ function NewIncidentReportForm({ defaultReporter, submitting, onCancel, onSubmit
   const [estimatedCostOfDamage, setEstimatedCostOfDamage] = useState('');
   const [damagedPropertyDescription, setDamagedPropertyDescription] = useState('');
   // Section 6 — Witness Information
-  const [witnesses, setWitnesses] = useState('');
-  const [witnessStatementProvided, setWitnessStatementProvided] = useState('');
+  const [witnesses, setWitnesses] = useState([]);
   // Section 7 — Incident Information
   const [occurrenceTypes, setOccurrenceTypes] = useState([]);
   const [occurrenceTypeOther, setOccurrenceTypeOther] = useState('');
@@ -8197,8 +8211,25 @@ function NewIncidentReportForm({ defaultReporter, submitting, onCancel, onSubmit
       )}
 
       {sectionHeading(6, 'Witness Information')}
-      <textarea placeholder="Witness name(s) and contact info, one per line" value={witnesses} onChange={(e) => setWitnesses(e.target.value)} rows={2} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-      <input type="text" placeholder="Witness statement(s) provided? (Yes/No)" value={witnessStatementProvided} onChange={(e) => setWitnessStatementProvided(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      {witnesses.map((w, idx) => (
+        <div key={idx} className="mb-3 pl-3" style={{ borderLeft: `2px solid ${COLORS.line}` }}>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-xs font-semibold" style={{ color: COLORS.inkDim }}>Witness {idx + 1}</p>
+            <button type="button" onClick={() => setWitnesses((prev) => prev.filter((_, i) => i !== idx))} className="text-xs" style={{ color: '#E07A5F' }}>Remove</button>
+          </div>
+          <input type="text" placeholder="Name" value={w.name} onChange={(e) => setWitnesses((prev) => prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)))} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+          <input type="text" placeholder="Contact info (phone/email)" value={w.contactInfo} onChange={(e) => setWitnesses((prev) => prev.map((x, i) => (i === idx ? { ...x, contactInfo: e.target.value } : x)))} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+          <textarea placeholder="Statement" value={w.statement} onChange={(e) => setWitnesses((prev) => prev.map((x, i) => (i === idx ? { ...x, statement: e.target.value } : x)))} rows={2} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => setWitnesses((prev) => [...prev, { name: '', contactInfo: '', statement: '' }])}
+        className="text-xs font-semibold px-3 py-2 rounded-lg mb-2"
+        style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+      >
+        + Add Witness
+      </button>
 
       {sectionHeading(7, 'Incident Information')}
       <CheckboxGroup label="Type of Occurrence" options={OCCURRENCE_TYPE_OPTIONS} selected={occurrenceTypes} onChange={setOccurrenceTypes} otherText={occurrenceTypeOther} onOtherTextChange={setOccurrenceTypeOther} />
@@ -8248,7 +8279,7 @@ function NewIncidentReportForm({ defaultReporter, submitting, onCancel, onSubmit
             injuryIllness, bodyPartsInjured: bodyPartsInjured.trim(), injuryDescription: injuryDescription.trim(),
             firstAidAttendant: firstAidAttendant.trim(), incidentFormsFilledOut: incidentFormsFilledOut.trim(), levelOfFirstAid: levelOfFirstAid.trim(), typeOfFirstAid: typeOfFirstAid.trim(), clinicHospital: clinicHospital.trim(), attendingPhysician: attendingPhysician.trim(), attendingPoliceOfficer: attendingPoliceOfficer.trim(),
             propertyDamaged: propertyDamaged.trim(), estimatedCostOfDamage: estimatedCostOfDamage.trim(), damagedPropertyDescription: damagedPropertyDescription.trim(),
-            witnesses: witnesses.trim(), witnessStatementProvided: witnessStatementProvided.trim(),
+            witnesses: witnesses.map((w) => ({ name: w.name.trim(), contactInfo: w.contactInfo.trim(), statement: w.statement.trim() })).filter((w) => w.name || w.contactInfo || w.statement),
             occurrenceTypes, occurrenceTypeOther: occurrenceTypeOther.trim(), contactWith, contactWithOther: contactWithOther.trim(), sequenceDescription: sequenceDescription.trim(), diagramAttached: diagramAttached.trim(),
             unsafeActs, unsafeActsOther: unsafeActsOther.trim(), safetyDeviceInoperable: safetyDeviceInoperable.trim(), substanceSuspicion: substanceSuspicion.trim(), operationsManagerNotified: operationsManagerNotified.trim(),
             unsafeConditions, unsafeConditionsOther: unsafeConditionsOther.trim(),
@@ -8413,8 +8444,13 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
       )}
 
       <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>6. Witness Information</p>
-      {field('Witnesses', record.witnesses)}
-      {field('Statement(s) Provided', record.witnessStatementProvided)}
+      {incidentReportWitnesses(record).map((w, idx) => (
+        <div key={idx} className="mb-2">
+          <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: COLORS.inkDim }}>Witness{incidentReportWitnesses(record).length > 1 ? ` ${idx + 1}` : ''}</p>
+          <p className="text-sm">{[w.name, w.contactInfo].filter(Boolean).join(' · ') || '—'}</p>
+          {w.statement && <p className="text-sm mt-1 whitespace-pre-wrap" style={{ color: COLORS.inkDim }}>{w.statement}</p>}
+        </div>
+      ))}
 
       <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>7. Incident Information</p>
       {checks('Type of Occurrence', record.occurrenceTypes, record.occurrenceTypeOther)}
