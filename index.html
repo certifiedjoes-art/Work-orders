@@ -86,7 +86,7 @@
 <!-- React + Babel -->
 <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js" onload="window.__loadStatus['react']='ok'" onerror="window.__loadStatus['react']='FAILED'"></script>
 <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js" onload="window.__loadStatus['react-dom']='ok'" onerror="window.__loadStatus['react-dom']='FAILED'"></script>
-<script crossorigin src="./babel.min.js" onload="window.__loadStatus['babel']='ok'" onerror="window.__loadStatus['babel']='FAILED'"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.25.6/babel.min.js" onload="window.__loadStatus['babel']='ok'" onerror="window.__loadStatus['babel']='FAILED'"></script>
 
 <!-- Firebase (Realtime Database) -->
 <script crossorigin src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" onload="window.__loadStatus['firebase-app']='ok'" onerror="window.__loadStatus['firebase-app']='FAILED'"></script>
@@ -769,6 +769,218 @@ const STATUSES = ['Open', 'In Progress', 'Done'];
 // of this open library.
 const SAFETY_CATEGORIES = ['Safety Manual', 'OHS Manual', 'SDS Sheets', 'Safety Meeting Minutes', 'Committee Meeting Minutes', 'SFI Booklet'];
 
+// Job-specific hazard data digitized from Harder Contracting's Job Hazard
+// Analysis manual (task inventory + critical task flags per occupation).
+// View-only for now on the Safety page; sign-off tracking and the invite-
+// link job picker come in a later phase.
+const JOB_HAZARDS = {
+  buncherOperator: {
+    label: 'Buncher Operator',
+    tasks: [
+      { task: 'Mount / dismount machine', hazards: ['Slipping, falling'], critical: true },
+      { task: 'Shift inspections', hazards: ['Slipping, falling, tripping', 'Cut legs when blade is still turning', 'Exposure to Cold'], critical: false },
+      { task: 'Greasing', hazards: ['Slipping, falling, tripping', 'Cut legs when blade is still turning', 'Exposure to Heat', 'Exposure to Cold', 'Pinching, Squashing'], critical: true },
+      { task: 'Operating', hazards: ['Excessive noise levels', 'Fatigue', 'Ergonomics (RSI)', 'Shift Work, Night Shift', 'Production related Stress', 'Machine catching fire'], critical: true },
+      { task: 'Walk machine over distance', hazards: ['Sink machine in swamp', 'Auto / truck accident', 'Tip Machine', 'Snag trees or branches with boom'], critical: true },
+      { task: 'Cutting Trees', hazards: ['Sink machine in swamp', 'Tip Machine', 'Flying debris, trees falling on buncher', 'Break saw blade', 'Cut into tracks or into ground', 'Trees jabbing into side panels or cab', 'Hit standing trees with head/boom'], critical: true },
+      { task: 'Fueling machine', hazards: ['Slipping, falling, tripping', 'Exposure to Cold', 'Fuel spill', 'Skin contact with diesel fuel'], critical: true },
+      { task: 'Radio communications', hazards: ['Wrong directions, getting lost', 'Mis-understanding, entering no-go zones', 'Failure to communicate with workers'], critical: true },
+    ],
+  },
+  campAttendantChainsawOperator: {
+    label: 'Camp Attendant / Chainsaw Operator',
+    tasks: [
+      { task: 'Camp Attendant (General duties)', hazards: ['Slipping, falling, tripping', 'Fatigue', 'Excessive noise levels', 'Exposure to Cold', 'Pinching or cutting hands', 'Harassment from workers', 'Physical straining', 'Problem with wildlife', 'Insect bites / stings', 'Exposure to hazardous chemicals'], critical: false },
+      { task: 'Initial Camp Setup', hazards: ['Slipping, falling, tripping', 'Falling from heights', 'Shocks', 'Physical straining', 'Exposure to Cold', 'Insect bites / stings', 'Confined space', 'Problem with wildlife', 'Pinching or cutting hands'], critical: true },
+      { task: 'Working with chainsaw', hazards: ['Pinched/Cut fingers', 'Pour chain oil in gas tank', 'Chainsaw accident'], critical: false },
+      { task: 'Maintaining yardsite', hazards: ['Slipping, falling, tripping', 'Exposure to Cold', 'Insect bites / stings', 'Excessive noise levels', 'Harassment', 'Chainsaw accident', 'Physical straining'], critical: true },
+      { task: 'Maintaining Camp', hazards: ['Electrical shock', 'Harassment', 'Water leaks', 'Working in confined spaces', 'Frozen water lines', 'Fumes from furnace / water heaters', 'Exposure to Heat / burns'], critical: true },
+      { task: 'Equipment maintenance', hazards: ['Slipping, falling, tripping', 'Fuel spill', 'Exposure to Cold'], critical: true },
+      { task: 'Driving on haul/bush roads', hazards: ['Vehicle accident', 'Drive over debris on road', 'Back into dirt bank', 'Hit ditch / snow bank', 'Fuel spill'], critical: true },
+      { task: 'Radio communication', hazards: ['Wrong directions, getting lost', 'Conflict with traffic', 'Failure to establish communication'], critical: false },
+    ],
+  },
+  cook: {
+    label: 'Cook',
+    tasks: [
+      { task: 'Camp Cook/Janitor in general', hazards: ['Fatigue', 'Shift Work Strain', 'Harassment from workers'], critical: false },
+      { task: 'Cooking Food', hazards: ['Cutting, scratching hands', 'Exposure to Heat / burns / scalding', 'Electrical shock', 'Spoiled Food'], critical: true },
+      { task: 'Cleaning Kitchen', hazards: ['Cuts, scratches', 'Electrical shock', 'Trips, falls'], critical: false },
+      { task: 'Cleaning camp, sleeper units', hazards: ['Trips, slips, Falls', 'Back strain', 'Electrical shock'], critical: true },
+      { task: 'Grocery run to town', hazards: ['Vehicle accident', 'Hit ditch / snow bank', 'Road Rage / harassment', 'Speeding', 'Back strain carrying heavy boxes'], critical: true },
+    ],
+  },
+  crawlerOperator: {
+    label: 'Crawler Operator',
+    tasks: [
+      { task: 'Mount / Dismount Machine', hazards: ['Slipping, falling, tripping'], critical: true },
+      { task: 'Shift inspections', hazards: ['Slipping, falling, tripping', 'Exposure to Cold'], critical: true },
+      { task: 'Greasing, Track Cleaning', hazards: ['Slipping, falling, tripping', 'Exposure to Heat', 'Exposure to Cold', 'Pinching, Squashing', 'Physical straining', 'Dust, inhalation, getting in eyes'], critical: true },
+      { task: 'Operating in general', hazards: ['Fatigue', 'Ergonomics (RSI)', 'Shift Work, Night Shift', 'Production related Stress', 'Excessive noise levels', 'Machine catching fire'], critical: false },
+      { task: 'Walk crawler over distance', hazards: ['Sink machine in swamp', 'Auto / truck accident', 'Trees breaking windows, limbs entering cab', 'Flying debris', 'Tip / Rollover Machine'], critical: true },
+      { task: 'Plowing Existing Cutlines', hazards: ['Sink crawler in swamp', 'Trespass onto machine-free zone', 'Trees breaking windows, limbs entering cab', 'Flying debris'], critical: true },
+      { task: 'Build roads / water crossings', hazards: ['Trespass onto machine-free zone', 'Build unapproved roads / crossings', 'Tip / Rollover Machine', 'Sink crawler in swamp', 'Trees breaking windows, limbs entering cab', 'Flying debris'], critical: true },
+      { task: 'Piling brush', hazards: ['Tip / Rollover Machine', 'Trees breaking windows, limbs entering cab', 'Flying debris'], critical: true },
+      { task: 'Reclaiming', hazards: ['Trees/snags entering cab and engine area', 'Tip / Rollover Machine', 'Flying debris'], critical: false },
+      { task: 'Build and remove water crossings', hazards: ['Trespass onto machine-free zone', 'Cause ground disturbance in unapproved areas', 'Tip / Rollover Machine', 'Sink crawler in swamp', 'Trees breaking windows, limbs entering cab', 'Flying debris'], critical: true },
+      { task: 'Winching', hazards: ['Break winch line', 'Cut / Puncture hands on cable', 'Flying debris entering workstation', 'Debris hitting bystanders'], critical: false },
+      { task: 'Fueling machine', hazards: ['Slipping, falling, tripping', 'Exposure to Cold', 'Fuel spill', 'Skin contact with diesel fuel'], critical: true },
+      { task: 'Radio communications', hazards: ['Wrong directions, getting lost', 'Mis-understanding, entering no-go zones', 'Failure to communicate with workers'], critical: false },
+    ],
+  },
+  processorOperator: {
+    label: 'Processor Operator',
+    tasks: [
+      { task: 'Mount / dismount machine', hazards: ['Slipping, falling, tripping'], critical: true },
+      { task: 'Shift inspections', hazards: ['Slipping, falling, tripping', 'Exposure to Cold'], critical: true },
+      { task: 'Greasing, Track Cleaning', hazards: ['Slipping, falling, tripping', 'Exposure to Heat', 'Exposure to Cold', 'Pinching, Squashing', 'Physical straining', 'Dust, inhalation, getting in eyes'], critical: true },
+      { task: 'Operating (in general)', hazards: ['Fatigue', 'Ergonomics (RSI)', 'Shift Work, Night Shift', 'Production related Stress', 'Excessive noise levels', 'Machine catching fire'], critical: true },
+      { task: 'Walk processor over distance', hazards: ['Sink machine in swamp', 'Auto / truck accident', 'Tip Machine', 'Snag trees or branches with boom'], critical: true },
+      { task: 'Processing trees', hazards: ['Conflict with passing vehicles', 'Flying debris breaking windows', 'Branches / limbs hitting cab', 'Rolling logs off deck', 'Break chain or bend saw bars', 'Eye strain'], critical: true },
+      { task: 'Quality Checks', hazards: ['Slipping, falling, tripping', 'Exposure to Cold'], critical: true },
+      { task: 'Maintenance', hazards: ['Slipping, falling, tripping', 'Exposure to Heat', 'Exposure to Cold', 'Pinching, Squashing', 'Cutting Hands'], critical: true },
+      { task: 'Fueling machine', hazards: ['Slipping, falling, tripping', 'Exposure to Cold', 'Fuel spill', 'Skin contact with diesel fuel'], critical: true },
+      { task: 'Radio communications', hazards: ['Wrong directions, getting lost', 'Mis-understanding, entering no-go zones', 'Failure to communicate with workers'], critical: false },
+    ],
+  },
+  excavatorOperator: {
+    label: 'Excavator Operator',
+    tasks: [
+      { task: 'Mount / dismount machine', hazards: ['Slipping, falling, tripping'], critical: true },
+      { task: 'Shift inspections', hazards: ['Slipping, falling, tripping', 'Exposure to Cold'], critical: false },
+      { task: 'Greasing, Track Cleaning', hazards: ['Slipping, falling, tripping', 'Exposure to Heat', 'Exposure to Cold', 'Pinching, Squashing', 'Physical straining', 'Dust, inhalation, getting in eyes'], critical: true },
+      { task: 'Operating (in general)', hazards: ['Fatigue', 'Ergonomics (RSI)', 'Shift Work, Night Shift', 'Production related Stress', 'Excessive noise levels', 'Machine catching fire'], critical: true },
+      { task: 'Walk excavator over distance', hazards: ['Back over people or equipment', 'Snag trees, facilities, buildings with boom', 'Trees jabbing into side panels or cab', 'Flying debris, trees falling on machine', 'Auto / truck accident', 'Tip Machine', 'Sink Machine'], critical: true },
+      { task: 'Excavating', hazards: ['Overhead power lines', 'Buried facilities', 'Cave ins', 'Hit people or equipment with boom or attachment', 'Excavate in the wrong place, trespass', 'Tip Machine', 'Sink Machine', 'Cause ground disturbance in unapproved areas'], critical: true },
+      { task: 'Reclaiming', hazards: ['Trees jabbing into side panels or cab', 'Flying debris, trees falling on machine', 'Tip Machine', 'Sink Machine', 'Cause ground disturbance in unapproved areas'], critical: true },
+      { task: 'Piling Tops / Brush', hazards: ['Trees jabbing into side panels or cab', 'Flying debris, trees falling on machine', 'Tip Machine', 'Sink Machine'], critical: true },
+      { task: 'Camp Setup Support', hazards: ['Back over people or equipment', 'Snag trees, facilities, buildings with boom', 'Overhead power lines'], critical: false },
+      { task: 'Fueling machine', hazards: ['Slipping, falling, tripping', 'Exposure to Cold', 'Fuel spill', 'Skin contact with diesel fuel'], critical: true },
+      { task: 'Radio communications', hazards: ['Wrong directions, getting lost', 'Mis-understanding, entering no-go zones', 'Failure to communicate with workers'], critical: true },
+    ],
+  },
+  graderOperator: {
+    label: 'Grader Operator',
+    tasks: [
+      { task: 'Mount / Dismount Machine', hazards: ['Slipping, falling'], critical: true },
+      { task: 'Shift inspections', hazards: ['Slipping, falling, tripping', 'Exposure to Cold'], critical: true },
+      { task: 'Greasing', hazards: ['Slipping, falling, tripping', 'Exposure to Heat', 'Exposure to Cold', 'Pinching, Squashing'], critical: true },
+      { task: 'Maintenance on blade', hazards: ['Exposure to Cold', 'Pinching, Squashing', 'Physical straining', 'Dust getting in eyes', 'Injury to hands working on blades or picks', 'Debris getting in eyes when hammering'], critical: true },
+      { task: 'Operating in general', hazards: ['Fatigue', 'Ergonomics (RSI)', 'Shift Work, Night Shift', 'Production related Stress', 'Excessive noise levels'], critical: false },
+      { task: 'Grading Roads', hazards: ['Get stuck', 'Trees/branches breaking windows', 'Auto / truck accident', 'Harassment from traffic'], critical: true },
+      { task: 'Pull Trucks', hazards: ['Back over people or equipment', 'Collision with trucks or vehicles', 'Strap breaking, harming persons or damaging equipment', 'Flying strap debris, entering workstation', 'Pinching or cutting hands'], critical: false },
+      { task: 'Fueling machine', hazards: ['Slipping, falling, tripping', 'Exposure to Cold', 'Fuel spill', 'Skin contact with diesel fuel'], critical: false },
+      { task: 'Radio communications', hazards: ['Wrong directions, getting lost', 'Mis-understanding, conflict with traffic', 'Failure to communicate with operator', 'Volume too low, unable to hear traffic'], critical: true },
+    ],
+  },
+  logLoaderOperator: {
+    label: 'Log Loader Operator',
+    tasks: [
+      { task: 'Mount / dismount machine', hazards: ['Slipping, falling, tripping'], critical: true },
+      { task: 'Shift inspections', hazards: ['Slipping, falling, tripping', 'Exposure to Cold', 'Getting squashed under grapple'], critical: true },
+      { task: 'Greasing, Track Cleaning', hazards: ['Slipping, falling, tripping', 'Exposure to Heat', 'Exposure to Cold', 'Pinching, Squashing', 'Physical straining', 'Dust, inhalation, getting in eyes'], critical: true },
+      { task: 'Operating (in general)', hazards: ['Fatigue', 'Ergonomics (RSI)', 'Shift Work, Night Shift', 'Production related Stress', 'Excessive noise levels', 'Machine catching fire'], critical: true },
+      { task: 'Walk excavator over distance', hazards: ['Flying debris, trees falling on machine', 'Auto / truck accident', 'Tip Machine', 'Sink Machine', 'Trees jabbing into side panels or cab'], critical: true },
+      { task: 'Loading & Unloading logs', hazards: ['Sink machine in swamp', 'Auto / truck accident', 'Tip Machine', 'Hitting log trucks with logs or grapple', 'Logs falling off load', 'Logs rolling off deck', 'Breaking bunks/stakes', 'Harassment from truckers', 'Trespassing across block boundaries', 'Ground disturbance', 'Eye strain'], critical: true },
+      { task: 'Unloading and Hook on Trailer', hazards: ['Break bunk off of truck', 'Trailer falling to the ground', 'Trailer falling onto persons', 'Break lights with trailer pole', 'Rip air lines / Electrical cord', 'Loader slipping sideways on slopes'], critical: true },
+      { task: 'Decking for Skidders', hazards: ['Sink machine in swamp', 'Auto / truck accident', 'Tip Machine', 'Snag trees or branches with boom', 'Trespassing across block boundaries', 'Ground disturbance', 'Hitting equipment with logs or grapple'], critical: true },
+      { task: 'Piling Tops / Brush', hazards: ['Trees jabbing into side panels or cab', 'Flying debris, trees falling on machine', 'Tip Machine', 'Sink Machine'], critical: true },
+      { task: 'Pushing Trucks', hazards: ['Bend or break stakes on log trailer', 'Loader slipping sideways on slopes', 'Damage lights or tires on trailer', 'Shift load, push logs forward'], critical: false },
+      { task: 'Fueling machine', hazards: ['Slipping, falling, tripping', 'Exposure to Cold', 'Fuel spill', 'Skin contact with diesel fuel'], critical: true },
+      { task: 'Radio communications', hazards: ['Wrong directions, getting lost', 'Mis-understanding, entering no-go zones', 'Failure to communicate with workers'], critical: false },
+    ],
+  },
+  logTruckDriver: {
+    label: 'Log Truck Driver',
+    tasks: [
+      { task: 'Mount / dismount truck', hazards: ['Slipping, falling, tripping'], critical: true },
+      { task: 'Shift inspections', hazards: ['Slipping, falling, tripping', 'Crushing under rolling truck', 'Dust, inhalation, getting in eyes', 'Pinching fingers, hands', 'Exposure to Cold', 'Exposure to Heat'], critical: true },
+      { task: 'Maintenance', hazards: ['Slipping, falling, tripping', 'Crushing under rolling truck', 'Dust, inhalation, getting in eyes', 'Pinching fingers, hands', 'Exposure to Cold', 'Exposure to Heat'], critical: true },
+      { task: 'Operating log truck (Driving)', hazards: ['Automobile, truck accident', 'Roll over', 'Drive off road', 'Hitting wildlife', 'Speeding', 'Losing a wheel', 'Road rage / harassment / violence', 'Fatigue, falling asleep', 'Shift Work, Night Shift', 'Excessive noise levels', 'Truck catching fire'], critical: true },
+      { task: 'Hooking/unhooking trailer', hazards: ['Pinching fingers, hands', 'Fifth wheel not latching properly', 'Backing over people', 'Trailer falling to the ground', 'Rip electrical or air lines', 'Physical straining'], critical: true },
+      { task: 'Loading', hazards: ['Logs falling off load', 'Break electrical or air lines', 'Dust, debris in eyes'], critical: false },
+      { task: 'Wrapping load', hazards: ['Getting hit with tightened boomers', 'Wrapper touching power line', 'Physical straining', 'Logs falling off load', 'Exposure to cold'], critical: true },
+      { task: 'Wrapper checks', hazards: ['Getting hit with tightened boomers', 'Wrapper touching power line', 'Physical straining', 'Being hit by vehicle', 'Logs falling off load', 'Exposure to cold'], critical: true },
+      { task: 'Unloading', hazards: ['Getting hit with tightened boomers', 'Falling debris when loosening wrappers', 'Break electrical or air lines', 'Logs falling off load', 'Physical straining', 'Exposure to cold', 'Harassment', 'Getting hit by loader or logs', 'Pinching fingers, hands', 'Trailer falling to the ground'], critical: true },
+      { task: 'Fueling truck', hazards: ['Slipping, falling, tripping', 'Fuel spill', 'Exposure to Cold', 'Skin contact with diesel fuel'], critical: true },
+      { task: 'Radio communication', hazards: ['Chattering, visiting', 'Volume too low', 'Radio on wrong channel', 'Calling wrong numbers'], critical: false },
+      { task: 'Documentation', hazards: ['Pre-Trip Inspection / Daily Logs filled out improperly', 'Missing legal documents', 'TM9 not filled out correctly'], critical: false },
+    ],
+  },
+  lowBedding: {
+    label: 'Low Bedding',
+    tasks: [
+      { task: 'Drive truck on bush road', hazards: ['Truck accident', 'Drive off road into bush'], critical: true },
+      { task: 'On lane bridges', hazards: ['Accident with other traffic', 'Drive off road into ditch'], critical: true },
+      { task: 'Drive on highway', hazards: ['Truck accident', 'Drive off road into ditch', 'Hitting wildlife', 'Speeding', 'Losing set of wheels', 'Tip / Rollover truck'], critical: true },
+      { task: 'Driving in general', hazards: ['Excessive noise', 'Truck catching fire'], critical: true },
+      { task: 'Psychological strain in driving', hazards: ['Fatigue', 'Fall asleep while driving', 'Shift work, Night shift', 'Road rage / harassment'], critical: true },
+      { task: 'Loading / Unloading equipment', hazards: ['Slide equipment off of lowbed', 'Break electrical or air lines', 'Not securing load properly', 'Dust and debris getting in eyes', 'Physical straining', 'Exposure to cold', 'Freezing / frost bite'], critical: true },
+      { task: 'Securing load', hazards: ['Getting hit with boomers'], critical: true },
+      { task: 'Tighten wrappers with boomers', hazards: ['Getting hit with boomers'], critical: true },
+      { task: 'Documentation (pre-trip / daily log, bill of lading)', hazards: ['Incorrect details', 'Missing details', 'Missing legal documents', 'Wrong info on bill of lading'], critical: true },
+    ],
+    note: 'This section\'s scanned copy only included the Critical Task Analysis (safe work procedure) sheets, not a summary worksheet with criticality scoring — hazards above are pulled from those sheets directly, so no consequence/frequency/probability ratings are available for this job.',
+  },
+  mechanic: {
+    label: 'Mechanic',
+    tasks: [
+      { task: 'Mechanic in general', hazards: ['Fatigue', 'Shift Work, Night Shift', 'Production related Stress', 'Excessive noise levels', 'Exposure to Cold', 'Pinching, Squashing', 'Pinching or cutting hands', 'Harassment from workers', 'Physical straining', 'Problem with wildlife', 'Insect bites / stings', 'Exposure to hazardous chemicals', 'Falling from heights'], critical: true },
+      { task: 'Mount / dismount machine', hazards: ['Slipping, falling, tripping'], critical: true },
+      { task: 'Inspections', hazards: ['Slipping, falling, tripping', 'Pinching, Squashing', 'Get hit or run over by machine', 'Exposure to Cold', 'Miss defective tools', 'Exposure to Heat / burns'], critical: true },
+      { task: 'Using Hand tools', hazards: ['Scraping knuckles', 'Break tools'], critical: false },
+      { task: 'Hammering metal', hazards: ['Excessive noise levels', 'Physical straining', 'Flying objects / debris', 'Sprained wrist/fingers', 'Scraping knuckles'], critical: true },
+      { task: 'Using Electric tools', hazards: ['Sprained wrist or fingers', 'Flying sparks', 'Electrical shock', 'Exposure to Heat / burns', 'Get clothing caught in moving tools', 'Excessive noise levels', 'Flying, spinning metal objects', 'Jamming debris between guards and blades'], critical: true },
+      { task: 'Cutting', hazards: ['Exposure to Heat / burns', 'Flying sparks', 'Flashes', 'Falling hot pieces of metal', 'Machine catching fire', 'Exposure to fumes'], critical: true },
+      { task: 'Welding', hazards: ['Machine catching fire', 'Exposure to Heat / burns', 'Flashes', 'Electrical shock', 'Excessive noise levels', 'Flying Flux', 'Exposure to Heat', 'Exposure to fumes', 'Flying sparks'], critical: true },
+      { task: 'Remove hydraulic hoses', hazards: ['Burns from hot oil', 'Hydraulic injection', 'Hydraulic explosion'], critical: false },
+      { task: 'Driving off-road/block', hazards: ['Vehicle accident', 'Drive over debris on road', 'Back into dirt bank', 'Hit ditch / snow bank'], critical: true },
+      { task: 'Radio communication', hazards: ['Wrong directions, getting lost', 'Vehicle Accident', 'Failure to establish communication'], critical: false },
+    ],
+  },
+  managerSupervisor: {
+    label: 'Manager / Supervisor',
+    tasks: [
+      { task: 'Managing (work in general)', hazards: ['Fatigue', 'Shift Work, Night Shift', 'Slipping, falling, tripping'], critical: true },
+      { task: 'Planning', hazards: ['Psychological Stress', 'Production related Stress'], critical: false },
+      { task: 'Communicate with employees', hazards: ['Lack of communication', 'Harassment from workers'], critical: false },
+      { task: 'Train employees', hazards: ['Harassment from workers', 'Communication issues', 'Improper training'], critical: false },
+      { task: 'Drive pickup on haul/bush road', hazards: ['Vehicle accident', 'Drive over debris on road', 'Back into dirt bank', 'Hit ditch / snow bank', 'Pass working equipment'], critical: true },
+      { task: 'Tour worksites', hazards: ['Vehicle accident', 'Drive over debris on road', 'Back into dirt bank', 'Hit ditch / snow bank', 'Pass working equipment'], critical: true },
+      { task: 'Inspections', hazards: ['Slipping, falling, tripping', 'Get hit or run over by machine', 'Exposure to Cold'], critical: true },
+      { task: 'Radio communication', hazards: ['Wrong directions, getting lost', 'Vehicle Accident', 'Failure to establish communication'], critical: false },
+      { task: 'Supervising in general', hazards: ['Managing long days: Fatigue, Shift work or night shift', 'Running around: Slips, trips and falls'], critical: true },
+    ],
+  },
+  safetyAdmin: {
+    label: 'Safety / Office Admin',
+    tasks: [
+      { task: 'Working in the office', hazards: ['Paper cuts', 'Planning, studying stress', 'Fatigue', 'Straining neck and eyes (RSI)', 'Harassment from workers', 'Psychological Stress', 'Production related Stress'], critical: false },
+      { task: 'Enforce health and safety program', hazards: ['Communication issues', 'Harassment from workers'], critical: false },
+      { task: 'Communicate with employees', hazards: ['Lack of communication', 'Harassment from workers'], critical: false },
+      { task: 'Train employees, orientations', hazards: ['Harassment from workers', 'Communication issues', 'Improper training'], critical: false },
+      { task: 'Drive pickup on haul/bush road', hazards: ['Vehicle accident', 'Drive over debris on road', 'Back into dirt bank', 'Hit ditch / snow bank'], critical: true },
+      { task: 'Inspections', hazards: ['Slipping, falling, tripping', 'Get hit or run over by machine', 'Exposure to Cold'], critical: true },
+      { task: 'Radio communication', hazards: ['Wrong directions, getting lost', 'Vehicle Accident', 'Failure to establish communication'], critical: false },
+    ],
+  },
+  skidderOperator: {
+    label: 'Skidder Operator',
+    tasks: [
+      { task: 'Mount / dismount machine', hazards: ['Slipping, falling, tripping'], critical: true },
+      { task: 'Shift inspections', hazards: ['Slipping, falling, tripping', 'Exposure to Cold'], critical: true },
+      { task: 'Greasing', hazards: ['Slipping, falling, tripping', 'Exposure to Heat', 'Exposure to Cold', 'Pinching, Squashing'], critical: true },
+      { task: 'Operating (in general)', hazards: ['Ergonomics (RSI)', 'Shift Work, Night Shift', 'Production related Stress', 'Excessive noise levels', 'Machine catching fire'], critical: false },
+      { task: 'Walk skidder over distance', hazards: ['Back over people or equipment', 'Drive over parked vehicle', 'Auto / truck accident', 'Tip / rollover Machine', 'Ground disturbance / sink machine', 'Trees or snags entering cab or engine'], critical: true },
+      { task: 'Skid trees', hazards: ['Tip / rollover Machine', 'Trees fall on skidder', 'Flying debris', 'Break windows', 'Ground disturbance / get stuck', 'Rough terrain making operator sick', 'Trespass over boundary onto machine-free zone'], critical: true },
+      { task: 'Deck trees', hazards: ['Tip / rollover Machine', 'Flying debris', 'Break windows', 'Ground disturbance / get stuck', 'Trees or snags entering cab or engine', 'Conflict with vehicles on road'], critical: true },
+      { task: 'Pull Trucks', hazards: ['Back over people or equipment', 'Collision with trucks or vehicles', 'Strap breaking, harming persons or damaging equipment', 'Flying strap debris, entering workstation', 'Pinching or cutting hands'], critical: false },
+      { task: 'Fueling machine', hazards: ['Slipping, falling, tripping', 'Exposure to Cold', 'Fuel spill', 'Skin contact with diesel fuel'], critical: true },
+      { task: 'Radio communications', hazards: ['Wrong directions, getting lost', 'Mis-understanding, entering no-go zones', 'Failure to communicate with workers'], critical: false },
+    ],
+  },
+};
+
 // Inspection types living in the Safety > Inspections dropdown. Only 'yard'
 // has a real digitized form so far — the rest show a "coming soon" state
 // until those forms are provided, so the menu itself doesn't need to change
@@ -806,28 +1018,14 @@ const PERSONAL_FACTORS_OPTIONS = ['Inadequate Physical Capability', 'Inadequate 
 const JOB_FACTORS_OPTIONS = ['Inadequate Leadership or Supervision', 'Inadequate Engineering Controls', 'Inadequate Purchasing', 'Inadequate Maintenance', 'Inadequate Tools or Equipment', 'Inadequate Work Standards', 'Wear and Tear', 'Other'];
 const ROOT_CAUSES_OPTIONS = ['Management Commitment', 'Leadership Training', 'Planned Inspections', 'Preventive Maintenance', 'Hazard Identification', 'Safe Work Practices and Procedures', 'Inadequate Previous Investigation', 'Emergency Preparedness and Response', 'Company Safety Rules', 'Worker Knowledge & Skill Training', 'Personal Protective Equipment (PPE)', 'Personal or Group Communications', 'Hygiene and Sanitation', 'Hiring & Placement Standards'];
 const PREVENTION_OPTIONS = ['Training/Retraining', 'Job procedure/design changes', 'Equipment repair or replacement', 'Hazard Identification and Analysis', 'Improved Hazard Controls', 'Supervisory Communication', 'Improve Safety Inspection Process', 'Reassignment of Involved Worker', 'Facilities Layout Review and Redesign', 'Installation of Safety Guards/Barriers', 'Safe work procedure reviewed and revised', 'Other'];
-// Role labels offered when adding a signature (RoleSelect's dropdown) —
-// just labels for who's signing, not a fixed list of who's required to.
+// Matches the sign-off table at the bottom of the reference form exactly.
+// The reporter's own signature is auto-tagged 'Employee' at submission, so
+// that one's usually already checked off by the time anyone looks.
 const INCIDENT_EXPECTED_SIGNERS = ['Employee', 'Supervisor', 'Management', 'H&S Coordinator'];
-// Who actually needs to sign a given report: whoever filed it, plus
-// whoever's listed as involved in Section 1 — not a fixed role checklist.
-// A routine incident with one person involved only ever needs two
-// signatures; nothing here requires a supervisor or management sign-off
-// unless someone deliberately adds one via "Add a Signature."
-function incidentReportExpectedSigners(record) {
-  const names = new Set();
-  if (record.reportedBy && record.reportedBy.trim()) names.add(record.reportedBy.trim());
-  incidentReportEmployees(record).forEach((emp) => {
-    const fullName = [emp.firstName, emp.lastName].filter(Boolean).join(' ').trim();
-    if (fullName) names.add(fullName);
-  });
-  return [...names];
-}
 function incidentSignersStatus(record) {
-  const expected = incidentReportExpectedSigners(record);
-  const signedNames = (record.signatures || []).map((s) => (s.name || '').trim().toLowerCase());
-  const missing = expected.filter((name) => !signedNames.includes(name.toLowerCase()));
-  return { total: expected.length, signedCount: expected.length - missing.length, missing, complete: expected.length > 0 && missing.length === 0 };
+  const signedRoles = (record.signatures || []).map((s) => (s.role || '').trim().toLowerCase());
+  const missing = INCIDENT_EXPECTED_SIGNERS.filter((role) => !signedRoles.includes(role.toLowerCase()));
+  return { total: INCIDENT_EXPECTED_SIGNERS.length, signedCount: INCIDENT_EXPECTED_SIGNERS.length - missing.length, missing, complete: missing.length === 0 };
 }
 // Reports saved before multi-person support only have the old flat fields
 // (record.lastName, record.department, etc.) rather than an employees
@@ -844,429 +1042,6 @@ function incidentReportEmployees(record) {
   }
   return [];
 }
-// Reports saved before per-witness statements only have a combined
-// witnesses string plus a separate "statement(s) provided?" string —
-// wrapped into the same {name, contactInfo, statement} shape so older
-// reports still display fine instead of showing blank.
-function incidentReportWitnesses(record) {
-  if (Array.isArray(record.witnesses)) return record.witnesses;
-  if (typeof record.witnesses === 'string' && record.witnesses.trim()) {
-    return [{ name: record.witnesses, contactInfo: '', statement: record.witnessStatementProvided || '' }];
-  }
-  return [];
-}
-// Matches the columns on Harder Contracting's paper training matrix
-// exactly, in the same order. `tracked: true` means the field IS an
-// expiry date to color-code directly; `renewalYears` means it's a
-// completion date with an implied re-training interval (H&S Orientation
-// annually, WHMIS every 3 years per the form's own note) — the due date
-// gets computed from it rather than stored separately. Fields with
-// neither just display plainly, since the paper form doesn't say those
-// ones expire on any schedule.
-const TRAINING_MATRIX_FIELDS = [
-  { key: 'dateOfHire', label: 'Date of Hire', type: 'date' },
-  { key: 'licenseClass', label: "Driver's License — Class", type: 'text' },
-  { key: 'licenseNumber', label: "Driver's License — Number", type: 'text' },
-  { key: 'licenseExpiry', label: "Driver's License — Expiry", type: 'date', tracked: true },
-  { key: 'driversAbstract', label: 'Drivers Abstract', type: 'text' },
-  { key: 'orientationDate', label: 'H&S Orientation — Completion Date', type: 'date', renewalYears: 1 },
-  { key: 'onJobTrainingDate', label: 'On-the-Job Training — Completion Date', type: 'date' },
-  { key: 'firstAidExpiry', label: 'First Aid/CPR — Expiry Date', type: 'date', tracked: true },
-  { key: 'tdgExpiry', label: 'TDG — Expiry Date', type: 'date', tracked: true },
-  { key: 'whmisDate', label: 'WHMIS — Completion Date', type: 'date', renewalYears: 3 },
-  { key: 'hazardIdDate', label: 'Hazard ID & Assessment Training — Completion Date', type: 'date' },
-  { key: 'incidentInvestigationDate', label: 'Incident Investigation Training — Completion Date', type: 'date' },
-  { key: 'inspectionTrainingDate', label: 'Inspection Training — Completion Date', type: 'date' },
-];
-const TRAINING_MATRIX_CATEGORIES = [
-  'Management and Supervisory', 'Administrative/Sales',
-  'Heavy Equipment — Bunchers', 'Heavy Equipment — Skidders', 'Heavy Equipment — Processors', 'Heavy Equipment — Log Loaders',
-  'Other Personnel', 'Sub-Contractors',
-];
-// "Getting close to running out" = 60 days out — same heads-up window
-// already used for the Fuel Tank Ledger reminders, for consistency.
-function trainingFieldStatus(field, record) {
-  const raw = record[field.key];
-  if (!raw) return { status: 'none', dueDate: null };
-  if (!field.tracked && !field.renewalYears) return { status: 'none', dueDate: raw };
-  let dueDateStr = raw;
-  if (field.renewalYears) {
-    const d = new Date(raw);
-    if (isNaN(d)) return { status: 'none', dueDate: raw };
-    d.setFullYear(d.getFullYear() + field.renewalYears);
-    dueDateStr = d.toISOString().slice(0, 10);
-  }
-  const due = new Date(dueDateStr);
-  if (isNaN(due)) return { status: 'none', dueDate: raw };
-  const days = (due.getTime() - Date.now()) / 86400000;
-  if (days < 0) return { status: 'expired', dueDate: dueDateStr };
-  if (days <= 60) return { status: 'expiringSoon', dueDate: dueDateStr };
-  return { status: 'ok', dueDate: dueDateStr };
-}
-function trainingPersonStatus(record) {
-  const statuses = TRAINING_MATRIX_FIELDS.filter((f) => f.tracked || f.renewalYears).map((f) => trainingFieldStatus(f, record).status);
-  if (statuses.includes('expired')) return 'expired';
-  if (statuses.includes('expiringSoon')) return 'expiringSoon';
-  if (statuses.every((s) => s === 'none')) return 'none';
-  return 'ok';
-}
-const TRAINING_STATUS_COLORS = { expired: '#E07A5F', expiringSoon: '#D9A441', ok: null, none: null };
-// One-time seed from Harder Contracting's existing training matrix PDF —
-// name, role, category, license info, and date of hire came through
-// clean. The rest of each person's certification dates (orientation,
-// first aid, TDG, WHMIS, etc.) could NOT be reliably matched to the right
-// column from that PDF — the source data has a different number of
-// populated columns per person with no way to tell which ones were
-// skipped, so guessing risked putting the wrong expiry date on the wrong
-// certification. Those raw dates are preserved in each person's Notes
-// field instead, to be sorted into the correct fields by hand once,
-// rather than trusted automatically. A few entries also had dates that
-// don't parse against the header's stated format at all (day-of-month or
-// month values that don't exist) — noted in Notes for those people too.
-const TRAINING_MATRIX_IMPORT_SEED = [
-  {
-    "name": "Harder, Edward",
-    "role": "OWNER/Senior Manager",
-    "category": "Management and Supervisory",
-    "licenseClass": "5",
-    "licenseNumber": "140251-117",
-    "licenseExpiry": "2028-11-22",
-    "notes": "Hire date from PDF (unparsed): 06/2014 | Unverified training/cert dates from PDF import (assign to correct fields above): 09/24/2027, 01/2024, 02/27/2025, 02/27/2025, 02/27/2025"
-  },
-  {
-    "name": "Wolfe, Joseph",
-    "role": "Supervisor",
-    "category": "Management and Supervisory",
-    "licenseClass": "1",
-    "licenseNumber": "148400-559",
-    "dateOfHire": "2022-10-01",
-    "licenseExpiry": "2027-04-02",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/01/2022, 09/24/2027, 11/24/2025, 01/2024, 02/27/2025, 02/27/2025, 02/27/2025"
-  },
-  {
-    "name": "Neufeld, Joey",
-    "role": "Health and Safety Coordinator",
-    "category": "Management and Supervisory",
-    "licenseClass": "1",
-    "licenseNumber": "153416-342",
-    "dateOfHire": "2023-01-02",
-    "licenseExpiry": "2026-03-30",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 01/02/2023, 01/02/2023, 08/19/2028, 7/1/2025, 08/05/2025, 12/16/2024, 01/07/2025, 12/16/2024"
-  },
-  {
-    "name": "Neudorf, Ernest",
-    "role": "Truck Supervisor",
-    "category": "Management and Supervisory",
-    "licenseClass": "5",
-    "licenseNumber": "155321-946",
-    "dateOfHire": "2025-11-17",
-    "licenseExpiry": "2026-06-08",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 11/17/2025, 11/17/2025, 01/28/2026"
-  },
-  {
-    "name": "Harder, Anna",
-    "role": "Office Admin/Payroll",
-    "category": "Administrative/Sales",
-    "licenseClass": "5",
-    "licenseNumber": "142781-491",
-    "dateOfHire": "2023-04-01",
-    "licenseExpiry": "2029-05-28"
-  },
-  {
-    "name": "Martens, Abram",
-    "role": "",
-    "category": "Heavy Equipment — Bunchers",
-    "licenseClass": "5",
-    "licenseNumber": "168930-212",
-    "dateOfHire": "2026-02-16",
-    "licenseExpiry": "2028-01-06",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 2/19/2026, 2/19/2026, 02/14/2026"
-  },
-  {
-    "name": "Neufeld, Wayne",
-    "role": "",
-    "category": "Heavy Equipment — Bunchers",
-    "licenseClass": "5",
-    "licenseNumber": "149751-703",
-    "dateOfHire": "2024-10-16",
-    "licenseExpiry": "2027-09-01",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/14/2024, 10/14/2024"
-  },
-  {
-    "name": "Wall, Kevin",
-    "role": "",
-    "category": "Heavy Equipment — Bunchers",
-    "licenseClass": "5",
-    "licenseNumber": "160660-270",
-    "dateOfHire": "2023-10-16",
-    "licenseExpiry": "2028-06-03",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/23/2023, 10/23/2023"
-  },
-  {
-    "name": "Friesen, Heinrich",
-    "role": "",
-    "category": "Heavy Equipment — Bunchers",
-    "licenseClass": "5",
-    "licenseNumber": "179247-754",
-    "dateOfHire": "2026-02-16",
-    "licenseExpiry": "2029-04-04",
-    "notes": "Language Barrier | Unverified training/cert dates from PDF import (assign to correct fields above): 2/16/2026, 2/16/2026"
-  },
-  {
-    "name": "Friesen, Ivan",
-    "role": "",
-    "category": "Heavy Equipment — Skidders",
-    "licenseClass": "5",
-    "licenseNumber": "147283-840",
-    "dateOfHire": "2023-10-16",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/30/2023, 10/30/2023, 01/2024"
-  },
-  {
-    "name": "Wall, Paul",
-    "role": "",
-    "category": "Heavy Equipment — Skidders",
-    "licenseClass": "5",
-    "licenseNumber": "174285-791",
-    "dateOfHire": "2024-12-19",
-    "licenseExpiry": "2026-10-27",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/19/2024, 12/19/2024, 01/28/2026"
-  },
-  {
-    "name": "Wall, P Martin",
-    "role": "",
-    "category": "Heavy Equipment — Skidders",
-    "licenseClass": "5",
-    "licenseNumber": "171356-140",
-    "dateOfHire": "2025-10-30",
-    "licenseExpiry": "2029-12-16",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/30/2025, 10/30/2025, 10/28/2028"
-  },
-  {
-    "name": "Friesen, Corny W",
-    "role": "",
-    "category": "Heavy Equipment — Skidders",
-    "licenseClass": "3",
-    "licenseNumber": "168517-472",
-    "dateOfHire": "2025-12-09",
-    "licenseExpiry": "2028-01-03",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/9/2025, 12/9/2025, 12/9/2028"
-  },
-  {
-    "name": "Dyck, Jerome",
-    "role": "",
-    "category": "Heavy Equipment — Skidders",
-    "licenseClass": "5",
-    "licenseNumber": "175551-944",
-    "dateOfHire": "2025-12-01",
-    "licenseExpiry": "2027-10-21",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/1/2025, 12/1/2025, 11/30/2028"
-  },
-  {
-    "name": "Friesen, Raymond",
-    "role": "",
-    "category": "Heavy Equipment — Skidders",
-    "licenseClass": "5",
-    "licenseNumber": "170312-714",
-    "dateOfHire": "2023-12-04",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/7/2023, 12/7/2023, 9/24/2027, 01/2024"
-  },
-  {
-    "name": "Letkeman, David JR",
-    "role": "",
-    "category": "Heavy Equipment — Processors",
-    "licenseClass": "5",
-    "licenseNumber": "164294-662",
-    "dateOfHire": "2025-10-07",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/7/2025, 10/7/2025, 1/11/2027"
-  },
-  {
-    "name": "Friesen, David",
-    "role": "",
-    "category": "Heavy Equipment — Processors",
-    "licenseClass": "5",
-    "licenseNumber": "174194-829",
-    "dateOfHire": "2025-10-01",
-    "licenseExpiry": "2030-08-08",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/01/2025, 10/01/2025"
-  },
-  {
-    "name": "Frissen, Jaren",
-    "role": "",
-    "category": "Heavy Equipment — Processors",
-    "licenseClass": "5",
-    "licenseNumber": "174130-765",
-    "dateOfHire": "2026-02-16",
-    "licenseExpiry": "2027-08-30",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 02/16/2026, 02/16/2026"
-  },
-  {
-    "name": "Wall, Simon",
-    "role": "",
-    "category": "Heavy Equipment — Log Loaders",
-    "licenseClass": "1",
-    "licenseNumber": "10007221139535",
-    "dateOfHire": "2024-10-29",
-    "notes": "License expiry from PDF (unparsed): 9/13/2034 | Unverified training/cert dates from PDF import (assign to correct fields above): 10/29/2024, 10/29/0202, 08/27/2028"
-  },
-  {
-    "name": "Peters, Jonathon",
-    "role": "",
-    "category": "Heavy Equipment — Log Loaders",
-    "licenseClass": "5",
-    "licenseNumber": "149157-596",
-    "dateOfHire": "2025-12-15",
-    "licenseExpiry": "2026-04-28",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/15/1025, 12/15/2025, 01/13/2029"
-  },
-  {
-    "name": "Wolfe, Matthew",
-    "role": "",
-    "category": "Heavy Equipment — Log Loaders",
-    "licenseClass": "5",
-    "licenseNumber": "166695-643",
-    "dateOfHire": "2026-01-20",
-    "notes": "License expiry from PDF (unparsed): 1/20/2026 | Unverified training/cert dates from PDF import (assign to correct fields above): 1/20/2026, 01/23/2029"
-  },
-  {
-    "name": "Driedger, Ronnie",
-    "role": "",
-    "category": "Heavy Equipment — Log Loaders",
-    "licenseClass": "5",
-    "licenseNumber": "149238-792",
-    "dateOfHire": "2026-01-20",
-    "licenseExpiry": "2027-08-13",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 1/20/2026, 1/20/2026, 01/16/2029"
-  },
-  {
-    "name": "Wolfe, Willy",
-    "role": "Mechanic",
-    "category": "Other Personnel",
-    "licenseClass": "5",
-    "licenseNumber": "160551-339",
-    "dateOfHire": "2023-10-16",
-    "notes": "License expiry from PDF (unparsed): 01/27/2027 | Unverified training/cert dates from PDF import (assign to correct fields above): 10/05/2023, 11/27/2024, 9/24/2027, 01/2024"
-  },
-  {
-    "name": "Schmidt, Philip",
-    "role": "Cat",
-    "category": "Other Personnel",
-    "licenseClass": "5",
-    "licenseNumber": "155936-230",
-    "dateOfHire": "2022-09-12",
-    "licenseExpiry": "2028-11-06",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 09/12/2022, 09/12/2022, 9/24/2027, 01/2024"
-  },
-  {
-    "name": "Harder, Mason",
-    "role": "Fuel up guy",
-    "category": "Other Personnel",
-    "licenseClass": "1",
-    "licenseNumber": "173833-542",
-    "dateOfHire": "2023-04-01",
-    "licenseExpiry": "2027-03-08",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 01/07/2025, 01/07/2025, 5/11/2027, 11/23/2028, 11/23/2028"
-  },
-  {
-    "name": "Friesen, George",
-    "role": "Mechanic",
-    "category": "Other Personnel",
-    "licenseClass": "1",
-    "licenseNumber": "151508-876",
-    "dateOfHire": "2025-11-17",
-    "licenseExpiry": "2030-06-05",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 11/17/2025, 11/07/2025, 2/1/2028, 11/17/2028"
-  },
-  {
-    "name": "Enns, Melissa",
-    "role": "Cook",
-    "category": "Other Personnel",
-    "licenseClass": "5",
-    "licenseNumber": "169217-486",
-    "dateOfHire": "2024-11-02",
-    "notes": "License expiry from PDF (unparsed): 7/28/2028 | Unverified training/cert dates from PDF import (assign to correct fields above): 11/02/2024, 11/02/2024, 5/5/2027"
-  },
-  {
-    "name": "Enns, Rosalee",
-    "role": "Cook",
-    "category": "Other Personnel",
-    "licenseClass": "5",
-    "licenseNumber": "170487-409",
-    "dateOfHire": "2024-11-02",
-    "licenseExpiry": "2029-12-09",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 11/02/2024, 11/02/2024"
-  },
-  {
-    "name": "Bergen, David",
-    "role": "Grader",
-    "category": "Other Personnel",
-    "licenseClass": "5",
-    "licenseNumber": "164419-756",
-    "dateOfHire": "2026-03-02",
-    "licenseExpiry": "2029-10-17",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 03/02/2026, 03/02/2026"
-  },
-  {
-    "name": "Peters, Mark",
-    "role": "Mechanic",
-    "category": "Other Personnel",
-    "licenseClass": "5",
-    "licenseNumber": "167403-229",
-    "dateOfHire": "2025-12-10",
-    "licenseExpiry": "2028-03-07",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/10/2025, 12/10/2025, 12/10/2028"
-  },
-  {
-    "name": "Friesen, Justin",
-    "role": "Excavator",
-    "category": "Other Personnel",
-    "licenseClass": "5",
-    "licenseNumber": "168477-446",
-    "dateOfHire": "2025-01-07",
-    "licenseExpiry": "2029-01-26",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 01/07/2025, 01/07/2025, 1/6/2029"
-  },
-  {
-    "name": "Martens, Keith",
-    "role": "CAT",
-    "category": "Other Personnel",
-    "licenseClass": "5",
-    "licenseNumber": "174743-765",
-    "dateOfHire": "2025-11-24",
-    "licenseExpiry": "2027-03-13",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 11/24/2025, 11/24/2025, 11/23/2028"
-  },
-  {
-    "name": "Zacharias, Ernie",
-    "role": "Processor",
-    "category": "Sub-Contractors",
-    "licenseClass": "5",
-    "licenseNumber": "167497-320",
-    "dateOfHire": "2025-11-24",
-    "licenseExpiry": "2026-12-01",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 11/24/2025, 11/28/2025"
-  },
-  {
-    "name": "Jeff Teichroeb",
-    "role": "Jeff Zacharias - Processor",
-    "category": "Sub-Contractors",
-    "licenseClass": "1",
-    "licenseNumber": "167478-346",
-    "dateOfHire": "2024-10-15",
-    "licenseExpiry": "2027-03-29",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/15/2023, 10/15/2023, 9/24/2027"
-  },
-  {
-    "name": "Jeff Teichroeb",
-    "role": "Paul Banman - Processor",
-    "category": "Sub-Contractors",
-    "licenseClass": "5",
-    "licenseNumber": "175530-229",
-    "dateOfHire": "2024-10-15",
-    "licenseExpiry": "2028-05-17",
-    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/15/2024, 10/15/2024"
-  }
-];
-
 // Matches Harder Contracting's paper "Work Site Inspection Form" exactly —
 // same section order, same item wording, so a filled-out digital copy reads
 // the same as the paper one it replaces. Every item gets an OK / Req. Att.
@@ -1339,34 +1114,6 @@ function OfflineBanner({ isOnline }) {
     >
       📴 Offline — your changes are saved and will sync once you're back online
     </div>
-  );
-}
-
-// Shows on every landing screen an admin/safety coordinator sees right
-// after logging in — the Training Matrix itself is buried a couple taps
-// deep in Safety, which meant an expired cert could go unnoticed for
-// weeks unless someone happened to open it. This surfaces the same
-// expired/expiring-soon count up front instead, with a tap straight
-// through to the list.
-function TrainingMatrixAlertBanner({ trainingMatrix, onOpen }) {
-  const flagged = trainingMatrix.filter((p) => {
-    const s = trainingPersonStatus(p);
-    return s === 'expired' || s === 'expiringSoon';
-  });
-  if (flagged.length === 0) return null;
-  const expiredCount = flagged.filter((p) => trainingPersonStatus(p) === 'expired').length;
-  return (
-    <button
-      onClick={onOpen}
-      className="w-full text-left rounded-lg p-3 mb-6"
-      style={{ background: '#E07A5F22', border: '1px solid #E07A5F' }}
-    >
-      <p className="text-sm font-bold" style={{ color: '#E07A5F' }}>
-        🎓 Training Matrix — {flagged.length} {flagged.length === 1 ? 'person needs' : 'people need'} attention
-        {expiredCount > 0 ? ` (${expiredCount} expired)` : ''}
-      </p>
-      <p className="text-xs mt-0.5" style={{ color: COLORS.inkDim }}>Tap to review</p>
-    </button>
   );
 }
 
@@ -3612,30 +3359,6 @@ function ClockInPromptOverlay({ show, mechanic, onClockIn, onSkip, t }) {
   );
 }
 
-// Ending the HOS log book and clocking out of the shift are two separate
-// actions (the log book tracks on-duty status for compliance; clocking out
-// ends the paid shift itself) — closing the log book used to leave the
-// shift open with nothing prompting the driver to also end it. This asks
-// right at the moment the log book closes, while it's still top of mind.
-function ClockOutAfterLogBookPromptOverlay({ show, onClockOut, onSkip }) {
-  if (!show) return null;
-  return (
-    <div className="fixed inset-0 z-50 p-6" style={{ background: 'rgba(0,0,0,0.75)', minHeight: '100vh' }}>
-      <div className="w-full max-w-xs mx-auto my-8 rounded-2xl p-6 text-center overflow-y-auto" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}`, maxHeight: '85vh' }}>
-        <p className="text-4xl mb-3">📕</p>
-        <p className="font-display text-lg font-bold mb-2">Log book closed</p>
-        <p className="text-sm mb-5" style={{ color: COLORS.inkDim }}>
-          Do you also want to clock out of your shift now?
-        </p>
-        <div className="flex flex-col gap-2">
-          <Btn onClick={onClockOut}>Clock Out Now</Btn>
-          <Btn variant="ghost" onClick={onSkip}>Not Yet — Still Working</Btn>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function statusColor(s) {
   if (s === 'Open') return COLORS.open;
   if (s === 'In Progress') return COLORS.progress;
@@ -3811,16 +3534,9 @@ function PrintPortal({ children }) {
   return ReactDOM.createPortal(children, target);
 }
 
-// Accepts either a plain date (YYYY-MM-DD, what regular timesheet entries
-// store) or a full ISO timestamp (what production shifts store, e.g. for
-// winch truck / machine operators) — mixing the two used to mean a
-// machine operator's shift date silently fell back to showing the raw,
-// unformatted timestamp instead of a real date, which is exactly the
-// "looks different for winch truck/machine shifts" bug this fixes.
 function fmtDate(d) {
   if (!d) return '';
-  const isPlainDate = /^\d{4}-\d{2}-\d{2}$/.test(d);
-  const dt = isPlainDate ? new Date(d + 'T00:00:00') : new Date(d);
+  const dt = new Date(d + 'T00:00:00');
   if (isNaN(dt)) return d;
   return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
@@ -3834,11 +3550,6 @@ function fmtTime(iso) {
 
 // Total paid hours for a shift: clock-in to clock-out, minus any unpaid break.
 function entryHours(entry) {
-  // Winch truck drivers: paid hours come from the HOS log book, not raw
-  // clock-in/out — see syncTimesheetToLogBook. This keeps the timesheet
-  // honest against the legally-binding on-duty record instead of two
-  // independent numbers that could quietly drift apart.
-  if (typeof entry.logBookHours === 'number') return entry.logBookHours;
   if (!entry.clockIn || !entry.clockOut) return 0;
   let ms = new Date(entry.clockOut) - new Date(entry.clockIn);
   if (entry.lunchStart && entry.lunchEnd) {
@@ -4251,12 +3962,8 @@ async function buildIncidentReportPdf(record) {
   }
 
   drawHeading('6. Witness Information');
-  const pdfWitnesses = incidentReportWitnesses(record);
-  pdfWitnesses.forEach((w, idx) => {
-    if (pdfWitnesses.length > 1) drawField('Witness', String(idx + 1));
-    drawField('Name / Contact', [w.name, w.contactInfo].filter(Boolean).join(' · '));
-    drawField('Statement', w.statement);
-  });
+  drawField('Witnesses', record.witnesses);
+  drawField('Statement(s) Provided', record.witnessStatementProvided);
 
   drawHeading('7. Incident Information');
   drawChecks('Type of Occurrence', record.occurrenceTypes, record.occurrenceTypeOther);
@@ -4297,25 +4004,6 @@ async function buildIncidentReportPdf(record) {
       }
       page.drawText(`Signed: ${sig.signedAt ? new Date(sig.signedAt).toLocaleString() : ''}`, { x: margin, y, size: 8, font, color: PDFLib.rgb(0.4, 0.4, 0.4) });
       y -= 20;
-    }
-  }
-
-  if (record.photos && record.photos.length > 0) {
-    // Each photo gets its own full page rather than being squeezed into
-    // the flowing layout above — matches how the paper form expects
-    // photos as attachments, not inline illustrations.
-    for (const photo of record.photos) {
-      try {
-        const res = await fetch(photo.url);
-        const bytes = await res.arrayBuffer();
-        const mimeType = res.headers.get('content-type') || '';
-        const img = mimeType.includes('png') ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
-        const photoPage = doc.addPage([pageWidth, pageHeight]);
-        const maxW = pageWidth - margin * 2, maxH = pageHeight - margin * 2;
-        const scale = Math.min(maxW / img.width, maxH / img.height, 1);
-        const w = img.width * scale, h = img.height * scale;
-        photoPage.drawImage(img, { x: (pageWidth - w) / 2, y: (pageHeight - h) / 2, width: w, height: h });
-      } catch (e) { /* skip a photo that fails to load rather than fail the whole PDF */ }
     }
   }
 
@@ -4667,15 +4355,6 @@ async function saveIncidentReportRecord(record) {
 async function deleteIncidentReportRecord(recordId) {
   await firebase.database().ref('incidentReportRecords/' + recordId).remove();
 }
-// One record per person on the training matrix — a full save (not just
-// on-create), since editing an existing person's dates is the normal way
-// this gets used, not just adding new people.
-async function saveTrainingMatrixRecord(record) {
-  await firebase.database().ref('trainingMatrixRecords/' + record.id).set(stripUndefined(record));
-}
-async function deleteTrainingMatrixRecord(recordId) {
-  await firebase.database().ref('trainingMatrixRecords/' + recordId).remove();
-}
 async function migrateMapsToPerRecord() {
   return migrateArrayCollectionToPerRecord('maps', 'mapRecords', 'maps');
 }
@@ -4807,7 +4486,6 @@ const OFFLINE_QUEUE_HANDLERS = {
   safetyDocs: { save: saveSafetyDocRecord, delete: deleteSafetyDocRecord },
   safetyInspections: { save: saveSafetyInspectionRecord, delete: deleteSafetyInspectionRecord },
   incidentReports: { save: saveIncidentReportRecord, delete: deleteIncidentReportRecord },
-  trainingMatrix: { save: saveTrainingMatrixRecord, delete: deleteTrainingMatrixRecord },
   mapPins: { save: saveMapPinRecord, patch: patchMapPinRecord, delete: deleteMapPinRecord },
   mapLines: { save: saveMapLineRecord, patch: patchMapLineRecord, delete: deleteMapLineRecord },
   machineTracks: { save: saveMachineTrackRecord, patch: patchMachineTrackRecord },
@@ -4892,28 +4570,6 @@ async function saveMilestonesCelebrated(data) {
 // used for weekly backups, just with a different (separate) secret key.
 const CLOUD_FUNCTION_URL = 'https://weekly-backup-and-email-337605513419.northamerica-northeast1.run.app';
 const APP_SECRET = '7606b2344e4100126f3eb1ac';
-
-// Looks up one unit's live Samsara reading (odometer km for a vehicle,
-// engine hours for equipment) by matching its name against Samsara's
-// vehicle/asset list — same name-matching the Samsara map already relies
-// on, so it only works if the unit is named the same way in both places.
-// Returns null on any failure (no signal, no match, nothing tracked for
-// that unit) rather than throwing, since this is a convenience prefill,
-// never something that should block filling out an inspection.
-async function fetchSamsaraStat(unitName) {
-  try {
-    const res = await fetch(CLOUD_FUNCTION_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: APP_SECRET, mode: 'samsaraStats' }),
-    });
-    const data = await res.json();
-    const match = (data.stats || []).find((s) => s.name && s.name.trim().toLowerCase() === unitName.trim().toLowerCase());
-    return match || null;
-  } catch (e) {
-    return null;
-  }
-}
 
 // Generate this in Firebase Console → Project Settings → Cloud Messaging →
 // Web configuration → Web Push certificates → Generate key pair, then
@@ -7299,32 +6955,10 @@ function NewVehicleInspectionForm({ knownUnits, defaultInspector, submitting, on
   const [inspectedBy, setInspectedBy] = useState(defaultInspector);
   const [items, setItems] = useState({});
   const [signature, setSignature] = useState('');
-  const [samsaraFetching, setSamsaraFetching] = useState(false);
-  const [samsaraFilled, setSamsaraFilled] = useState(false);
 
   const effectiveUnit = addingNewUnit ? newUnitName.trim() : unit;
   const answeredItems = Object.values(items).filter((v) => v && v.status).length;
   const canSubmit = effectiveUnit && inspectedBy.trim() && signature.trim() && answeredItems === VEHICLE_INSPECTION_ITEMS.length && !submitting;
-
-  // Pulls the live odometer reading the moment a unit is picked — this is
-  // "when inspection gets started" — so Km shows up filled in already
-  // rather than someone having to go check Samsara separately. Still just
-  // a starting point: they can overwrite it if it looks wrong.
-  useEffect(() => {
-    if (!unit || addingNewUnit) return;
-    let cancelled = false;
-    setSamsaraFetching(true);
-    setSamsaraFilled(false);
-    fetchSamsaraStat(unit).then((stat) => {
-      if (cancelled) return;
-      setSamsaraFetching(false);
-      if (stat && typeof stat.odometerKm === 'number') {
-        setKm(String(stat.odometerKm));
-        setSamsaraFilled(true);
-      }
-    });
-    return () => { cancelled = true; };
-  }, [unit, addingNewUnit]);
 
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
@@ -7390,12 +7024,10 @@ function NewVehicleInspectionForm({ knownUnits, defaultInspector, submitting, on
             type="number"
             inputMode="numeric"
             value={km}
-            onChange={(e) => { setKm(e.target.value); setSamsaraFilled(false); }}
+            onChange={(e) => setKm(e.target.value)}
             className="w-full px-3 py-2 rounded-lg text-sm"
             style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
           />
-          {samsaraFetching && <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>📡 Checking Samsara…</p>}
-          {samsaraFilled && !samsaraFetching && <p className="text-xs mt-1" style={{ color: COLORS.accent }}>📡 From Samsara</p>}
         </div>
         <div>
           <label className="block text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Inspected By</label>
@@ -7520,34 +7152,10 @@ function NewEquipmentInspectionForm({ knownUnits, defaultInspector, submitting, 
   const [items, setItems] = useState({});
   const [comments, setComments] = useState('');
   const [signature, setSignature] = useState('');
-  const [samsaraFetching, setSamsaraFetching] = useState(false);
-  const [samsaraFilled, setSamsaraFilled] = useState(false);
 
   const effectiveUnit = addingNewUnit ? newUnitName.trim() : unit;
   const answeredItems = Object.values(items).filter((v) => v && v.status).length;
   const canSubmit = effectiveUnit && machine.trim() && inspectedBy.trim() && signature.trim() && answeredItems === EQUIPMENT_INSPECTION_ITEMS.length && !submitting;
-
-  // Same idea as the vehicle form's Km prefill, but engine hours instead —
-  // see the CONFIDENCE NOTE on the samsaraStats Cloud Function mode: this
-  // is less certain to actually return data for equipment specifically,
-  // since Samsara's Asset tracking is primarily location-only. It'll just
-  // silently stay blank if nothing comes back, same as any unit with no
-  // Samsara device at all.
-  useEffect(() => {
-    if (!unit || addingNewUnit) return;
-    let cancelled = false;
-    setSamsaraFetching(true);
-    setSamsaraFilled(false);
-    fetchSamsaraStat(unit).then((stat) => {
-      if (cancelled) return;
-      setSamsaraFetching(false);
-      if (stat && typeof stat.engineHours === 'number') {
-        setHourMeter(String(stat.engineHours));
-        setSamsaraFilled(true);
-      }
-    });
-    return () => { cancelled = true; };
-  }, [unit, addingNewUnit]);
 
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
@@ -7614,12 +7222,10 @@ function NewEquipmentInspectionForm({ knownUnits, defaultInspector, submitting, 
             type="text"
             inputMode="numeric"
             value={hourMeter}
-            onChange={(e) => { setHourMeter(e.target.value); setSamsaraFilled(false); }}
+            onChange={(e) => setHourMeter(e.target.value)}
             className="w-full px-3 py-2 rounded-lg text-sm"
             style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
           />
-          {samsaraFetching && <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>📡 Checking Samsara…</p>}
-          {samsaraFilled && !samsaraFetching && <p className="text-xs mt-1" style={{ color: COLORS.accent }}>📡 From Samsara</p>}
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2 mb-4">
@@ -7770,54 +7376,6 @@ function EquipmentInspectionDetail({ record, isAdmin, onReview, onDelete, onBack
 // root causes, prevention...), so one data-driven component renders all of
 // them rather than hand-writing dozens of near-identical checkbox blocks.
 // An "Other" option (however it's worded) reveals a specify box.
-// Photo capture for a report being filled out — each tap of "Add Photo"
-// takes one picture; they build up as removable thumbnails until submit,
-// where the actual upload happens (see submitIncidentReport). Reused by
-// both the full report form and the quick Near Miss one.
-function PhotoCapture({ photos, onChange }) {
-  const fileInputRef = useRef(null);
-  const addPhoto = (file) => {
-    if (!file) return;
-    onChange([...photos, { id: uid(), blob: file, previewUrl: URL.createObjectURL(file) }]);
-  };
-  const removePhoto = (id) => {
-    const target = photos.find((p) => p.id === id);
-    if (target) URL.revokeObjectURL(target.previewUrl);
-    onChange(photos.filter((p) => p.id !== id));
-  };
-  return (
-    <div className="mb-4">
-      <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Photos</p>
-      {photos.length > 0 && (
-        <div className="flex gap-2 mb-2 overflow-x-auto">
-          {photos.map((p) => (
-            <div key={p.id} className="relative flex-shrink-0">
-              <img src={p.previewUrl} alt="Photo" className="rounded" style={{ width: 72, height: 72, objectFit: 'cover', border: `1px solid ${COLORS.line}` }} />
-              <button
-                type="button"
-                onClick={() => removePhoto(p.id)}
-                className="absolute -top-1 -right-1 rounded-full text-xs w-5 h-5 flex items-center justify-center"
-                style={{ background: '#E07A5F', color: '#1B1F19' }}
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { addPhoto(e.target.files && e.target.files[0]); e.target.value = ''; }} />
-      <button
-        type="button"
-        onClick={() => fileInputRef.current && fileInputRef.current.click()}
-        className="text-xs font-semibold px-3 py-2 rounded-lg"
-        style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-      >
-        📷 Add Photo
-      </button>
-    </div>
-  );
-}
-
 function CheckboxGroup({ label, options, selected, onChange, otherText, onOtherTextChange, readOnly }) {
   const hasOther = options.some((o) => /other/i.test(o)) && selected.some((o) => /other/i.test(o));
   if (readOnly) {
@@ -7874,115 +7432,6 @@ function CheckboxGroup({ label, options, selected, onChange, otherText, onOtherT
 // almost happened") so people actually report them; the full root-cause
 // investigation apparatus can always be added later from the report's
 // detail view if it turns out to warrant one.
-// Add/Edit form for one person on the training matrix — same component
-// either way, just pre-filled when editing. Each tracked date field's
-// label changes color live as you type, so the warning is visible right
-// where you're editing it, not just on the summary list.
-function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete }) {
-  const inputStyle = { background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
-  const [name, setName] = useState((initial && initial.name) || '');
-  const [role, setRole] = useState((initial && initial.role) || '');
-  const [category, setCategory] = useState((initial && initial.category) || TRAINING_MATRIX_CATEGORIES[0]);
-  const [customCategory, setCustomCategory] = useState(!!(initial && initial.category && !TRAINING_MATRIX_CATEGORIES.includes(initial.category)));
-  const [notes, setNotes] = useState((initial && initial.notes) || '');
-  const [values, setValues] = useState(() => {
-    const v = {};
-    TRAINING_MATRIX_FIELDS.forEach((f) => { v[f.key] = (initial && initial[f.key]) || ''; });
-    return v;
-  });
-  const [keptCertPhotos, setKeptCertPhotos] = useState((initial && initial.certPhotos) || []);
-  const [newCertPhotos, setNewCertPhotos] = useState([]);
-
-  const canSubmit = name.trim() && !submitting;
-  const statusColor = (field) => {
-    const s = trainingFieldStatus(field, values).status;
-    return TRAINING_STATUS_COLORS[s] || COLORS.inkDim;
-  };
-
-  return (
-    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-      <p className="font-display text-lg font-bold mb-3">{initial ? 'Edit Person' : 'Add Person'}</p>
-
-      <input type="text" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-      <input type="text" placeholder="Role/Position" value={role} onChange={(e) => setRole(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-
-      {customCategory ? (
-        <div className="flex gap-2 mb-3">
-          <input type="text" placeholder="Category" value={category} onChange={(e) => setCategory(e.target.value)} className="flex-1 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-          <button type="button" onClick={() => { setCustomCategory(false); setCategory(TRAINING_MATRIX_CATEGORIES[0]); }} className="text-xs" style={{ color: COLORS.inkDim }}>Pick from list</button>
-        </div>
-      ) : (
-        <select
-          value={category}
-          onChange={(e) => { if (e.target.value === '__other__') { setCustomCategory(true); setCategory(''); } else setCategory(e.target.value); }}
-          className="w-full mb-3 px-3 py-2 rounded-lg text-sm"
-          style={inputStyle}
-        >
-          {TRAINING_MATRIX_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          <option value="__other__">Other…</option>
-        </select>
-      )}
-
-      {TRAINING_MATRIX_FIELDS.map((f) => (
-        <div key={f.key} className="mb-2">
-          <label className="block text-xs font-semibold mb-1" style={{ color: statusColor(f) }}>{f.label}</label>
-          <input
-            type={f.type}
-            value={values[f.key]}
-            onChange={(e) => setValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
-            className="w-full px-3 py-2 rounded-lg text-sm"
-            style={inputStyle}
-          />
-        </div>
-      ))}
-
-      {keptCertPhotos.length > 0 && (
-        <div className="flex gap-2 mb-2 overflow-x-auto">
-          {keptCertPhotos.map((p) => (
-            <div key={p.id} className="relative flex-shrink-0">
-              <a href={p.url} target="_blank" rel="noopener noreferrer">
-                <img src={p.url} alt="Certificate" className="rounded" style={{ width: 72, height: 72, objectFit: 'cover', border: `1px solid ${COLORS.line}` }} />
-              </a>
-              <button
-                type="button"
-                onClick={() => setKeptCertPhotos((prev) => prev.filter((x) => x.id !== p.id))}
-                className="absolute -top-1 -right-1 rounded-full text-xs w-5 h-5 flex items-center justify-center"
-                style={{ background: '#E07A5F', color: '#1B1F19' }}
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      <PhotoCapture photos={newCertPhotos} onChange={setNewCertPhotos} />
-
-      <textarea placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full mt-2 mb-4 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-
-      <div className="flex items-center justify-between">
-        <div className="flex gap-2">
-          <Btn
-            onClick={() => onSubmit({ ...(initial ? { id: initial.id } : {}), name: name.trim(), role: role.trim(), category, notes: notes.trim(), certPhotos: keptCertPhotos, pendingCertPhotos: newCertPhotos, ...values })}
-            disabled={!canSubmit}
-          >
-            {submitting ? 'Saving…' : 'Save'}
-          </Btn>
-          <Btn variant="ghost" onClick={onCancel} disabled={submitting}>Cancel</Btn>
-        </div>
-        {initial && onDelete && (
-          <button
-            onClick={() => { if (confirm(`Remove ${name} from the training matrix?`)) onDelete(initial.id); }}
-            className="text-xs"
-            style={{ color: '#E07A5F' }}
-          >
-            🗑️ Remove
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function NewNearMissForm({ defaultReporter, submitting, onCancel, onSubmit }) {
   const inputStyle = { background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
   const [dateOfOccurrence, setDateOfOccurrence] = useState(() => new Date().toISOString().slice(0, 10));
@@ -7993,7 +7442,6 @@ function NewNearMissForm({ defaultReporter, submitting, onCancel, onSubmit }) {
   const [potentialConsequence, setPotentialConsequence] = useState('');
   const [reportedBy, setReportedBy] = useState(defaultReporter);
   const [signatureData, setSignatureData] = useState(null);
-  const [photos, setPhotos] = useState([]);
 
   const canSubmit = exactLocation.trim() && sequenceDescription.trim() && reportedBy.trim() && signatureData && !submitting;
 
@@ -8018,8 +7466,6 @@ function NewNearMissForm({ defaultReporter, submitting, onCancel, onSubmit }) {
       <textarea placeholder="What happened?" value={sequenceDescription} onChange={(e) => setSequenceDescription(e.target.value)} rows={3} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
       <textarea placeholder="What could have happened if things had gone differently?" value={potentialConsequence} onChange={(e) => setPotentialConsequence(e.target.value)} rows={2} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
 
-      <PhotoCapture photos={photos} onChange={setPhotos} />
-
       <input type="text" placeholder="Your name" value={reportedBy} onChange={(e) => setReportedBy(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
       <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Signature</p>
       <div className="mb-4">
@@ -8034,7 +7480,6 @@ function NewNearMissForm({ defaultReporter, submitting, onCancel, onSubmit }) {
             sequenceDescription: sequenceDescription.trim(), potentialConsequence: potentialConsequence.trim(),
             reportedBy: reportedBy.trim(),
             reporterSignature: { name: reportedBy.trim(), role: 'Employee', dataUrl: signatureData, signedAt: Date.now() },
-            pendingPhotos: photos,
           })}
           disabled={!canSubmit}
         >
@@ -8086,7 +7531,8 @@ function NewIncidentReportForm({ defaultReporter, submitting, onCancel, onSubmit
   const [estimatedCostOfDamage, setEstimatedCostOfDamage] = useState('');
   const [damagedPropertyDescription, setDamagedPropertyDescription] = useState('');
   // Section 6 — Witness Information
-  const [witnesses, setWitnesses] = useState([]);
+  const [witnesses, setWitnesses] = useState('');
+  const [witnessStatementProvided, setWitnessStatementProvided] = useState('');
   // Section 7 — Incident Information
   const [occurrenceTypes, setOccurrenceTypes] = useState([]);
   const [occurrenceTypeOther, setOccurrenceTypeOther] = useState('');
@@ -8117,7 +7563,6 @@ function NewIncidentReportForm({ defaultReporter, submitting, onCancel, onSubmit
   // Reporter signature
   const [reportedBy, setReportedBy] = useState(defaultReporter);
   const [reporterSignatureData, setReporterSignatureData] = useState(null);
-  const [photos, setPhotos] = useState([]);
 
   const canSubmit = exactLocation.trim() && dateOfOccurrence && reportedBy.trim() && sequenceDescription.trim() && reporterSignatureData && !submitting;
 
@@ -8211,25 +7656,8 @@ function NewIncidentReportForm({ defaultReporter, submitting, onCancel, onSubmit
       )}
 
       {sectionHeading(6, 'Witness Information')}
-      {witnesses.map((w, idx) => (
-        <div key={idx} className="mb-3 pl-3" style={{ borderLeft: `2px solid ${COLORS.line}` }}>
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-xs font-semibold" style={{ color: COLORS.inkDim }}>Witness {idx + 1}</p>
-            <button type="button" onClick={() => setWitnesses((prev) => prev.filter((_, i) => i !== idx))} className="text-xs" style={{ color: '#E07A5F' }}>Remove</button>
-          </div>
-          <input type="text" placeholder="Name" value={w.name} onChange={(e) => setWitnesses((prev) => prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)))} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-          <input type="text" placeholder="Contact info (phone/email)" value={w.contactInfo} onChange={(e) => setWitnesses((prev) => prev.map((x, i) => (i === idx ? { ...x, contactInfo: e.target.value } : x)))} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-          <textarea placeholder="Statement" value={w.statement} onChange={(e) => setWitnesses((prev) => prev.map((x, i) => (i === idx ? { ...x, statement: e.target.value } : x)))} rows={2} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
-        </div>
-      ))}
-      <button
-        type="button"
-        onClick={() => setWitnesses((prev) => [...prev, { name: '', contactInfo: '', statement: '' }])}
-        className="text-xs font-semibold px-3 py-2 rounded-lg mb-2"
-        style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-      >
-        + Add Witness
-      </button>
+      <textarea placeholder="Witness name(s) and contact info, one per line" value={witnesses} onChange={(e) => setWitnesses(e.target.value)} rows={2} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      <input type="text" placeholder="Witness statement(s) provided? (Yes/No)" value={witnessStatementProvided} onChange={(e) => setWitnessStatementProvided(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
 
       {sectionHeading(7, 'Incident Information')}
       <CheckboxGroup label="Type of Occurrence" options={OCCURRENCE_TYPE_OPTIONS} selected={occurrenceTypes} onChange={setOccurrenceTypes} otherText={occurrenceTypeOther} onOtherTextChange={setOccurrenceTypeOther} />
@@ -8258,8 +7686,6 @@ function NewIncidentReportForm({ defaultReporter, submitting, onCancel, onSubmit
       <CheckboxGroup options={PREVENTION_OPTIONS} selected={prevention} onChange={setPrevention} otherText={preventionOther} onOtherTextChange={setPreventionOther} label="" />
       <textarea placeholder="Describe action(s) taken to prevent recurrence (short and long term). Assign dates of completion if possible." value={recurrenceActions} onChange={(e) => setRecurrenceActions(e.target.value)} rows={3} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
 
-      <PhotoCapture photos={photos} onChange={setPhotos} />
-
       <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>Reporter Signature</p>
       <input type="text" placeholder="Your name" value={reportedBy} onChange={(e) => setReportedBy(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
       <div className="mb-4">
@@ -8279,7 +7705,7 @@ function NewIncidentReportForm({ defaultReporter, submitting, onCancel, onSubmit
             injuryIllness, bodyPartsInjured: bodyPartsInjured.trim(), injuryDescription: injuryDescription.trim(),
             firstAidAttendant: firstAidAttendant.trim(), incidentFormsFilledOut: incidentFormsFilledOut.trim(), levelOfFirstAid: levelOfFirstAid.trim(), typeOfFirstAid: typeOfFirstAid.trim(), clinicHospital: clinicHospital.trim(), attendingPhysician: attendingPhysician.trim(), attendingPoliceOfficer: attendingPoliceOfficer.trim(),
             propertyDamaged: propertyDamaged.trim(), estimatedCostOfDamage: estimatedCostOfDamage.trim(), damagedPropertyDescription: damagedPropertyDescription.trim(),
-            witnesses: witnesses.map((w) => ({ name: w.name.trim(), contactInfo: w.contactInfo.trim(), statement: w.statement.trim() })).filter((w) => w.name || w.contactInfo || w.statement),
+            witnesses: witnesses.trim(), witnessStatementProvided: witnessStatementProvided.trim(),
             occurrenceTypes, occurrenceTypeOther: occurrenceTypeOther.trim(), contactWith, contactWithOther: contactWithOther.trim(), sequenceDescription: sequenceDescription.trim(), diagramAttached: diagramAttached.trim(),
             unsafeActs, unsafeActsOther: unsafeActsOther.trim(), safetyDeviceInoperable: safetyDeviceInoperable.trim(), substanceSuspicion: substanceSuspicion.trim(), operationsManagerNotified: operationsManagerNotified.trim(),
             unsafeConditions, unsafeConditionsOther: unsafeConditionsOther.trim(),
@@ -8287,7 +7713,6 @@ function NewIncidentReportForm({ defaultReporter, submitting, onCancel, onSubmit
             rootCauses, prevention, preventionOther: preventionOther.trim(), recurrenceActions: recurrenceActions.trim(),
             reportedBy: reportedBy.trim(),
             reporterSignature: { name: reportedBy.trim(), role: 'Employee', dataUrl: reporterSignatureData, signedAt: Date.now() },
-            pendingPhotos: photos,
           })}
           disabled={!canSubmit}
         >
@@ -8339,7 +7764,7 @@ function RoleSelect({ value, onChange }) {
   );
 }
 
-function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onSetStatus, onAction, onDelete, onCreateSignLink, onAddPhoto, onBack }) {
+function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onSetStatus, onAction, onDelete, onCreateSignLink, onBack }) {
   const [addingSignature, setAddingSignature] = useState(false);
   const [signerName, setSignerName] = useState('');
   const [signerRole, setSignerRole] = useState('');
@@ -8349,8 +7774,6 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
   const [linkSignerName, setLinkSignerName] = useState('');
   const [linkSignerRole, setLinkSignerRole] = useState('');
   const [creatingLink, setCreatingLink] = useState(false);
-  const [addingPhoto, setAddingPhoto] = useState(false);
-  const photoInputRef = useRef(null);
 
   const field = (label, value) => {
     if (!value) return null;
@@ -8444,13 +7867,8 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
       )}
 
       <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>6. Witness Information</p>
-      {incidentReportWitnesses(record).map((w, idx) => (
-        <div key={idx} className="mb-2">
-          <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: COLORS.inkDim }}>Witness{incidentReportWitnesses(record).length > 1 ? ` ${idx + 1}` : ''}</p>
-          <p className="text-sm">{[w.name, w.contactInfo].filter(Boolean).join(' · ') || '—'}</p>
-          {w.statement && <p className="text-sm mt-1 whitespace-pre-wrap" style={{ color: COLORS.inkDim }}>{w.statement}</p>}
-        </div>
-      ))}
+      {field('Witnesses', record.witnesses)}
+      {field('Statement(s) Provided', record.witnessStatementProvided)}
 
       <p className="font-display text-sm font-bold uppercase tracking-wide mt-4 mb-2" style={{ color: COLORS.accent }}>7. Incident Information</p>
       {checks('Type of Occurrence', record.occurrenceTypes, record.occurrenceTypeOther)}
@@ -8458,50 +7876,6 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
       {field('Sequence of Events', record.sequenceDescription)}
       {field('Potential Consequence (Near Miss)', record.potentialConsequence)}
       {field('Diagram/Picture Attached', record.diagramAttached)}
-
-      {((record.photos && record.photos.length > 0) || isAdmin) && (
-        <div className="mb-3">
-          <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Photos</p>
-          {record.photos && record.photos.length > 0 && (
-            <div className="flex gap-2 mb-2 overflow-x-auto">
-              {record.photos.map((p) => (
-                <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer" className="flex-shrink-0">
-                  <img src={p.url} alt="Incident photo" className="rounded" style={{ width: 80, height: 80, objectFit: 'cover', border: `1px solid ${COLORS.line}` }} />
-                </a>
-              ))}
-            </div>
-          )}
-          {isAdmin && (
-            <>
-              <input
-                ref={photoInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files && e.target.files[0];
-                  e.target.value = '';
-                  if (!file) return;
-                  setAddingPhoto(true);
-                  await onAddPhoto(record.id, file);
-                  setAddingPhoto(false);
-                }}
-              />
-              <button
-                type="button"
-                disabled={addingPhoto}
-                onClick={() => photoInputRef.current && photoInputRef.current.click()}
-                className="text-xs font-semibold px-3 py-2 rounded-lg"
-                style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-              >
-                {addingPhoto ? 'Adding…' : '📷 Add Photo'}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
       {checks('7.a Unsafe Acts', record.unsafeActs, record.unsafeActsOther)}
       {field('Safety Device Made Inoperable', record.safetyDeviceInoperable)}
       {field('Substance Suspicion', record.substanceSuspicion)}
@@ -9375,33 +8749,6 @@ function PrintableWorkOrder({ order, activeUnit, t, lang, getAssignedMechanics, 
 
 function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, onDelete, isAdmin }) {
   const [block, setBlock] = useState(shift.block || '');
-  // Same time-only pattern the mechanic timesheet edit already uses —
-  // NOT a full date+time picker. Each keeps its own original calendar day
-  // locked in behind the scenes (so a shift that genuinely crosses
-  // midnight still saves correctly) rather than letting the date be
-  // changed here at all, which isn't something this needs and was also
-  // the earlier version's actual bug: building the field from
-  // toISOString() (always UTC) showed the wrong day for anyone not in UTC.
-  const getLocalDatePart = (iso) => {
-    if (!iso) return '';
-    const d = new Date(iso);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  };
-  const toLocalTime = (iso) => {
-    if (!iso) return '';
-    const d = new Date(iso);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  };
-  const combineDateTime = (datePart, time) => {
-    if (!time || !datePart) return null;
-    return new Date(`${datePart}T${time}`).toISOString();
-  };
-  const startDatePart = getLocalDatePart(shift.start);
-  const endDatePart = getLocalDatePart(shift.end) || startDatePart;
-  const [startTime, setStartTime] = useState(toLocalTime(shift.start));
-  const [endTime, setEndTime] = useState(toLocalTime(shift.end));
   const [startHours, setStartHours] = useState(shift.startHours || '');
   const [endHours, setEndHours] = useState(shift.endHours || '');
   const [spruce, setSpruce] = useState(shift.spruce || '');
@@ -9429,7 +8776,7 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
       <div className="flex items-center justify-between mb-3 no-print">
-        <p className="font-display font-semibold">{fmtDate(shift.end || shift.start)} — {shift.machine}</p>
+        <p className="font-display font-semibold">{fmtDate(shift.start)} — {shift.machine}</p>
         {isAdmin && (
           <button
             onClick={() => window.print()}
@@ -9445,28 +8792,6 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
           <PrintableProductionShift shift={shift} unitTypes={unitTypes} />
         </PrintPortal>
       )}
-      <div className="grid grid-cols-2 gap-3 mb-3">
-        <label className="block">
-          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock In</span>
-          <input
-            type="time"
-            value={startTime}
-            onChange={(e) => setStartTime(e.target.value)}
-            className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
-            style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
-          />
-        </label>
-        <label className="block">
-          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock Out</span>
-          <input
-            type="time"
-            value={endTime}
-            onChange={(e) => setEndTime(e.target.value)}
-            className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2"
-            style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
-          />
-        </label>
-      </div>
       {activeType !== 'fuel' && activeType !== 'winch' && (
         <label className="block mb-3">
           <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Block</span>
@@ -9554,11 +8879,7 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
         </div>
       ) : (
         <div className="flex gap-2 flex-wrap">
-          <Btn onClick={() => onSave({
-            block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes,
-            start: combineDateTime(startDatePart, startTime) || shift.start,
-            end: combineDateTime(endDatePart, endTime) || shift.end,
-          })}>Save changes</Btn>
+          <Btn onClick={() => onSave({ block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes })}>Save changes</Btn>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
           <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>Delete shift</button>
         </div>
@@ -9719,6 +9040,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [driverDocuments, setDriverDocuments] = useState(() => cacheGet('driverDocuments', []));
   const [uploadingDriverDoc, setUploadingDriverDoc] = useState(false);
   const [expandedSafetyCategory, setExpandedSafetyCategory] = useState(null);
+  const [jobHazardsExpanded, setJobHazardsExpanded] = useState(false);
+  const [selectedJobHazard, setSelectedJobHazard] = useState(null); // JOB_HAZARDS key, or null (showing the job picker)
   const [inspectionsExpanded, setInspectionsExpanded] = useState(false);
   const [incidentReportingExpanded, setIncidentReportingExpanded] = useState(false);
   const [showAddSafetyDoc, setShowAddSafetyDoc] = useState(null); // category name, or null
@@ -9728,11 +9051,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const warmedSafetyDocIds = useRef(new Set());
   const [safetyInspections, setSafetyInspections] = useState(() => cacheGet('safetyInspections', []));
   const [incidentReports, setIncidentReports] = useState(() => cacheGet('incidentReports', []));
-  const [trainingMatrix, setTrainingMatrix] = useState(() => cacheGet('trainingMatrix', []));
-  const [trainingMatrixExpanded, setTrainingMatrixExpanded] = useState(false);
-  const [editingTrainingPersonId, setEditingTrainingPersonId] = useState(null); // null = list view; 'new' = add form; else a person's id
-  const [submittingTrainingPerson, setSubmittingTrainingPerson] = useState(false);
-  const [importingTrainingMatrix, setImportingTrainingMatrix] = useState(false);
   const [nearMissRequests, setNearMissRequests] = useState(() => cacheGet('nearMissRequests', []));
   const [showRequestNearMiss, setShowRequestNearMiss] = useState(false);
   const [requestNearMissTarget, setRequestNearMissTarget] = useState('');
@@ -9937,7 +9255,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [tsFilterEnd, setTsFilterEnd] = useState('');
   const [tsEmailDraft, setTsEmailDraft] = useState(null);
   const [showClockInPrompt, setShowClockInPrompt] = useState(false);
-  const [showClockOutAfterLogBookPrompt, setShowClockOutAfterLogBookPrompt] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState(null);
   const [editingOrderChecklistId, setEditingOrderChecklistId] = useState(null);
   const [showFireworks, setShowFireworks] = useState(false);
@@ -10075,16 +9392,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = Object.values(snap.val() || {});
       setIncidentReports(val);
       cacheSet('incidentReports', val);
-    });
-    return () => ref.off('value', on);
-  }, []);
-
-  useEffect(() => {
-    const ref = firebase.database().ref('trainingMatrixRecords');
-    const on = ref.on('value', (snap) => {
-      const val = Object.values(snap.val() || {});
-      setTrainingMatrix(val);
-      cacheSet('trainingMatrix', val);
     });
     return () => ref.off('value', on);
   }, []);
@@ -11665,29 +10972,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await queueWrite('safetyInspections', { kind: 'delete', entryId: recordId });
   };
   const submitIncidentReport = async (record) => {
-    const { pendingPhotos, ...rest } = record;
-    const id = uid();
-    // Photos get uploaded here (once we have a real report id to file them
-    // under), rather than in the form component itself — same reasoning as
-    // signatures: the form just hands over what the user gave it, and the
-    // submit step is where it actually becomes a saved record.
-    let photos = [];
-    if (pendingPhotos && pendingPhotos.length > 0) {
-      photos = await Promise.all(pendingPhotos.map(async (p) => {
-        const storageRef = firebase.storage().ref(`incidentPhotos/${id}/${Date.now()}-${p.blob.name || 'photo.jpg'}`);
-        await storageRef.put(p.blob);
-        const url = await storageRef.getDownloadURL();
-        return { id: uid(), url, fileName: p.blob.name || 'photo.jpg', addedBy: currentMechanic, addedAt: Date.now() };
-      }));
-    }
     const full = {
-      id,
+      id: uid(),
       status: 'open',
-      signatures: rest.reporterSignature ? [rest.reporterSignature] : [],
-      photos,
+      signatures: record.reporterSignature ? [record.reporterSignature] : [],
       createdBy: currentMechanic,
       createdAt: Date.now(),
-      ...rest,
+      ...record,
     };
     delete full.reporterSignature;
     const next = [...incidentReports, full];
@@ -11695,53 +10986,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     cacheSet('incidentReports', next);
     await queueWrite('incidentReports', { kind: 'save', entry: full });
     return full;
-  };
-  // Lets admin/safety attach a photo to a report after the fact too — an
-  // investigator visiting the site later, for instance — not just at the
-  // moment it's first filed.
-  const addIncidentReportPhoto = async (reportId, file) => {
-    const record = incidentReports.find((r) => r.id === reportId);
-    if (!record) return;
-    const storageRef = firebase.storage().ref(`incidentPhotos/${reportId}/${Date.now()}-${file.name}`);
-    await storageRef.put(file);
-    const url = await storageRef.getDownloadURL();
-    const photo = { id: uid(), url, fileName: file.name, addedBy: currentMechanic, addedAt: Date.now() };
-    const updated = { ...record, photos: [...(record.photos || []), photo] };
-    const next = incidentReports.map((r) => (r.id === reportId ? updated : r));
-    setIncidentReports(next);
-    cacheSet('incidentReports', next);
-    await queueWrite('incidentReports', { kind: 'save', entry: updated });
-  };
-  const saveTrainingPerson = async (person) => {
-    const { pendingCertPhotos, ...rest } = person;
-    const id = rest.id || uid();
-    let certPhotos = rest.certPhotos || [];
-    // Same pattern as incident report photos — upload happens here, once
-    // there's a real id to file them under, not inside the form itself.
-    if (pendingCertPhotos && pendingCertPhotos.length > 0) {
-      const uploaded = await Promise.all(pendingCertPhotos.map(async (p) => {
-        const storageRef = firebase.storage().ref(`trainingCertPhotos/${id}/${Date.now()}-${p.blob.name || 'cert.jpg'}`);
-        await storageRef.put(p.blob);
-        const url = await storageRef.getDownloadURL();
-        return { id: uid(), url, fileName: p.blob.name || 'cert.jpg', addedBy: currentMechanic, addedAt: Date.now() };
-      }));
-      certPhotos = [...certPhotos, ...uploaded];
-    }
-    const full = rest.id
-      ? { ...rest, id, certPhotos }
-      : { ...rest, id, certPhotos, createdBy: currentMechanic, createdAt: Date.now() };
-    const next = trainingMatrix.some((p) => p.id === full.id)
-      ? trainingMatrix.map((p) => (p.id === full.id ? full : p))
-      : [...trainingMatrix, full];
-    setTrainingMatrix(next);
-    cacheSet('trainingMatrix', next);
-    await queueWrite('trainingMatrix', { kind: 'save', entry: full });
-  };
-  const deleteTrainingPerson = async (personId) => {
-    const next = trainingMatrix.filter((p) => p.id !== personId);
-    setTrainingMatrix(next);
-    cacheSet('trainingMatrix', next);
-    await queueWrite('trainingMatrix', { kind: 'delete', entryId: personId });
   };
   // Signatures accumulate over time — the reporter signs at filing, an
   // investigator or an involved party may not sign until days later once
@@ -12505,23 +11749,29 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
   const openDriverLog = driverLogs.find((l) => l.driver === currentMechanic && !l.end);
 
-  // Keeps a winch truck driver's timesheet in sync with their HOS log book
-  // — the legally-binding on-duty record, not raw clock-in/out, is what
-  // should determine their paid hours for that day, so the two can't
-  // quietly drift apart. Called after every driver log mutation below.
-  // Passing null for logForDay clears the override (used when a log is
-  // deleted or a status change removed leaves nothing to sync), reverting
-  // that day's entry back to normal clock-in/out math.
-  const syncTimesheetToLogBook = async (driverName, dateStr, logForDay) => {
-    const entry = timesheets.find((t) => t.mechanic === driverName && t.date === dateStr);
-    if (!entry) return; // nothing to sync to yet — no timesheet entry for this day
+  // Flags — never overrides — a mismatch between a winch driver's actual
+  // paid hours for the day and what their HOS log book shows as on-duty
+  // time. Paid hours always come straight from the real clock-in/out, no
+  // exceptions, even on a day where they also worked a different job
+  // before or after driving. This only warns if the log book shows MORE
+  // on-duty time than what's on the timesheet — the concerning direction,
+  // since that could mean on-duty time went unpaid. The timesheet
+  // legitimately exceeding the log book is normal and expected whenever
+  // other work happened that same day, so that direction is never flagged.
+  const checkLogBookMismatch = async (driverName, dateStr, logForDay) => {
+    const dayEntries = timesheets.filter((t) => t.mechanic === driverName && t.date === dateStr);
+    if (dayEntries.length === 0) return; // nothing on the timesheet yet for this day to compare against
     if (!logForDay) {
-      await patchOneTimesheetEntry(entry.id, { logBookHours: null });
+      await Promise.all(dayEntries.map((e) => patchOneTimesheetEntry(e.id, { logBookMismatchHours: null })));
       return;
     }
     const totals = computeDutyDurations(logForDay.statusChanges, logForDay.end);
-    const onDutyHours = totals.driving + totals.onDuty;
-    await patchOneTimesheetEntry(entry.id, { logBookHours: Math.round(onDutyHours * 2) / 2 });
+    const onDutyHours = Math.round((totals.driving + totals.onDuty) * 2) / 2;
+    const paidHours = dayEntries.reduce((sum, e) => sum + entryHours(e), 0);
+    const mismatch = onDutyHours > paidHours ? Math.round((onDutyHours - paidHours) * 2) / 2 : null;
+    // Flag on just the first entry for the day — the warning is about the
+    // day as a whole, not any one specific clock-in/out within it.
+    await patchOneTimesheetEntry(dayEntries[0].id, { logBookMismatchHours: mismatch });
   };
 
   const startDriverLog = async (odometerStart, unit) => {
@@ -12539,7 +11789,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       signedAt: null,
     };
     await saveOneDriverLog(entry);
-    await syncTimesheetToLogBook(currentMechanic, localDateStr(new Date(now)), entry);
+    await checkLogBookMismatch(currentMechanic, localDateStr(new Date(now)), entry);
   };
 
   const addDriverStatusChange = async (status, note) => {
@@ -12547,7 +11797,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const change = { id: uid(), status, time: new Date().toISOString(), note: note || '' };
     const nextChanges = [...(openDriverLog.statusChanges || []), change];
     await patchOneDriverLog(openDriverLog.id, { statusChanges: nextChanges });
-    await syncTimesheetToLogBook(currentMechanic, localDateStr(new Date(openDriverLog.start)), { ...openDriverLog, statusChanges: nextChanges });
+    await checkLogBookMismatch(currentMechanic, localDateStr(new Date(openDriverLog.start)), { ...openDriverLog, statusChanges: nextChanges });
   };
 
   const endDriverLog = async (odometerEnd, signature) => {
@@ -12562,11 +11812,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       signedAt: now,
       statusChanges: nextChanges,
     });
-    await syncTimesheetToLogBook(currentMechanic, localDateStr(new Date(openDriverLog.start)), { ...openDriverLog, end: now, statusChanges: nextChanges });
-    // Ending the log book doesn't touch the shift itself — ask right now,
-    // while it's still on screen, rather than leaving the shift open with
-    // nothing pointing that out.
-    if (openProductionShift) setShowClockOutAfterLogBookPrompt(true);
+    await checkLogBookMismatch(currentMechanic, localDateStr(new Date(openDriverLog.start)), { ...openDriverLog, end: now, statusChanges: nextChanges });
   };
 
   // Fills in any of the last 14 calendar days that have no log at all, as a
@@ -12590,7 +11836,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       };
     });
     await bulkSaveDriverLogs(entries);
-    await Promise.all(entries.map((e) => syncTimesheetToLogBook(currentMechanic, localDateStr(new Date(e.start)), e)));
+    await Promise.all(entries.map((e) => checkLogBookMismatch(currentMechanic, localDateStr(new Date(e.start)), e)));
   };
 
   // Admin-side editing — always available, even on an approved log, per
@@ -12599,13 +11845,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const updateDriverLog = async (logId, patch) => {
     await patchOneDriverLog(logId, patch);
     const log = driverLogs.find((l) => l.id === logId);
-    if (log) await syncTimesheetToLogBook(log.driver, localDateStr(new Date(log.start)), { ...log, ...patch });
+    if (log) await checkLogBookMismatch(log.driver, localDateStr(new Date(log.start)), { ...log, ...patch });
   };
   const deleteDriverLog = async (logId) => {
     const log = driverLogs.find((l) => l.id === logId);
     await deleteOneDriverLog(logId);
     setEditingDriverLogId(null);
-    if (log) await syncTimesheetToLogBook(log.driver, localDateStr(new Date(log.start)), null);
+    if (log) await checkLogBookMismatch(log.driver, localDateStr(new Date(log.start)), null);
   };
   // Removes every log on file for a driver entirely — for cleaning up
   // test data, or someone who's genuinely gone and shouldn't keep
@@ -12625,7 +11871,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (!log) return;
     const nextChanges = [...(log.statusChanges || []), change].sort((a, b) => new Date(a.time) - new Date(b.time));
     await patchOneDriverLog(logId, { statusChanges: nextChanges });
-    await syncTimesheetToLogBook(log.driver, localDateStr(new Date(log.start)), { ...log, statusChanges: nextChanges });
+    await checkLogBookMismatch(log.driver, localDateStr(new Date(log.start)), { ...log, statusChanges: nextChanges });
   };
   const updateDriverStatusChange = async (logId, changeId, patch) => {
     const log = driverLogs.find((l) => l.id === logId);
@@ -12634,14 +11880,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       .map((c) => (c.id === changeId ? { ...c, ...patch } : c))
       .sort((a, b) => new Date(a.time) - new Date(b.time));
     await patchOneDriverLog(logId, { statusChanges: nextChanges });
-    await syncTimesheetToLogBook(log.driver, localDateStr(new Date(log.start)), { ...log, statusChanges: nextChanges });
+    await checkLogBookMismatch(log.driver, localDateStr(new Date(log.start)), { ...log, statusChanges: nextChanges });
   };
   const removeDriverStatusChange = async (logId, changeId) => {
     const log = driverLogs.find((l) => l.id === logId);
     if (!log) return;
     const nextChanges = (log.statusChanges || []).filter((c) => c.id !== changeId);
     await patchOneDriverLog(logId, { statusChanges: nextChanges });
-    await syncTimesheetToLogBook(log.driver, localDateStr(new Date(log.start)), { ...log, statusChanges: nextChanges });
+    await checkLogBookMismatch(log.driver, localDateStr(new Date(log.start)), { ...log, statusChanges: nextChanges });
   };
 
   const isDriverLogWeekApproved = (weekStart) => !!driverLogApprovals[weekStart];
@@ -13930,13 +13176,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </button>
           </div>
 
-          {(isAdmin || isSafety) && (
-            <TrainingMatrixAlertBanner
-              trainingMatrix={trainingMatrix}
-              onOpen={() => { setScreen('safety'); setTrainingMatrixExpanded(true); setEditingTrainingPersonId(null); }}
-            />
-          )}
-
           <SidebarMenu
             show={showSidebar}
             onClose={() => setShowSidebar(false)}
@@ -14338,11 +13577,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
-        <ClockOutAfterLogBookPromptOverlay
-          show={showClockOutAfterLogBookPrompt}
-          onClockOut={() => { setShowClockOutAfterLogBookPrompt(false); attemptProductionClockOut(); }}
-          onSkip={() => setShowClockOutAfterLogBookPrompt(false)}
-        />
         <SidebarMenu
           show={showSidebar}
           onClose={() => setShowSidebar(false)}
@@ -14380,13 +13614,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </div>
             <button onClick={() => setShowSidebar(true)} className="text-3xl leading-none px-3 py-2 rounded-lg" style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>☰</button>
           </div>
-
-          {(isAdmin || isSafety) && (
-            <TrainingMatrixAlertBanner
-              trainingMatrix={trainingMatrix}
-              onOpen={() => { setScreen('safety'); setTrainingMatrixExpanded(true); setEditingTrainingPersonId(null); }}
-            />
-          )}
 
           {!openProductionShift ? (
             <div className="rounded-lg p-8 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
@@ -15279,13 +14506,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           )}
           <h1 className="font-display text-3xl font-bold mb-2">Admin</h1>
 
-          {(isAdmin || isSafety) && (
-            <TrainingMatrixAlertBanner
-              trainingMatrix={trainingMatrix}
-              onOpen={() => { setScreen('safety'); setTrainingMatrixExpanded(true); setEditingTrainingPersonId(null); }}
-            />
-          )}
-
           {isAdmin && (
           <button
             onClick={() => setScreen('pdtTranslations')}
@@ -15972,14 +15192,32 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                               isAdmin={isAdmin}
                             />
                           ) : (
-                            <ProductionShiftRow
+                            <button
                               key={s.id}
-                              shift={s}
-                              unitTypes={unitTypes}
-                              isAdmin={isAdmin}
-                              onEdit={() => setEditingShiftId(s.id)}
-                              onQuickPatch={(id, patch) => updateProductionShift(id, patch)}
-                            />
+                              onClick={() => setEditingShiftId(s.id)}
+                              className="w-full text-left rounded-lg p-3"
+                              style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="font-semibold text-sm">{fmtDate(s.end)}</span>
+                                <span className="underline text-xs" style={{ color: COLORS.accent }}>Edit</span>
+                              </div>
+                              <div className="flex items-center justify-between text-xs" style={{ color: COLORS.inkDim }}>
+                                <span>{s.machine}{s.block ? ` · Block ${s.block}` : ''}</span>
+                                <span className="font-mono">{fmtTime(s.start)} – {fmtTime(s.end)}</span>
+                              </div>
+                              {machineType(s.machine, unitTypes) === 'fuel' && s.fuelLog && Object.keys(s.fuelLog).length > 0 && (
+                                <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>
+                                  ⛽ {Object.values(s.fuelLog).flat().reduce((sum, v) => sum + (parseFloat(v) || 0), 0)} L across {Object.keys(s.fuelLog).length} unit{Object.keys(s.fuelLog).length > 1 ? 's' : ''}
+                                </p>
+                              )}
+                              {s.downtimeLog && s.downtimeLog.length > 0 && (
+                                <p className="text-xs mt-1" style={{ color: '#E07A5F' }}>⚠ {s.downtimeLog.length} downtime report{s.downtimeLog.length > 1 ? 's' : ''}</p>
+                              )}
+                              {s.signature && (
+                                <p className="text-xs mt-1" style={{ color: COLORS.done }}>✓ Signed</p>
+                              )}
+                            </button>
                           )
                         ))}
                       </div>
@@ -17596,6 +16834,55 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             );
           })}
 
+          <AdminSection
+            icon="⚠️"
+            title={`Job Hazards${selectedJobHazard ? ' — ' + JOB_HAZARDS[selectedJobHazard].label : ''}`}
+            expanded={jobHazardsExpanded}
+            onToggle={() => setJobHazardsExpanded((x) => !x)}
+          >
+            {!selectedJobHazard ? (
+              <div className="space-y-2">
+                <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Task-by-task hazard breakdown from the job hazard analysis manual. Tasks marked ⚠️ have a full Safe Work Procedure on file — ask your supervisor to see it.</p>
+                {Object.keys(JOB_HAZARDS).map((key) => (
+                  <button
+                    key={key}
+                    onClick={() => setSelectedJobHazard(key)}
+                    className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                    style={{ background: COLORS.surfaceRaised }}
+                  >
+                    <span className="text-sm font-semibold">{JOB_HAZARDS[key].label}</span>
+                    <span className="text-xs" style={{ color: COLORS.inkDim }}>{JOB_HAZARDS[key].tasks.length} tasks →</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div>
+                <button
+                  onClick={() => setSelectedJobHazard(null)}
+                  className="text-xs uppercase tracking-wide mb-3"
+                  style={{ color: COLORS.inkDim }}
+                >
+                  ← Back to Job Hazards
+                </button>
+                {JOB_HAZARDS[selectedJobHazard].note && (
+                  <p className="text-xs mb-3 italic" style={{ color: COLORS.inkDim }}>{JOB_HAZARDS[selectedJobHazard].note}</p>
+                )}
+                <div className="space-y-3">
+                  {JOB_HAZARDS[selectedJobHazard].tasks.map((t, i) => (
+                    <div key={i} className="rounded-lg px-3 py-3" style={{ background: COLORS.surfaceRaised }}>
+                      <p className="text-sm font-semibold mb-1.5">{t.critical && <span title="Critical task — Safe Work Procedure on file">⚠️ </span>}{t.task}</p>
+                      <ul className="text-xs space-y-0.5" style={{ color: COLORS.inkDim }}>
+                        {t.hazards.map((h, j) => (
+                          <li key={j}>• {h}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </AdminSection>
+
           {(isAdmin || isSafety) && (
             <AdminSection
               icon="🧰"
@@ -17722,7 +17009,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     />
                   ) : newVehicleInspectionOpen ? (
                     <NewVehicleInspectionForm
-                      knownUnits={units.filter((u) => { const t = unitTypes[slugForUnit(u)]; return t === 'truck' || t === 'pickup'; }).sort((a, b) => a.localeCompare(b))}
+                      knownUnits={[...new Set(safetyInspections.filter((r) => r.type === 'vehicle').map((r) => r.unit))].sort((a, b) => a.localeCompare(b))}
                       defaultInspector={currentMechanic}
                       submitting={submittingSafetyInspection}
                       onCancel={() => setNewVehicleInspectionOpen(false)}
@@ -17800,10 +17087,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   ) : newEquipmentInspectionOpen ? (
                     <NewEquipmentInspectionForm
                       knownUnits={
-                        units
-                          .filter((u) => MACHINE_TYPE_LABELS[unitTypes[slugForUnit(u)]])
-                          .sort((a, b) => a.localeCompare(b))
-                          .map((u) => ({ unit: u, machine: MACHINE_TYPE_LABELS[unitTypes[slugForUnit(u)]] }))
+                        [...new Map(
+                          safetyInspections
+                            .filter((r) => r.type === 'equipment')
+                            .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+                            .map((r) => [r.unit, { unit: r.unit, machine: r.machine }])
+                        ).values()]
                       }
                       defaultInspector={currentMechanic}
                       submitting={submittingSafetyInspection}
@@ -18009,7 +17298,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   onSetStatus={setIncidentReportStatus}
                   onAction={handleIncidentReportAction}
                   onCreateSignLink={createIncidentSignRequest}
-                  onAddPhoto={addIncidentReportPhoto}
                   onDelete={async () => { await deleteIncidentReport(viewingIncidentReportId); setViewingIncidentReportId(null); }}
                 />
               ) : newIncidentReportOpen ? (
@@ -18102,94 +17390,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
                   {incidentReports.length === 0 && (
                     <p className="text-sm" style={{ color: COLORS.inkDim }}>No reports on file yet.</p>
-                  )}
-                </div>
-              )}
-            </AdminSection>
-          )}
-
-          {(isAdmin || isSafety) && (
-            <AdminSection
-              icon="🎓"
-              title="Training Matrix"
-              expanded={trainingMatrixExpanded}
-              onToggle={() => setTrainingMatrixExpanded((x) => !x)}
-            >
-              {editingTrainingPersonId ? (
-                <TrainingPersonForm
-                  initial={editingTrainingPersonId === 'new' ? null : trainingMatrix.find((p) => p.id === editingTrainingPersonId)}
-                  submitting={submittingTrainingPerson}
-                  onCancel={() => setEditingTrainingPersonId(null)}
-                  onDelete={async (id) => { await deleteTrainingPerson(id); setEditingTrainingPersonId(null); }}
-                  onSubmit={async (person) => {
-                    setSubmittingTrainingPerson(true);
-                    await saveTrainingPerson(person);
-                    setSubmittingTrainingPerson(false);
-                    setEditingTrainingPersonId(null);
-                  }}
-                />
-              ) : (
-                <div>
-                  <div className="flex gap-2 mb-4">
-                    <button
-                      onClick={() => setEditingTrainingPersonId('new')}
-                      className="text-xs font-semibold px-3 py-2 rounded-lg"
-                      style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-                    >
-                      + Add Person
-                    </button>
-                    {trainingMatrix.length === 0 && (
-                      <button
-                        disabled={importingTrainingMatrix}
-                        onClick={async () => {
-                          if (!confirm(`Import ${TRAINING_MATRIX_IMPORT_SEED.length} people from the training matrix PDF? Only run this once.`)) return;
-                          setImportingTrainingMatrix(true);
-                          for (const person of TRAINING_MATRIX_IMPORT_SEED) {
-                            await saveTrainingPerson({ ...person, id: uid(), createdBy: currentMechanic, createdAt: Date.now() });
-                          }
-                          setImportingTrainingMatrix(false);
-                        }}
-                        className="text-xs font-semibold px-3 py-2 rounded-lg"
-                        style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-                      >
-                        {importingTrainingMatrix ? `Importing… (${TRAINING_MATRIX_IMPORT_SEED.length})` : `📥 Import ${TRAINING_MATRIX_IMPORT_SEED.length} From PDF`}
-                      </button>
-                    )}
-                  </div>
-
-                  {[...TRAINING_MATRIX_CATEGORIES, ...new Set(trainingMatrix.map((p) => p.category).filter((c) => c && !TRAINING_MATRIX_CATEGORIES.includes(c)))].map((cat) => {
-                    const people = trainingMatrix.filter((p) => (p.category || TRAINING_MATRIX_CATEGORIES[0]) === cat);
-                    if (people.length === 0) return null;
-                    return (
-                      <div key={cat} className="mb-4">
-                        <p className="font-display text-sm font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>{cat}</p>
-                        <div className="space-y-2">
-                          {people.map((p) => {
-                            const status = trainingPersonStatus(p);
-                            const statusLabel = status === 'expired' ? 'Expired' : status === 'expiringSoon' ? 'Due Soon' : '';
-                            return (
-                              <button
-                                key={p.id}
-                                onClick={() => setEditingTrainingPersonId(p.id)}
-                                className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
-                                style={{ background: COLORS.surfaceRaised }}
-                              >
-                                <span className="text-sm">{p.name}{p.role ? ` — ${p.role}` : ''}</span>
-                                {statusLabel && (
-                                  <span className="text-xs font-bold flex-shrink-0 ml-2" style={{ color: TRAINING_STATUS_COLORS[status] }}>
-                                    {statusLabel}
-                                  </span>
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {trainingMatrix.length === 0 && (
-                    <p className="text-sm" style={{ color: COLORS.inkDim }}>No one on the training matrix yet.</p>
                   )}
                 </div>
               )}
@@ -18986,133 +18186,8 @@ function TimesheetJobsEditor({ entry, onAdd, onRemove }) {
   );
 }
 
-// Read-only row for one machine/winch truck shift — same buttons as
-// TimesheetEntryCard (Print, Show raw data, Signed (view)), same styling,
-// same behavior, just pointed at a production shift's fields instead of a
-// regular timesheet entry's. Tapping the row itself (not one of the
-// buttons) opens the edit form, same as a regular entry.
-function ProductionShiftRow({ shift, onEdit, onQuickPatch, unitTypes, isAdmin }) {
-  const [showSignature, setShowSignature] = useState(false);
-  const [showRawData, setShowRawData] = useState(false);
-  const [fixDraft, setFixDraft] = useState({});
-  const hours = shift.end ? (new Date(shift.end) - new Date(shift.start)) / 1000 / 60 / 60 : 0;
-  const getLocalDatePart = (iso) => {
-    if (!iso) return '';
-    const d = new Date(iso);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  };
-  const toLocalTime = (iso) => {
-    if (!iso) return '';
-    const d = new Date(iso);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  };
-  const combineDateTime = (datePart, time) => {
-    if (!time || !datePart) return null;
-    return new Date(`${datePart}T${time}`).toISOString();
-  };
-
-  return (
-    <div className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
-      <div className="flex items-center justify-between mb-1">
-        <span className="font-semibold text-sm">{fmtDate(shift.end)}</span>
-        <div className="flex items-center gap-3">
-          {isAdmin && (
-            <button onClick={() => window.print()} className="text-xs underline" style={{ color: COLORS.inkDim }}>🖨️ Print</button>
-          )}
-          <button onClick={onEdit} className="text-xs underline" style={{ color: COLORS.accent }}>Edit</button>
-        </div>
-      </div>
-      {isAdmin && (
-        <PrintPortal>
-          <PrintableProductionShift shift={shift} unitTypes={unitTypes} />
-        </PrintPortal>
-      )}
-      <div className="flex items-center justify-between text-xs" style={{ color: COLORS.inkDim }}>
-        <span>{shift.machine}{shift.block ? ` · Block ${shift.block}` : ''}</span>
-        <span className="font-mono">{fmtTime(shift.start)} – {fmtTime(shift.end)}</span>
-      </div>
-      {shift.end && (
-        <p className="text-xs font-mono mt-1" style={{ color: COLORS.accent }}>
-          Total for the day: <span className="font-bold">{fmtHours(hours)}</span>
-        </p>
-      )}
-      {machineType(shift.machine, unitTypes) === 'fuel' && shift.fuelLog && Object.keys(shift.fuelLog).length > 0 && (
-        <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>
-          ⛽ {Object.values(shift.fuelLog).flat().reduce((sum, v) => sum + (parseFloat(v) || 0), 0)} L across {Object.keys(shift.fuelLog).length} unit{Object.keys(shift.fuelLog).length > 1 ? 's' : ''}
-        </p>
-      )}
-      {shift.downtimeLog && shift.downtimeLog.length > 0 && (
-        <p className="text-xs mt-1" style={{ color: '#E07A5F' }}>⚠ {shift.downtimeLog.length} downtime report{shift.downtimeLog.length > 1 ? 's' : ''}</p>
-      )}
-
-      {isAdmin && (
-        <div className="mt-2">
-          <button onClick={() => setShowRawData((s) => !s)} className="text-xs underline" style={{ color: COLORS.line }}>
-            {showRawData ? 'Hide raw data' : '🔍 Show raw data'}
-          </button>
-          {showRawData && (
-            <div className="mt-2 rounded-lg p-3 font-mono text-xs" style={{ background: COLORS.surface, color: COLORS.inkDim }}>
-              <p className="mb-2">employee: {shift.employee}</p>
-              <p className="mb-2">machine: {shift.machine}</p>
-              <p className="mb-2">id: {shift.id}</p>
-              {['start', 'end'].map((field) => {
-                const iso = shift[field];
-                if (!iso) return <p key={field} className="mb-2">{field}: —</p>;
-                const storedDate = getLocalDatePart(iso);
-                const time = toLocalTime(iso);
-                const draftDate = fixDraft[field] !== undefined ? fixDraft[field] : storedDate;
-                return (
-                  <div key={field} className="mb-3">
-                    <p>{field}: {iso}</p>
-                    {onQuickPatch && (
-                      <div className="flex items-center gap-2 mt-1">
-                        <input
-                          type="date"
-                          value={draftDate}
-                          onChange={(e) => setFixDraft((d) => ({ ...d, [field]: e.target.value }))}
-                          className="rounded px-2 py-1 text-xs"
-                          style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
-                        />
-                        <button
-                          onClick={() => onQuickPatch(shift.id, { [field]: combineDateTime(draftDate, time) })}
-                          disabled={draftDate === storedDate}
-                          className="text-xs underline"
-                          style={{ color: draftDate === storedDate ? COLORS.line : COLORS.accent }}
-                        >
-                          Fix date (keeps {time} as the time)
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {shift.signature && (
-        <div className="mt-2">
-          <button
-            onClick={() => setShowSignature((s) => !s)}
-            className="text-xs underline"
-            style={{ color: COLORS.done }}
-          >
-            ✓ Signed {showSignature ? '(hide)' : '(view)'}
-          </button>
-          {showSignature && (
-            <div className="mt-2 rounded-lg p-2 inline-block" style={{ background: '#fff' }}>
-              <img src={shift.signature} alt="Signature" style={{ height: 60, display: 'block' }} />
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
+// Paper-friendly rendering of a single day's timesheet entry — clock
+// in/out, break, jobs breakdown, paid hours, and signature.
 function PrintableTimesheetEntry({ entry }) {
   const hours = entryHours(entry);
   return (
@@ -19284,6 +18359,11 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
         <p className="text-xs font-mono mb-2" style={{ color: entryHours(entry) > 16 ? '#E07A5F' : COLORS.accent }}>
           Total for the day: <span className="font-bold">{fmtHours(entryHours(entry))}</span>
           {entryHours(entry) > 16 && ' ⚠️ looks wrong — likely a corrupted date on one of the saved times'}
+        </p>
+      )}
+      {isAdmin && typeof entry.logBookMismatchHours === 'number' && entry.logBookMismatchHours > 0 && (
+        <p className="text-xs mb-2 rounded-lg px-2 py-1" style={{ background: COLORS.progress, color: '#1B1F19', display: 'inline-block' }}>
+          ⚠ Log book shows {entry.logBookMismatchHours}h more on-duty than what's paid this day — worth checking
         </p>
       )}
       {isAdmin && (
