@@ -981,6 +981,527 @@ const JOB_HAZARDS = {
   },
 };
 
+// WHMIS and TDG training course content + quizzes, shown on the Safety
+// page under Training. Quiz results are saved per worker to Firebase
+// (trainingRecords/{mechanic}/{courseKey}) so admins can see who's passed.
+const TRAINING_COURSES = {
+  whmis: {
+    label: 'WHMIS 2015',
+    subtitle: 'Workplace Hazardous Materials Information System',
+    passScore: 80,
+    modules: [
+      {
+        title: 'What is WHMIS and why it matters',
+        content: ['WHMIS (Workplace Hazardous Materials Information System) is Canada\'s national system for giving workers information about hazardous products used, stored, or handled on the job — things like fuel, degreasers, chain oil, paint, welding gases, and cleaning chemicals.', 'WHMIS 2015 aligns Canada with the international GHS (Globally Harmonized System), so labels and Safety Data Sheets look the same no matter where a product was made.', 'WHMIS rests on three pillars: (1) supplier and workplace labels, (2) Safety Data Sheets (SDS), and (3) worker education and training — this course covers all three.'],
+      },
+      {
+        title: 'Your rights and responsibilities',
+        content: ['Every worker has the right to know what hazardous products they\'re working with, how to handle them safely, and what to do in an emergency.', 'Suppliers must classify hazardous products and provide a compliant label and SDS to the employer.', 'The employer (Harder Contracting) must maintain an up-to-date SDS binder/library, ensure every hazardous product is properly labelled, and train workers before they use a controlled product.', 'Workers must attend training, follow safe work procedures, use required PPE, and never remove or deface a label.'],
+      },
+      {
+        title: 'Labels: supplier vs. workplace',
+        content: ['A supplier label comes from the manufacturer and must include: product identifier, pictogram(s), signal word (Danger or Warning), hazard statement(s), precautionary statement(s), and supplier identifier.', 'A workplace label is created on-site when a product is transferred into another container (e.g. pouring chain oil into a smaller jug). At minimum it needs the product name, safe handling information, and a note to consult the SDS.', 'Never use a product from an unlabelled container. If you can\'t identify what\'s in a container, don\'t use it — report it.'],
+      },
+      {
+        title: 'The WHMIS hazard pictograms',
+        content: ['There are 9 WHMIS pictograms, each representing a hazard class: Flame (flammable), Flame Over Circle (oxidizer), Exploding Bomb (explosive/reactive), Gas Cylinder (compressed gas), Corrosion (corrosive to skin/metal), Skull and Crossbones (acutely toxic — can kill in small amounts), Health Hazard (carcinogen, respiratory sensitizer, organ damage), Exclamation Mark (irritant, less severe health effects), and Biohazardous Infectious Materials.', 'Diesel fuel and gasoline carry the Flame pictogram. Many degreasers and battery acid carry Corrosion. Welding/cutting gas cylinders carry Gas Cylinder and often Flame.', 'A product can carry more than one pictogram if it has more than one type of hazard.'],
+      },
+      {
+        title: 'Safety Data Sheets (SDS)',
+        content: ['Every hazardous product must have an SDS on file — Harder Contracting keeps these accessible on the Safety page under \'SDS Sheets\', viewable on your phone.', 'An SDS has 16 standard sections, but the ones that matter most day-to-day are: Section 2 (hazards), Section 4 (first aid), Section 5 (fire-fighting), Section 6 (accidental release/spills), Section 7 (handling & storage), and Section 8 (exposure controls/PPE).', 'Check the SDS before using a product for the first time, and know where to find it fast in an emergency.'],
+      },
+      {
+        title: 'Safe handling, PPE, and storage',
+        content: ['Always use the PPE specified for a product — gloves, eye protection, respiratory protection — as listed on the label or SDS.', 'Store hazardous products the way the SDS specifies — upright, away from incompatible materials (e.g. keep oxidizers away from fuels), and in a ventilated area where required.', 'Never mix chemicals unless you know it\'s safe to do so — some combinations (like bleach and ammonia) create dangerous gases.'],
+      },
+      {
+        title: 'Spills, exposure, and emergency response',
+        content: ['If you\'re exposed (skin contact, eye contact, inhalation), follow the first-aid section of the SDS immediately — usually flush with water for a set number of minutes — and get medical attention if needed.', 'For a spill, refer to Section 6 of the SDS. Contain it if you safely can, stop the source, and report it right away — don\'t try to handle a large or unfamiliar spill alone.', 'Report every exposure or spill incident through the Safety page, even if it seems minor — this is how patterns get caught before someone gets seriously hurt.'],
+      },
+    ],
+    quiz: [
+      { q: 'What are the three pillars of WHMIS?', options: ['Labels, SDS, and worker education/training', 'Fire extinguishers, first aid kits, and spill kits', 'PPE, ventilation, and storage', 'Supplier, employer, and government'], correct: 0 },
+      { q: 'What must a workplace label include at minimum?', options: ['Full 16-section SDS text', 'Product name, safe handling info, and a note to consult the SDS', 'Only the pictogram', 'Nothing — workplace labels aren\'t required'], correct: 1 },
+      { q: 'Which pictogram is used for a product that can kill in small amounts (acute toxicity)?', options: ['Exclamation Mark', 'Health Hazard', 'Skull and Crossbones', 'Corrosion'], correct: 2 },
+      { q: 'How many WHMIS pictograms are there?', options: ['6', '8', '9', '12'], correct: 2 },
+      { q: 'Which SDS section tells you what first aid to give after exposure?', options: ['Section 2', 'Section 4', 'Section 9', 'Section 14'], correct: 1 },
+      { q: 'What should you do if you find an unlabelled container?', options: ['Smell it to guess what\'s inside', 'Use it carefully', 'Don\'t use it — report it', 'Pour it out'], correct: 2 },
+      { q: 'Who is responsible for providing a compliant label and SDS for a hazardous product?', options: ['The worker', 'The supplier', 'The government', 'No one — it\'s optional'], correct: 1 },
+      { q: 'What pictogram would you expect on a container of diesel fuel?', options: ['Biohazard', 'Flame', 'Gas Cylinder', 'Exploding Bomb'], correct: 1 },
+      { q: 'What\'s the right response to a chemical spill you\'re not sure how to handle?', options: ['Clean it up yourself no matter what', 'Ignore it, it\'ll evaporate', 'Report it and get help — don\'t handle it alone if it\'s large or unfamiliar', 'Cover it with anything nearby and walk away'], correct: 2 },
+      { q: 'Where can you find a product\'s SDS at Harder Contracting?', options: ['It doesn\'t exist on the app', 'The Safety page, under SDS Sheets', 'Only in a filing cabinet at head office', 'You have to call the supplier every time'], correct: 1 },
+    ],
+  },
+  tdg: {
+    label: 'TDG Awareness',
+    subtitle: 'Transportation of Dangerous Goods (Canada)',
+    passScore: 80,
+    modules: [
+      {
+        title: 'What is TDG and when it applies',
+        content: ['The Transportation of Dangerous Goods Act and Regulations (TDGR) govern how dangerous goods are handled, offered for transport, and transported on Canadian roads.', 'At Harder Contracting, this mainly applies to diesel fuel transport (fuel trucks, service trucks carrying fuel/lubricants) and anyone hooking/hauling equipment or materials classified as dangerous goods.', 'This course is a general awareness overview. Depending on your specific role — especially fuel truck operation — you may need to complete a recognized, certified TDG training course to legally handle or transport dangerous goods. Check with your supervisor about what\'s required for your position.'],
+      },
+      {
+        title: 'The 9 classes of dangerous goods',
+        content: ['Class 1 — Explosives. Class 2 — Gases (flammable, non-flammable/non-toxic, or toxic — includes propane, welding gases). Class 3 — Flammable liquids (this is where diesel and gasoline fall). Class 4 — Flammable solids, substances liable to spontaneous combustion, or dangerous when wet.', 'Class 5 — Oxidizing substances and organic peroxides. Class 6 — Toxic and infectious substances. Class 7 — Radioactive materials. Class 8 — Corrosives (like battery acid). Class 9 — Miscellaneous dangerous products (includes some environmentally hazardous substances).', 'Diesel fuel is Class 3, Flammable Liquid — the class you\'ll encounter most often in this operation.'],
+      },
+      {
+        title: 'Shipping documents',
+        content: ['Any shipment of dangerous goods above the exempt quantity needs a shipping document showing: the shipping name, class, UN number, packing group, and quantity of the dangerous goods being transported.', 'The shipping document must be within reach of the driver — not locked in a separate compartment — and available immediately in an emergency.', 'For a fuel truck, this is typically part of your daily paperwork alongside your pre-trip inspection and log.'],
+      },
+      {
+        title: 'Safety marks: placards and labels',
+        content: ['Above certain quantity thresholds, a vehicle carrying dangerous goods must display placards — the diamond-shaped safety marks that identify the class of goods being carried (e.g. the red Flammable Liquid placard for diesel).', 'Placards must be visible on all four sides of the vehicle/trailer and must match what\'s actually being carried — never leave up a placard for a load that\'s no longer on board.', 'Individual containers and packages also carry labels showing the same class information at a smaller scale.'],
+      },
+      {
+        title: 'Handling dangerous goods at Harder Contracting',
+        content: ['When fueling machines in the field, follow the same principles as any dangerous goods handling: keep ignition sources away, avoid spills, and know where the nearest spill kit is.', 'If you\'re transporting fuel drums, jugs, or a slip tank on a truck, know the quantity you\'re carrying — small quantities may fall under exemptions, but it\'s the driver/employer\'s responsibility to know which rules apply, not to assume.', 'Never mix or transport dangerous goods that are incompatible with each other in the same load without knowing it\'s permitted.'],
+      },
+      {
+        title: 'Emergency response and reporting',
+        content: ['In a dangerous goods incident (spill, fire, leak) involving a placarded load, TDG requires an immediate report to the appropriate authorities if release thresholds are met — this is normally handled by the company/supervisor, but as the driver you must report to your supervisor immediately and know the basics of what\'s on board.', 'Keep the shipping document and any Emergency Response Assistance Plan (ERAP) information accessible — for higher-risk goods, an ERAP may be required, which gives responders a specific plan for that product.', 'Your first priority in any incident is your own safety and the safety of others nearby — get clear, then report.'],
+      },
+      {
+        title: 'Training and certification requirements',
+        content: ['TDG requires anyone who handles, offers for transport, or transports dangerous goods to be adequately trained — trained means you understand the hazards and TDG requirements relevant to your specific duties.', 'Depending on your role, formal TDG certification (typically valid for a set period before requiring renewal) may be legally required, not just recommended. This awareness course does not replace that certification where it\'s required.', 'Talk to your supervisor about whether your specific job (e.g. fuel truck driver) requires a certified TDG course, and when your certification is due for renewal.'],
+      },
+    ],
+    quiz: [
+      { q: 'What TDG class does diesel fuel fall under?', options: ['Class 8 — Corrosives', 'Class 3 — Flammable Liquids', 'Class 2 — Gases', 'Class 9 — Miscellaneous'], correct: 1 },
+      { q: 'How many classes of dangerous goods are there under TDG?', options: ['6', '9', '12', '4'], correct: 1 },
+      { q: 'Where must the shipping document be kept while driving?', options: ['Mailed to the office later', 'Locked in a separate compartment', 'Within reach of the driver', 'It isn\'t required'], correct: 2 },
+      { q: 'What are placards?', options: ['Paperwork filed after delivery', 'Diamond-shaped safety marks showing the class of dangerous goods on board', 'A type of fire extinguisher', 'The driver\'s TDG certificate'], correct: 1 },
+      { q: 'What should you do first in a dangerous goods incident like a spill or fire?', options: ['Try to fix it alone no matter the size', 'Get clear and ensure safety, then report to your supervisor', 'Leave the placards up and drive away', 'Wait until end of shift to mention it'], correct: 1 },
+      { q: 'Does this awareness course replace certified TDG training where it\'s legally required?', options: ['Yes, always', 'No — check with your supervisor about certification requirements for your role', 'Only for fuel truck drivers', 'Only if you pass with 100%'], correct: 1 },
+      { q: 'What class covers corrosives like battery acid?', options: ['Class 8', 'Class 3', 'Class 1', 'Class 5'], correct: 0 },
+      { q: 'What should placards on a vehicle always match?', options: ['The driver\'s mood', 'Whatever was carried last month', 'What\'s actually being carried right now', 'The company logo'], correct: 2 },
+      { q: 'What is an ERAP?', options: ['A type of fuel additive', 'An Emergency Response Assistance Plan for higher-risk goods', 'A vehicle inspection form', 'A worker\'s TDG certificate number'], correct: 1 },
+      { q: 'Who is responsible for knowing which TDG rules apply to a load (e.g. exemptions for small quantities)?', options: ['No one, it doesn\'t matter', 'The driver/employer — never just assume', 'The manufacturer of the fuel', 'The customer receiving the load'], correct: 1 },
+    ],
+  },
+};
+
+// Employer info required on every Certificate of Training (TDG Regulations
+// Section 6.3(1)(a) — name and address of the employer's place of business).
+// Used for both TDG (legally required fields) and WHMIS (issued the same
+// way for consistency, though WHMIS itself doesn't mandate this format).
+const TRAINING_EMPLOYER = {
+  name: 'Harder Contracting Ltd.',
+  address: 'Box 1486, La Crete, Alberta  T0H 2H0',
+};
+// Both courses renew every 3 years (36 months), matching the existing
+// WHMIS renewal interval already used on the Training Matrix, and matching
+// the TDG Regulations' own 36-month certificate validity for road vehicle
+// transport (Section 6.5(b)).
+const CERTIFICATE_VALID_YEARS = 3;
+// Worker training/certification matrix — restored from an earlier backup
+// after being lost to an older-upload overwrite. Tracks license,
+// WHMIS, TDG, first aid, and orientation dates per person with expiry
+// warnings.
+const TRAINING_MATRIX_FIELDS = [
+  { key: 'dateOfHire', label: 'Date of Hire', type: 'date' },
+  { key: 'licenseClass', label: "Driver's License — Class", type: 'text' },
+  { key: 'licenseNumber', label: "Driver's License — Number", type: 'text' },
+  { key: 'licenseExpiry', label: "Driver's License — Expiry", type: 'date', tracked: true },
+  { key: 'driversAbstract', label: 'Drivers Abstract', type: 'text' },
+  { key: 'orientationDate', label: 'H&S Orientation — Completion Date', type: 'date', renewalYears: 1 },
+  { key: 'onJobTrainingDate', label: 'On-the-Job Training — Completion Date', type: 'date' },
+  { key: 'firstAidExpiry', label: 'First Aid/CPR — Expiry Date', type: 'date', tracked: true },
+  { key: 'tdgExpiry', label: 'TDG — Expiry Date', type: 'date', tracked: true },
+  { key: 'whmisDate', label: 'WHMIS — Completion Date', type: 'date', renewalYears: 3 },
+  { key: 'hazardIdDate', label: 'Hazard ID & Assessment Training — Completion Date', type: 'date' },
+  { key: 'incidentInvestigationDate', label: 'Incident Investigation Training — Completion Date', type: 'date' },
+  { key: 'inspectionTrainingDate', label: 'Inspection Training — Completion Date', type: 'date' },
+];
+const TRAINING_MATRIX_CATEGORIES = [
+  'Management and Supervisory', 'Administrative/Sales',
+  'Heavy Equipment — Bunchers', 'Heavy Equipment — Skidders', 'Heavy Equipment — Processors', 'Heavy Equipment — Log Loaders',
+  'Other Personnel', 'Sub-Contractors',
+];
+// "Getting close to running out" = 60 days out — same heads-up window
+// already used for the Fuel Tank Ledger reminders, for consistency.
+function trainingFieldStatus(field, record) {
+  const raw = record[field.key];
+  if (!raw) return { status: 'none', dueDate: null };
+  if (!field.tracked && !field.renewalYears) return { status: 'none', dueDate: raw };
+  let dueDateStr = raw;
+  if (field.renewalYears) {
+    const d = new Date(raw);
+    if (isNaN(d)) return { status: 'none', dueDate: raw };
+    d.setFullYear(d.getFullYear() + field.renewalYears);
+    dueDateStr = d.toISOString().slice(0, 10);
+  }
+  const due = new Date(dueDateStr);
+  if (isNaN(due)) return { status: 'none', dueDate: raw };
+  const days = (due.getTime() - Date.now()) / 86400000;
+  if (days < 0) return { status: 'expired', dueDate: dueDateStr };
+  if (days <= 60) return { status: 'expiringSoon', dueDate: dueDateStr };
+  return { status: 'ok', dueDate: dueDateStr };
+}
+function trainingPersonStatus(record) {
+  const statuses = TRAINING_MATRIX_FIELDS.filter((f) => f.tracked || f.renewalYears).map((f) => trainingFieldStatus(f, record).status);
+  if (statuses.includes('expired')) return 'expired';
+  if (statuses.includes('expiringSoon')) return 'expiringSoon';
+  if (statuses.every((s) => s === 'none')) return 'none';
+  return 'ok';
+}
+const TRAINING_STATUS_COLORS = { expired: '#E07A5F', expiringSoon: '#D9A441', ok: null, none: null };
+// One-time seed from Harder Contracting's existing training matrix PDF —
+// name, role, category, license info, and date of hire came through
+// clean. The rest of each person's certification dates (orientation,
+// first aid, TDG, WHMIS, etc.) could NOT be reliably matched to the right
+// column from that PDF — the source data has a different number of
+// populated columns per person with no way to tell which ones were
+// skipped, so guessing risked putting the wrong expiry date on the wrong
+// certification. Those raw dates are preserved in each person's Notes
+// field instead, to be sorted into the correct fields by hand once,
+// rather than trusted automatically. A few entries also had dates that
+// don't parse against the header's stated format at all (day-of-month or
+// month values that don't exist) — noted in Notes for those people too.
+const TRAINING_MATRIX_IMPORT_SEED = [
+  {
+    "name": "Harder, Edward",
+    "role": "OWNER/Senior Manager",
+    "category": "Management and Supervisory",
+    "licenseClass": "5",
+    "licenseNumber": "140251-117",
+    "licenseExpiry": "2028-11-22",
+    "notes": "Hire date from PDF (unparsed): 06/2014 | Unverified training/cert dates from PDF import (assign to correct fields above): 09/24/2027, 01/2024, 02/27/2025, 02/27/2025, 02/27/2025"
+  },
+  {
+    "name": "Wolfe, Joseph",
+    "role": "Supervisor",
+    "category": "Management and Supervisory",
+    "licenseClass": "1",
+    "licenseNumber": "148400-559",
+    "dateOfHire": "2022-10-01",
+    "licenseExpiry": "2027-04-02",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/01/2022, 09/24/2027, 11/24/2025, 01/2024, 02/27/2025, 02/27/2025, 02/27/2025"
+  },
+  {
+    "name": "Neufeld, Joey",
+    "role": "Health and Safety Coordinator",
+    "category": "Management and Supervisory",
+    "licenseClass": "1",
+    "licenseNumber": "153416-342",
+    "dateOfHire": "2023-01-02",
+    "licenseExpiry": "2026-03-30",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 01/02/2023, 01/02/2023, 08/19/2028, 7/1/2025, 08/05/2025, 12/16/2024, 01/07/2025, 12/16/2024"
+  },
+  {
+    "name": "Neudorf, Ernest",
+    "role": "Truck Supervisor",
+    "category": "Management and Supervisory",
+    "licenseClass": "5",
+    "licenseNumber": "155321-946",
+    "dateOfHire": "2025-11-17",
+    "licenseExpiry": "2026-06-08",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 11/17/2025, 11/17/2025, 01/28/2026"
+  },
+  {
+    "name": "Harder, Anna",
+    "role": "Office Admin/Payroll",
+    "category": "Administrative/Sales",
+    "licenseClass": "5",
+    "licenseNumber": "142781-491",
+    "dateOfHire": "2023-04-01",
+    "licenseExpiry": "2029-05-28"
+  },
+  {
+    "name": "Martens, Abram",
+    "role": "",
+    "category": "Heavy Equipment — Bunchers",
+    "licenseClass": "5",
+    "licenseNumber": "168930-212",
+    "dateOfHire": "2026-02-16",
+    "licenseExpiry": "2028-01-06",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 2/19/2026, 2/19/2026, 02/14/2026"
+  },
+  {
+    "name": "Neufeld, Wayne",
+    "role": "",
+    "category": "Heavy Equipment — Bunchers",
+    "licenseClass": "5",
+    "licenseNumber": "149751-703",
+    "dateOfHire": "2024-10-16",
+    "licenseExpiry": "2027-09-01",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/14/2024, 10/14/2024"
+  },
+  {
+    "name": "Wall, Kevin",
+    "role": "",
+    "category": "Heavy Equipment — Bunchers",
+    "licenseClass": "5",
+    "licenseNumber": "160660-270",
+    "dateOfHire": "2023-10-16",
+    "licenseExpiry": "2028-06-03",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/23/2023, 10/23/2023"
+  },
+  {
+    "name": "Friesen, Heinrich",
+    "role": "",
+    "category": "Heavy Equipment — Bunchers",
+    "licenseClass": "5",
+    "licenseNumber": "179247-754",
+    "dateOfHire": "2026-02-16",
+    "licenseExpiry": "2029-04-04",
+    "notes": "Language Barrier | Unverified training/cert dates from PDF import (assign to correct fields above): 2/16/2026, 2/16/2026"
+  },
+  {
+    "name": "Friesen, Ivan",
+    "role": "",
+    "category": "Heavy Equipment — Skidders",
+    "licenseClass": "5",
+    "licenseNumber": "147283-840",
+    "dateOfHire": "2023-10-16",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/30/2023, 10/30/2023, 01/2024"
+  },
+  {
+    "name": "Wall, Paul",
+    "role": "",
+    "category": "Heavy Equipment — Skidders",
+    "licenseClass": "5",
+    "licenseNumber": "174285-791",
+    "dateOfHire": "2024-12-19",
+    "licenseExpiry": "2026-10-27",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/19/2024, 12/19/2024, 01/28/2026"
+  },
+  {
+    "name": "Wall, P Martin",
+    "role": "",
+    "category": "Heavy Equipment — Skidders",
+    "licenseClass": "5",
+    "licenseNumber": "171356-140",
+    "dateOfHire": "2025-10-30",
+    "licenseExpiry": "2029-12-16",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/30/2025, 10/30/2025, 10/28/2028"
+  },
+  {
+    "name": "Friesen, Corny W",
+    "role": "",
+    "category": "Heavy Equipment — Skidders",
+    "licenseClass": "3",
+    "licenseNumber": "168517-472",
+    "dateOfHire": "2025-12-09",
+    "licenseExpiry": "2028-01-03",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/9/2025, 12/9/2025, 12/9/2028"
+  },
+  {
+    "name": "Dyck, Jerome",
+    "role": "",
+    "category": "Heavy Equipment — Skidders",
+    "licenseClass": "5",
+    "licenseNumber": "175551-944",
+    "dateOfHire": "2025-12-01",
+    "licenseExpiry": "2027-10-21",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/1/2025, 12/1/2025, 11/30/2028"
+  },
+  {
+    "name": "Friesen, Raymond",
+    "role": "",
+    "category": "Heavy Equipment — Skidders",
+    "licenseClass": "5",
+    "licenseNumber": "170312-714",
+    "dateOfHire": "2023-12-04",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/7/2023, 12/7/2023, 9/24/2027, 01/2024"
+  },
+  {
+    "name": "Letkeman, David JR",
+    "role": "",
+    "category": "Heavy Equipment — Processors",
+    "licenseClass": "5",
+    "licenseNumber": "164294-662",
+    "dateOfHire": "2025-10-07",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/7/2025, 10/7/2025, 1/11/2027"
+  },
+  {
+    "name": "Friesen, David",
+    "role": "",
+    "category": "Heavy Equipment — Processors",
+    "licenseClass": "5",
+    "licenseNumber": "174194-829",
+    "dateOfHire": "2025-10-01",
+    "licenseExpiry": "2030-08-08",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/01/2025, 10/01/2025"
+  },
+  {
+    "name": "Frissen, Jaren",
+    "role": "",
+    "category": "Heavy Equipment — Processors",
+    "licenseClass": "5",
+    "licenseNumber": "174130-765",
+    "dateOfHire": "2026-02-16",
+    "licenseExpiry": "2027-08-30",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 02/16/2026, 02/16/2026"
+  },
+  {
+    "name": "Wall, Simon",
+    "role": "",
+    "category": "Heavy Equipment — Log Loaders",
+    "licenseClass": "1",
+    "licenseNumber": "10007221139535",
+    "dateOfHire": "2024-10-29",
+    "notes": "License expiry from PDF (unparsed): 9/13/2034 | Unverified training/cert dates from PDF import (assign to correct fields above): 10/29/2024, 10/29/0202, 08/27/2028"
+  },
+  {
+    "name": "Peters, Jonathon",
+    "role": "",
+    "category": "Heavy Equipment — Log Loaders",
+    "licenseClass": "5",
+    "licenseNumber": "149157-596",
+    "dateOfHire": "2025-12-15",
+    "licenseExpiry": "2026-04-28",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/15/1025, 12/15/2025, 01/13/2029"
+  },
+  {
+    "name": "Wolfe, Matthew",
+    "role": "",
+    "category": "Heavy Equipment — Log Loaders",
+    "licenseClass": "5",
+    "licenseNumber": "166695-643",
+    "dateOfHire": "2026-01-20",
+    "notes": "License expiry from PDF (unparsed): 1/20/2026 | Unverified training/cert dates from PDF import (assign to correct fields above): 1/20/2026, 01/23/2029"
+  },
+  {
+    "name": "Driedger, Ronnie",
+    "role": "",
+    "category": "Heavy Equipment — Log Loaders",
+    "licenseClass": "5",
+    "licenseNumber": "149238-792",
+    "dateOfHire": "2026-01-20",
+    "licenseExpiry": "2027-08-13",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 1/20/2026, 1/20/2026, 01/16/2029"
+  },
+  {
+    "name": "Wolfe, Willy",
+    "role": "Mechanic",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "160551-339",
+    "dateOfHire": "2023-10-16",
+    "notes": "License expiry from PDF (unparsed): 01/27/2027 | Unverified training/cert dates from PDF import (assign to correct fields above): 10/05/2023, 11/27/2024, 9/24/2027, 01/2024"
+  },
+  {
+    "name": "Schmidt, Philip",
+    "role": "Cat",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "155936-230",
+    "dateOfHire": "2022-09-12",
+    "licenseExpiry": "2028-11-06",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 09/12/2022, 09/12/2022, 9/24/2027, 01/2024"
+  },
+  {
+    "name": "Harder, Mason",
+    "role": "Fuel up guy",
+    "category": "Other Personnel",
+    "licenseClass": "1",
+    "licenseNumber": "173833-542",
+    "dateOfHire": "2023-04-01",
+    "licenseExpiry": "2027-03-08",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 01/07/2025, 01/07/2025, 5/11/2027, 11/23/2028, 11/23/2028"
+  },
+  {
+    "name": "Friesen, George",
+    "role": "Mechanic",
+    "category": "Other Personnel",
+    "licenseClass": "1",
+    "licenseNumber": "151508-876",
+    "dateOfHire": "2025-11-17",
+    "licenseExpiry": "2030-06-05",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 11/17/2025, 11/07/2025, 2/1/2028, 11/17/2028"
+  },
+  {
+    "name": "Enns, Melissa",
+    "role": "Cook",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "169217-486",
+    "dateOfHire": "2024-11-02",
+    "notes": "License expiry from PDF (unparsed): 7/28/2028 | Unverified training/cert dates from PDF import (assign to correct fields above): 11/02/2024, 11/02/2024, 5/5/2027"
+  },
+  {
+    "name": "Enns, Rosalee",
+    "role": "Cook",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "170487-409",
+    "dateOfHire": "2024-11-02",
+    "licenseExpiry": "2029-12-09",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 11/02/2024, 11/02/2024"
+  },
+  {
+    "name": "Bergen, David",
+    "role": "Grader",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "164419-756",
+    "dateOfHire": "2026-03-02",
+    "licenseExpiry": "2029-10-17",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 03/02/2026, 03/02/2026"
+  },
+  {
+    "name": "Peters, Mark",
+    "role": "Mechanic",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "167403-229",
+    "dateOfHire": "2025-12-10",
+    "licenseExpiry": "2028-03-07",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 12/10/2025, 12/10/2025, 12/10/2028"
+  },
+  {
+    "name": "Friesen, Justin",
+    "role": "Excavator",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "168477-446",
+    "dateOfHire": "2025-01-07",
+    "licenseExpiry": "2029-01-26",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 01/07/2025, 01/07/2025, 1/6/2029"
+  },
+  {
+    "name": "Martens, Keith",
+    "role": "CAT",
+    "category": "Other Personnel",
+    "licenseClass": "5",
+    "licenseNumber": "174743-765",
+    "dateOfHire": "2025-11-24",
+    "licenseExpiry": "2027-03-13",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 11/24/2025, 11/24/2025, 11/23/2028"
+  },
+  {
+    "name": "Zacharias, Ernie",
+    "role": "Processor",
+    "category": "Sub-Contractors",
+    "licenseClass": "5",
+    "licenseNumber": "167497-320",
+    "dateOfHire": "2025-11-24",
+    "licenseExpiry": "2026-12-01",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 11/24/2025, 11/28/2025"
+  },
+  {
+    "name": "Jeff Teichroeb",
+    "role": "Jeff Zacharias - Processor",
+    "category": "Sub-Contractors",
+    "licenseClass": "1",
+    "licenseNumber": "167478-346",
+    "dateOfHire": "2024-10-15",
+    "licenseExpiry": "2027-03-29",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/15/2023, 10/15/2023, 9/24/2027"
+  },
+  {
+    "name": "Jeff Teichroeb",
+    "role": "Paul Banman - Processor",
+    "category": "Sub-Contractors",
+    "licenseClass": "5",
+    "licenseNumber": "175530-229",
+    "dateOfHire": "2024-10-15",
+    "licenseExpiry": "2028-05-17",
+    "notes": "Unverified training/cert dates from PDF import (assign to correct fields above): 10/15/2024, 10/15/2024"
+  }
+];
+
 // Inspection types living in the Safety > Inspections dropdown. Only 'yard'
 // has a real digitized form so far — the rest show a "coming soon" state
 // until those forms are provided, so the menu itself doesn't need to change
@@ -4344,6 +4865,22 @@ async function saveSafetyInspectionRecord(record) {
 async function deleteSafetyInspectionRecord(recordId) {
   await firebase.database().ref('safetyInspectionRecords/' + recordId).remove();
 }
+// WHMIS/TDG training quiz results — one record per worker per course
+// attempt (a retake creates a new record rather than overwriting, so a
+// full attempt history is kept; admins only need the latest pass).
+async function saveTrainingMatrixRecord(record) {
+  await firebase.database().ref('trainingMatrixRecords/' + record.id).set(stripUndefined(record));
+}
+async function deleteTrainingMatrixRecord(recordId) {
+  await firebase.database().ref('trainingMatrixRecords/' + recordId).remove();
+}
+
+async function saveTrainingRecord(record) {
+  await firebase.database().ref('trainingRecords/' + record.id).set(stripUndefined(record));
+}
+async function deleteTrainingRecord(recordId) {
+  await firebase.database().ref('trainingRecords/' + recordId).remove();
+}
 // Incident/near-miss/accident reports — unlike inspections, these get
 // signatures ADDED over time as people become available (the reporter
 // signs immediately, an investigator or an involved party may sign days
@@ -4485,6 +5022,8 @@ const OFFLINE_QUEUE_HANDLERS = {
   maps: { save: saveMapRecord, patch: patchMapRecord, delete: deleteMapRecord, bulkPatch: bulkPatchMapRecords },
   safetyDocs: { save: saveSafetyDocRecord, delete: deleteSafetyDocRecord },
   safetyInspections: { save: saveSafetyInspectionRecord, delete: deleteSafetyInspectionRecord },
+  trainingRecords: { save: saveTrainingRecord, delete: deleteTrainingRecord },
+  trainingMatrix: { save: saveTrainingMatrixRecord, delete: deleteTrainingMatrixRecord },
   incidentReports: { save: saveIncidentReportRecord, delete: deleteIncidentReportRecord },
   mapPins: { save: saveMapPinRecord, patch: patchMapPinRecord, delete: deleteMapPinRecord },
   mapLines: { save: saveMapLineRecord, patch: patchMapLineRecord, delete: deleteMapLineRecord },
@@ -6500,6 +7039,81 @@ function AdminSection({ icon, title, expanded, onToggle, children }) {
   );
 }
 
+// Printable Certificate of Training — meets TDG Regulations Section 6.3
+// content requirements (employer name/address, employee name, expiry date
+// prefixed "Expires on", and the aspects/topics trained on) and doubles as
+// a WHMIS completion certificate for consistency. Requires signatures from
+// both the employee and the employer (or an employee acting on the
+// employer's behalf) per Section 6.3(3) before it's considered issued.
+function CertificateOfTraining({ record, course }) {
+  const issuedDate = record.certIssuedAt ? new Date(record.certIssuedAt) : null;
+  const expiresDate = record.certExpiresOn ? new Date(record.certExpiresOn + 'T00:00:00') : null;
+  return (
+    <div className="rounded-lg p-6" style={{ background: '#FAF7EE', color: '#1B1F19', border: `2px solid ${COLORS.accent}` }}>
+      <p className="text-center font-display text-xs uppercase tracking-widest mb-1" style={{ color: COLORS.accent }}>Certificate of Training</p>
+      <p className="text-center font-display text-xl font-bold mb-4">{course.label}</p>
+
+      <div className="text-sm mb-4">
+        <p><strong>Employer:</strong> {TRAINING_EMPLOYER.name}</p>
+        <p><strong>Address:</strong> {TRAINING_EMPLOYER.address}</p>
+      </div>
+      <div className="text-sm mb-4">
+        <p><strong>Employee:</strong> {record.mechanic}</p>
+        <p><strong>Trained in:</strong> {course.modules.map((m) => m.title).join('; ')}</p>
+        <p><strong>Quiz score:</strong> {record.scorePercent}%</p>
+      </div>
+      <div className="text-sm mb-4">
+        <p><strong>Issued:</strong> {issuedDate ? issuedDate.toLocaleDateString() : '—'}</p>
+        <p><strong>Expires on:</strong> {expiresDate ? expiresDate.toLocaleDateString() : '—'}</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 mt-6">
+        <div>
+          <p className="text-xs uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Employee signature</p>
+          {record.employeeSignature ? (
+            <img src={record.employeeSignature.dataUrl} alt="Employee signature" style={{ height: 50, background: '#fff', border: `1px solid ${COLORS.line}`, borderRadius: 4 }} />
+          ) : (
+            <p className="text-xs italic" style={{ color: COLORS.inkDim }}>Not yet signed</p>
+          )}
+        </div>
+        <div>
+          <p className="text-xs uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Employer signature</p>
+          {record.employerSignature ? (
+            <div>
+              <img src={record.employerSignature.dataUrl} alt="Employer signature" style={{ height: 50, background: '#fff', border: `1px solid ${COLORS.line}`, borderRadius: 4 }} />
+              <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>{record.employerSignature.name}</p>
+            </div>
+          ) : (
+            <p className="text-xs italic" style={{ color: COLORS.inkDim }}>Not yet countersigned</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TrainingMatrixAlertBanner({ trainingMatrix, onOpen }) {
+  const flagged = trainingMatrix.filter((p) => {
+    const s = trainingPersonStatus(p);
+    return s === 'expired' || s === 'expiringSoon';
+  });
+  if (flagged.length === 0) return null;
+  const expiredCount = flagged.filter((p) => trainingPersonStatus(p) === 'expired').length;
+  return (
+    <button
+      onClick={onOpen}
+      className="w-full text-left rounded-lg p-3 mb-6"
+      style={{ background: '#E07A5F22', border: '1px solid #E07A5F' }}
+    >
+      <p className="text-sm font-bold" style={{ color: '#E07A5F' }}>
+        🎓 Training Matrix — {flagged.length} {flagged.length === 1 ? 'person needs' : 'people need'} attention
+        {expiredCount > 0 ? ` (${expiredCount} expired)` : ''}
+      </p>
+      <p className="text-xs mt-0.5" style={{ color: COLORS.inkDim }}>Tap to review</p>
+    </button>
+  );
+}
+
 function SafetyDocUploadForm({ uploading, onCancel, onSubmit }) {
   const [title, setTitle] = useState('');
   const [file, setFile] = useState(null);
@@ -7376,6 +7990,50 @@ function EquipmentInspectionDetail({ record, isAdmin, onReview, onDelete, onBack
 // root causes, prevention...), so one data-driven component renders all of
 // them rather than hand-writing dozens of near-identical checkbox blocks.
 // An "Other" option (however it's worded) reveals a specify box.
+function PhotoCapture({ photos, onChange }) {
+  const fileInputRef = useRef(null);
+  const addPhoto = (file) => {
+    if (!file) return;
+    onChange([...photos, { id: uid(), blob: file, previewUrl: URL.createObjectURL(file) }]);
+  };
+  const removePhoto = (id) => {
+    const target = photos.find((p) => p.id === id);
+    if (target) URL.revokeObjectURL(target.previewUrl);
+    onChange(photos.filter((p) => p.id !== id));
+  };
+  return (
+    <div className="mb-4">
+      <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Photos</p>
+      {photos.length > 0 && (
+        <div className="flex gap-2 mb-2 overflow-x-auto">
+          {photos.map((p) => (
+            <div key={p.id} className="relative flex-shrink-0">
+              <img src={p.previewUrl} alt="Photo" className="rounded" style={{ width: 72, height: 72, objectFit: 'cover', border: `1px solid ${COLORS.line}` }} />
+              <button
+                type="button"
+                onClick={() => removePhoto(p.id)}
+                className="absolute -top-1 -right-1 rounded-full text-xs w-5 h-5 flex items-center justify-center"
+                style={{ background: '#E07A5F', color: '#1B1F19' }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { addPhoto(e.target.files && e.target.files[0]); e.target.value = ''; }} />
+      <button
+        type="button"
+        onClick={() => fileInputRef.current && fileInputRef.current.click()}
+        className="text-xs font-semibold px-3 py-2 rounded-lg"
+        style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+      >
+        📷 Add Photo
+      </button>
+    </div>
+  );
+}
+
 function CheckboxGroup({ label, options, selected, onChange, otherText, onOtherTextChange, readOnly }) {
   const hasOther = options.some((o) => /other/i.test(o)) && selected.some((o) => /other/i.test(o));
   if (readOnly) {
@@ -7432,6 +8090,111 @@ function CheckboxGroup({ label, options, selected, onChange, otherText, onOtherT
 // almost happened") so people actually report them; the full root-cause
 // investigation apparatus can always be added later from the report's
 // detail view if it turns out to warrant one.
+function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete }) {
+  const inputStyle = { background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
+  const [name, setName] = useState((initial && initial.name) || '');
+  const [role, setRole] = useState((initial && initial.role) || '');
+  const [category, setCategory] = useState((initial && initial.category) || TRAINING_MATRIX_CATEGORIES[0]);
+  const [customCategory, setCustomCategory] = useState(!!(initial && initial.category && !TRAINING_MATRIX_CATEGORIES.includes(initial.category)));
+  const [notes, setNotes] = useState((initial && initial.notes) || '');
+  const [values, setValues] = useState(() => {
+    const v = {};
+    TRAINING_MATRIX_FIELDS.forEach((f) => { v[f.key] = (initial && initial[f.key]) || ''; });
+    return v;
+  });
+  const [keptCertPhotos, setKeptCertPhotos] = useState((initial && initial.certPhotos) || []);
+  const [newCertPhotos, setNewCertPhotos] = useState([]);
+
+  const canSubmit = name.trim() && !submitting;
+  const statusColor = (field) => {
+    const s = trainingFieldStatus(field, values).status;
+    return TRAINING_STATUS_COLORS[s] || COLORS.inkDim;
+  };
+
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <p className="font-display text-lg font-bold mb-3">{initial ? 'Edit Person' : 'Add Person'}</p>
+
+      <input type="text" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+      <input type="text" placeholder="Role/Position" value={role} onChange={(e) => setRole(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+
+      {customCategory ? (
+        <div className="flex gap-2 mb-3">
+          <input type="text" placeholder="Category" value={category} onChange={(e) => setCategory(e.target.value)} className="flex-1 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+          <button type="button" onClick={() => { setCustomCategory(false); setCategory(TRAINING_MATRIX_CATEGORIES[0]); }} className="text-xs" style={{ color: COLORS.inkDim }}>Pick from list</button>
+        </div>
+      ) : (
+        <select
+          value={category}
+          onChange={(e) => { if (e.target.value === '__other__') { setCustomCategory(true); setCategory(''); } else setCategory(e.target.value); }}
+          className="w-full mb-3 px-3 py-2 rounded-lg text-sm"
+          style={inputStyle}
+        >
+          {TRAINING_MATRIX_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          <option value="__other__">Other…</option>
+        </select>
+      )}
+
+      {TRAINING_MATRIX_FIELDS.map((f) => (
+        <div key={f.key} className="mb-2">
+          <label className="block text-xs font-semibold mb-1" style={{ color: statusColor(f) }}>{f.label}</label>
+          <input
+            type={f.type}
+            value={values[f.key]}
+            onChange={(e) => setValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+            className="w-full px-3 py-2 rounded-lg text-sm"
+            style={inputStyle}
+          />
+        </div>
+      ))}
+
+      {keptCertPhotos.length > 0 && (
+        <div className="flex gap-2 mb-2 overflow-x-auto">
+          {keptCertPhotos.map((p) => (
+            <div key={p.id} className="relative flex-shrink-0">
+              <a href={p.url} target="_blank" rel="noopener noreferrer">
+                <img src={p.url} alt="Certificate" className="rounded" style={{ width: 72, height: 72, objectFit: 'cover', border: `1px solid ${COLORS.line}` }} />
+              </a>
+              <button
+                type="button"
+                onClick={() => setKeptCertPhotos((prev) => prev.filter((x) => x.id !== p.id))}
+                className="absolute -top-1 -right-1 rounded-full text-xs w-5 h-5 flex items-center justify-center"
+                style={{ background: '#E07A5F', color: '#1B1F19' }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <PhotoCapture photos={newCertPhotos} onChange={setNewCertPhotos} />
+
+      <textarea placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full mt-2 mb-4 px-3 py-2 rounded-lg text-sm" style={inputStyle} />
+
+      <div className="flex items-center justify-between">
+        <div className="flex gap-2">
+          <Btn
+            onClick={() => onSubmit({ ...(initial ? { id: initial.id } : {}), name: name.trim(), role: role.trim(), category, notes: notes.trim(), certPhotos: keptCertPhotos, pendingCertPhotos: newCertPhotos, ...values })}
+            disabled={!canSubmit}
+          >
+            {submitting ? 'Saving…' : 'Save'}
+          </Btn>
+          <Btn variant="ghost" onClick={onCancel} disabled={submitting}>Cancel</Btn>
+        </div>
+        {initial && onDelete && (
+          <button
+            onClick={() => { if (confirm(`Remove ${name} from the training matrix?`)) onDelete(initial.id); }}
+            className="text-xs"
+            style={{ color: '#E07A5F' }}
+          >
+            🗑️ Remove
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function NewNearMissForm({ defaultReporter, submitting, onCancel, onSubmit }) {
   const inputStyle = { background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
   const [dateOfOccurrence, setDateOfOccurrence] = useState(() => new Date().toISOString().slice(0, 10));
@@ -9042,6 +9805,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [expandedSafetyCategory, setExpandedSafetyCategory] = useState(null);
   const [jobHazardsExpanded, setJobHazardsExpanded] = useState(false);
   const [selectedJobHazard, setSelectedJobHazard] = useState(null); // JOB_HAZARDS key, or null (showing the job picker)
+  const [trainingExpanded, setTrainingExpanded] = useState(false);
+  const [selectedCourse, setSelectedCourse] = useState(null); // TRAINING_COURSES key, or null
+  const [courseStage, setCourseStage] = useState('modules'); // 'modules' | 'quiz' | 'result'
+  const [quizAnswers, setQuizAnswers] = useState({}); // { questionIndex: optionIndex }
+  const [quizResult, setQuizResult] = useState(null); // { scorePercent, passed, recordId }
+  const [certSignatureDraft, setCertSignatureDraft] = useState(null); // data URL from SignaturePad, for either employee or employer signing
   const [inspectionsExpanded, setInspectionsExpanded] = useState(false);
   const [incidentReportingExpanded, setIncidentReportingExpanded] = useState(false);
   const [showAddSafetyDoc, setShowAddSafetyDoc] = useState(null); // category name, or null
@@ -9050,6 +9819,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [openingSafetyDocId, setOpeningSafetyDocId] = useState(null);
   const warmedSafetyDocIds = useRef(new Set());
   const [safetyInspections, setSafetyInspections] = useState(() => cacheGet('safetyInspections', []));
+  const [trainingRecords, setTrainingRecords] = useState(() => cacheGet('trainingRecords', []));
+  const [trainingMatrix, setTrainingMatrix] = useState(() => cacheGet('trainingMatrix', []));
+  const [trainingMatrixExpanded, setTrainingMatrixExpanded] = useState(false);
+  const [editingTrainingPersonId, setEditingTrainingPersonId] = useState(null); // null = list view; 'new' = add form; else a person's id
+  const [submittingTrainingPerson, setSubmittingTrainingPerson] = useState(false);
+  const [importingTrainingMatrix, setImportingTrainingMatrix] = useState(false);
   const [incidentReports, setIncidentReports] = useState(() => cacheGet('incidentReports', []));
   const [nearMissRequests, setNearMissRequests] = useState(() => cacheGet('nearMissRequests', []));
   const [showRequestNearMiss, setShowRequestNearMiss] = useState(false);
@@ -9382,6 +10157,26 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = Object.values(snap.val() || {});
       setSafetyInspections(val);
       cacheSet('safetyInspections', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('trainingRecords');
+    const on = ref.on('value', (snap) => {
+      const val = Object.values(snap.val() || {});
+      setTrainingRecords(val);
+      cacheSet('trainingRecords', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('trainingMatrixRecords');
+    const on = ref.on('value', (snap) => {
+      const val = Object.values(snap.val() || {});
+      setTrainingMatrix(val);
+      cacheSet('trainingMatrix', val);
     });
     return () => ref.off('value', on);
   }, []);
@@ -10971,6 +11766,89 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     cacheSet('safetyInspections', next);
     await queueWrite('safetyInspections', { kind: 'delete', entryId: recordId });
   };
+  // Records one quiz attempt — a retake adds a new record rather than
+  // overwriting, so the full attempt history is kept for admins.
+  const submitTrainingQuiz = async (courseKey, scorePercent, passed, answers) => {
+    const full = {
+      id: uid(),
+      courseKey,
+      mechanic: currentMechanic,
+      scorePercent,
+      passed,
+      answers,
+      completedAt: Date.now(),
+    };
+    const next = [...trainingRecords, full];
+    setTrainingRecords(next);
+    cacheSet('trainingRecords', next);
+    await queueWrite('trainingRecords', { kind: 'save', entry: full });
+    return full;
+  };
+  // Employee signs right after passing — this alone does NOT issue the
+  // certificate (TDG Regs require BOTH signatures — Section 6.3(3)); it
+  // just marks the certificate as awaiting employer countersignature.
+  const signTrainingCertAsEmployee = async (recordId, dataUrl) => {
+    const record = trainingRecords.find((r) => r.id === recordId);
+    if (!record) return;
+    const updated = { ...record, employeeSignature: { dataUrl, signedAt: Date.now() } };
+    const next = trainingRecords.map((r) => (r.id === recordId ? updated : r));
+    setTrainingRecords(next);
+    cacheSet('trainingRecords', next);
+    await queueWrite('trainingRecords', { kind: 'save', entry: updated });
+  };
+  // Employer countersignature is what actually issues the certificate —
+  // this is the point the issue date and 3-year expiry get stamped, per
+  // TDG Regulations Section 6.3 (employer must have "reasonable grounds to
+  // believe" the employee is adequately trained before issuing).
+  const signTrainingCertAsEmployer = async (recordId, employerName, dataUrl) => {
+    const record = trainingRecords.find((r) => r.id === recordId);
+    if (!record) return;
+    const issuedAt = Date.now();
+    const expires = new Date(issuedAt);
+    expires.setFullYear(expires.getFullYear() + CERTIFICATE_VALID_YEARS);
+    const updated = {
+      ...record,
+      employerSignature: { name: employerName, dataUrl, signedAt: issuedAt },
+      certIssuedAt: issuedAt,
+      certExpiresOn: expires.toISOString().slice(0, 10),
+    };
+    const next = trainingRecords.map((r) => (r.id === recordId ? updated : r));
+    setTrainingRecords(next);
+    cacheSet('trainingRecords', next);
+    await queueWrite('trainingRecords', { kind: 'save', entry: updated });
+  };
+  const saveTrainingPerson = async (person) => {
+    const { pendingCertPhotos, ...rest } = person;
+    const id = rest.id || uid();
+    let certPhotos = rest.certPhotos || [];
+    // Same pattern as incident report photos — upload happens here, once
+    // there's a real id to file them under, not inside the form itself.
+    if (pendingCertPhotos && pendingCertPhotos.length > 0) {
+      const uploaded = await Promise.all(pendingCertPhotos.map(async (p) => {
+        const storageRef = firebase.storage().ref(`trainingCertPhotos/${id}/${Date.now()}-${p.blob.name || 'cert.jpg'}`);
+        await storageRef.put(p.blob);
+        const url = await storageRef.getDownloadURL();
+        return { id: uid(), url, fileName: p.blob.name || 'cert.jpg', addedBy: currentMechanic, addedAt: Date.now() };
+      }));
+      certPhotos = [...certPhotos, ...uploaded];
+    }
+    const full = rest.id
+      ? { ...rest, id, certPhotos }
+      : { ...rest, id, certPhotos, createdBy: currentMechanic, createdAt: Date.now() };
+    const next = trainingMatrix.some((p) => p.id === full.id)
+      ? trainingMatrix.map((p) => (p.id === full.id ? full : p))
+      : [...trainingMatrix, full];
+    setTrainingMatrix(next);
+    cacheSet('trainingMatrix', next);
+    await queueWrite('trainingMatrix', { kind: 'save', entry: full });
+  };
+  const deleteTrainingPerson = async (personId) => {
+    const next = trainingMatrix.filter((p) => p.id !== personId);
+    setTrainingMatrix(next);
+    cacheSet('trainingMatrix', next);
+    await queueWrite('trainingMatrix', { kind: 'delete', entryId: personId });
+  };
+
   const submitIncidentReport = async (record) => {
     const full = {
       id: uid(),
@@ -13176,6 +14054,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </button>
           </div>
 
+          {(isAdmin || isSafety) && (
+            <TrainingMatrixAlertBanner
+              trainingMatrix={trainingMatrix}
+              onOpen={() => { setScreen('safety'); setTrainingMatrixExpanded(true); setEditingTrainingPersonId(null); }}
+            />
+          )}
+
           <SidebarMenu
             show={showSidebar}
             onClose={() => setShowSidebar(false)}
@@ -13614,6 +14499,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </div>
             <button onClick={() => setShowSidebar(true)} className="text-3xl leading-none px-3 py-2 rounded-lg" style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>☰</button>
           </div>
+
+          {(isAdmin || isSafety) && (
+            <TrainingMatrixAlertBanner
+              trainingMatrix={trainingMatrix}
+              onOpen={() => { setScreen('safety'); setTrainingMatrixExpanded(true); setEditingTrainingPersonId(null); }}
+            />
+          )}
 
           {!openProductionShift ? (
             <div className="rounded-lg p-8 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
@@ -14505,6 +15397,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </button>
           )}
           <h1 className="font-display text-3xl font-bold mb-2">Admin</h1>
+
+          {(isAdmin || isSafety) && (
+            <TrainingMatrixAlertBanner
+              trainingMatrix={trainingMatrix}
+              onOpen={() => { setScreen('safety'); setTrainingMatrixExpanded(true); setEditingTrainingPersonId(null); }}
+            />
+          )}
 
           {isAdmin && (
           <button
@@ -16882,6 +17781,267 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               </div>
             )}
           </AdminSection>
+
+          <AdminSection
+            icon="🎓"
+            title={`Training Courses${selectedCourse ? ' — ' + TRAINING_COURSES[selectedCourse].label : ''}`}
+            expanded={trainingExpanded}
+            onToggle={() => setTrainingExpanded((x) => !x)}
+          >
+            {!selectedCourse ? (
+              <div className="space-y-2">
+                <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Read through each course, then pass the quiz ({Object.values(TRAINING_COURSES)[0].passScore}%+) to record your completion.</p>
+                {Object.keys(TRAINING_COURSES).map((key) => {
+                  const course = TRAINING_COURSES[key];
+                  const myAttempts = trainingRecords.filter((r) => r.courseKey === key && r.mechanic === currentMechanic).sort((a, b) => b.completedAt - a.completedAt);
+                  const passed = myAttempts.find((r) => r.passed);
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => { setSelectedCourse(key); setCourseStage('modules'); setQuizAnswers({}); setQuizResult(null); }}
+                      className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                      style={{ background: COLORS.surfaceRaised }}
+                    >
+                      <span>
+                        <span className="text-sm font-semibold block">{course.label}</span>
+                        <span className="text-xs" style={{ color: COLORS.inkDim }}>{course.subtitle}</span>
+                      </span>
+                      <span className="text-xs font-bold flex-shrink-0" style={{ color: passed ? '#6B9080' : myAttempts.length ? '#E07A5F' : COLORS.inkDim }}>
+                        {passed ? '✓ Passed' : myAttempts.length ? 'Not passed yet' : 'Not started'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div>
+                <button
+                  onClick={() => { setSelectedCourse(null); setCourseStage('modules'); setQuizAnswers({}); setQuizResult(null); }}
+                  className="text-xs uppercase tracking-wide mb-3"
+                  style={{ color: COLORS.inkDim }}
+                >
+                  ← Back to Training
+                </button>
+
+                {courseStage === 'modules' && (
+                  <div>
+                    <div className="space-y-3 mb-4">
+                      {TRAINING_COURSES[selectedCourse].modules.map((m, i) => (
+                        <div key={i} className="rounded-lg px-3 py-3" style={{ background: COLORS.surfaceRaised }}>
+                          <p className="text-sm font-semibold mb-1.5">{i + 1}. {m.title}</p>
+                          <div className="text-xs space-y-1.5" style={{ color: COLORS.inkDim }}>
+                            {m.content.map((p, j) => <p key={j}>{p}</p>)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <Btn onClick={() => { setCourseStage('quiz'); setQuizAnswers({}); }}>Take the Quiz</Btn>
+                  </div>
+                )}
+
+                {courseStage === 'quiz' && (
+                  <div>
+                    <div className="space-y-4 mb-4">
+                      {TRAINING_COURSES[selectedCourse].quiz.map((q, qi) => (
+                        <div key={qi} className="rounded-lg px-3 py-3" style={{ background: COLORS.surfaceRaised }}>
+                          <p className="text-sm font-semibold mb-2">{qi + 1}. {q.q}</p>
+                          <div className="space-y-1.5">
+                            {q.options.map((opt, oi) => (
+                              <button
+                                key={oi}
+                                onClick={() => setQuizAnswers((prev) => ({ ...prev, [qi]: oi }))}
+                                className="w-full text-left text-xs rounded-lg px-3 py-2"
+                                style={{
+                                  background: quizAnswers[qi] === oi ? COLORS.accent + '33' : COLORS.bg,
+                                  border: `1px solid ${quizAnswers[qi] === oi ? COLORS.accent : COLORS.line}`,
+                                  color: COLORS.ink,
+                                }}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <Btn
+                      disabled={Object.keys(quizAnswers).length < TRAINING_COURSES[selectedCourse].quiz.length}
+                      onClick={async () => {
+                        const quiz = TRAINING_COURSES[selectedCourse].quiz;
+                        const numCorrect = quiz.reduce((sum, q, qi) => sum + (quizAnswers[qi] === q.correct ? 1 : 0), 0);
+                        const scorePercent = Math.round((numCorrect / quiz.length) * 100);
+                        const passed = scorePercent >= TRAINING_COURSES[selectedCourse].passScore;
+                        const full = await submitTrainingQuiz(selectedCourse, scorePercent, passed, quizAnswers);
+                        setQuizResult({ scorePercent, passed, recordId: full.id });
+                        setCourseStage('result');
+                      }}
+                    >
+                      Submit Quiz
+                    </Btn>
+                  </div>
+                )}
+
+                {courseStage === 'result' && quizResult && (
+                  <div>
+                    <div
+                      className="rounded-lg p-4 mb-4 text-center"
+                      style={{ background: quizResult.passed ? '#6B908022' : '#E07A5F22', border: `1px solid ${quizResult.passed ? '#6B9080' : '#E07A5F'}` }}
+                    >
+                      <p className="text-2xl font-bold mb-1" style={{ color: quizResult.passed ? '#6B9080' : '#E07A5F' }}>{quizResult.scorePercent}%</p>
+                      <p className="text-sm font-semibold" style={{ color: quizResult.passed ? '#6B9080' : '#E07A5F' }}>
+                        {quizResult.passed ? '✓ Passed' : `Not passed — need ${TRAINING_COURSES[selectedCourse].passScore}%+`}
+                      </p>
+                    </div>
+
+                    {quizResult.passed && (() => {
+                      const record = trainingRecords.find((r) => r.id === quizResult.recordId);
+                      if (!record) return null;
+                      if (!record.employeeSignature) {
+                        return (
+                          <div className="mb-4">
+                            <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Sign below to request your Certificate of Training. Your supervisor still needs to countersign before it's officially issued.</p>
+                            <SignaturePad onChange={setCertSignatureDraft} />
+                            <Btn
+                              className="mt-2"
+                              disabled={!certSignatureDraft}
+                              onClick={async () => { await signTrainingCertAsEmployee(record.id, certSignatureDraft); setCertSignatureDraft(null); }}
+                            >
+                              Sign & Request Certificate
+                            </Btn>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="mb-4">
+                          <CertificateOfTraining record={record} course={TRAINING_COURSES[selectedCourse]} />
+                          {!record.employerSignature && (
+                            <p className="text-xs mt-2 italic" style={{ color: COLORS.inkDim }}>Waiting on your supervisor to countersign — check back, or ask a Safety Coordinator/Admin to countersign it from this same screen.</p>
+                          )}
+                          {record.employerSignature && (
+                            <div>
+                              <Btn variant="ghost" className="mt-2" onClick={() => window.print()}>🖨️ Print Certificate</Btn>
+                              <PrintPortal>
+                                <div style={{ padding: 24 }}>
+                                  <CertificateOfTraining record={record} course={TRAINING_COURSES[selectedCourse]} />
+                                </div>
+                              </PrintPortal>
+                            </div>
+                          )}
+                          {(isAdmin || isSafety) && !record.employerSignature && (
+                            <div className="mt-3 no-print">
+                              <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Countersign as employer to issue this certificate:</p>
+                              <SignaturePad onChange={setCertSignatureDraft} />
+                              <Btn
+                                className="mt-2"
+                                disabled={!certSignatureDraft}
+                                onClick={async () => { await signTrainingCertAsEmployer(record.id, currentMechanic, certSignatureDraft); setCertSignatureDraft(null); }}
+                              >
+                                Countersign & Issue Certificate
+                              </Btn>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    <div className="flex gap-2 no-print">
+                      <Btn onClick={() => { setCourseStage('quiz'); setQuizAnswers({}); setQuizResult(null); setCertSignatureDraft(null); }}>Retake Quiz</Btn>
+                      <Btn variant="ghost" onClick={() => { setSelectedCourse(null); setCourseStage('modules'); setQuizAnswers({}); setQuizResult(null); setCertSignatureDraft(null); }}>Back to Training</Btn>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+            )}
+          </AdminSection>
+
+          {(isAdmin || isSafety) && (
+            <AdminSection
+              icon="🎓"
+              title="Training Matrix"
+              expanded={trainingMatrixExpanded}
+              onToggle={() => setTrainingMatrixExpanded((x) => !x)}
+            >
+              {editingTrainingPersonId ? (
+                <TrainingPersonForm
+                  initial={editingTrainingPersonId === 'new' ? null : trainingMatrix.find((p) => p.id === editingTrainingPersonId)}
+                  submitting={submittingTrainingPerson}
+                  onCancel={() => setEditingTrainingPersonId(null)}
+                  onDelete={async (id) => { await deleteTrainingPerson(id); setEditingTrainingPersonId(null); }}
+                  onSubmit={async (person) => {
+                    setSubmittingTrainingPerson(true);
+                    await saveTrainingPerson(person);
+                    setSubmittingTrainingPerson(false);
+                    setEditingTrainingPersonId(null);
+                  }}
+                />
+              ) : (
+                <div>
+                  <div className="flex gap-2 mb-4">
+                    <button
+                      onClick={() => setEditingTrainingPersonId('new')}
+                      className="text-xs font-semibold px-3 py-2 rounded-lg"
+                      style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                    >
+                      + Add Person
+                    </button>
+                    {trainingMatrix.length === 0 && (
+                      <button
+                        disabled={importingTrainingMatrix}
+                        onClick={async () => {
+                          if (!confirm(`Import ${TRAINING_MATRIX_IMPORT_SEED.length} people from the training matrix PDF? Only run this once.`)) return;
+                          setImportingTrainingMatrix(true);
+                          for (const person of TRAINING_MATRIX_IMPORT_SEED) {
+                            await saveTrainingPerson({ ...person, id: uid(), createdBy: currentMechanic, createdAt: Date.now() });
+                          }
+                          setImportingTrainingMatrix(false);
+                        }}
+                        className="text-xs font-semibold px-3 py-2 rounded-lg"
+                        style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                      >
+                        {importingTrainingMatrix ? `Importing… (${TRAINING_MATRIX_IMPORT_SEED.length})` : `📥 Import ${TRAINING_MATRIX_IMPORT_SEED.length} From PDF`}
+                      </button>
+                    )}
+                  </div>
+
+                  {[...TRAINING_MATRIX_CATEGORIES, ...new Set(trainingMatrix.map((p) => p.category).filter((c) => c && !TRAINING_MATRIX_CATEGORIES.includes(c)))].map((cat) => {
+                    const people = trainingMatrix.filter((p) => (p.category || TRAINING_MATRIX_CATEGORIES[0]) === cat);
+                    if (people.length === 0) return null;
+                    return (
+                      <div key={cat} className="mb-4">
+                        <p className="font-display text-sm font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>{cat}</p>
+                        <div className="space-y-2">
+                          {people.map((p) => {
+                            const status = trainingPersonStatus(p);
+                            const statusLabel = status === 'expired' ? 'Expired' : status === 'expiringSoon' ? 'Due Soon' : '';
+                            return (
+                              <button
+                                key={p.id}
+                                onClick={() => setEditingTrainingPersonId(p.id)}
+                                className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                                style={{ background: COLORS.surfaceRaised }}
+                              >
+                                <span className="text-sm">{p.name}{p.role ? ` — ${p.role}` : ''}</span>
+                                {statusLabel && (
+                                  <span className="text-xs font-bold flex-shrink-0 ml-2" style={{ color: TRAINING_STATUS_COLORS[status] }}>
+                                    {statusLabel}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {trainingMatrix.length === 0 && (
+                    <p className="text-sm" style={{ color: COLORS.inkDim }}>No one on the training matrix yet.</p>
+                  )}
+                </div>
+              )}
+            </AdminSection>
+          )}
 
           {(isAdmin || isSafety) && (
             <AdminSection
