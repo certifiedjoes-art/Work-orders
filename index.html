@@ -1030,6 +1030,7 @@ const TRAINING_COURSES = {
       { q: 'What pictogram would you expect on a container of diesel fuel?', options: ['Biohazard', 'Flame', 'Gas Cylinder', 'Exploding Bomb'], correct: 1 },
       { q: 'What\'s the right response to a chemical spill you\'re not sure how to handle?', options: ['Clean it up yourself no matter what', 'Ignore it, it\'ll evaporate', 'Report it and get help — don\'t handle it alone if it\'s large or unfamiliar', 'Cover it with anything nearby and walk away'], correct: 2 },
       { q: 'Where can you find a product\'s SDS at Harder Contracting?', options: ['It doesn\'t exist on the app', 'The Safety page, under SDS Sheets', 'Only in a filing cabinet at head office', 'You have to call the supplier every time'], correct: 1 },
+      { q: 'Is it ever okay to mix two chemicals just because they\'re both handy?', options: ['Yes, always fine', 'No — some combinations create dangerous gases', 'Only if they\'re the same color', 'Only outdoors'], correct: 1 },
     ],
   },
   tdg: {
@@ -1094,6 +1095,16 @@ const TRAINING_EMPLOYER = {
 // the TDG Regulations' own 36-month certificate validity for road vehicle
 // transport (Section 6.5(b)).
 const CERTIFICATE_VALID_YEARS = 3;
+// Maps each course's modules to which quiz question(s) act as a checkpoint
+// right after that module in the narrated-video mode — keyed by module
+// index, values are indices into that course's quiz array. Every module
+// gets at least one checkpoint so the video never runs more than a few
+// minutes without a check-in. A module with no entry here just has no
+// checkpoint (falls through to the next one). Only WHMIS has a video for
+// now; TDG still uses the read-then-quiz format.
+const COURSE_VIDEO_CHECKPOINTS = {
+  whmis: { 0: [0], 1: [6], 2: [1, 5], 3: [2, 3, 7], 4: [4, 9], 5: [10], 6: [8] },
+};
 // Worker training/certification matrix — restored from an earlier backup
 // after being lost to an older-upload overwrite. Tracks license,
 // WHMIS, TDG, first aid, and orientation dates per person with expiry
@@ -9807,7 +9818,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [selectedJobHazard, setSelectedJobHazard] = useState(null); // JOB_HAZARDS key, or null (showing the job picker)
   const [trainingExpanded, setTrainingExpanded] = useState(false);
   const [selectedCourse, setSelectedCourse] = useState(null); // TRAINING_COURSES key, or null
-  const [courseStage, setCourseStage] = useState('modules'); // 'modules' | 'quiz' | 'result'
+  const [courseStage, setCourseStage] = useState('modules'); // 'modules' | 'video' | 'quiz' | 'result'
+  const [videoSlideIndex, setVideoSlideIndex] = useState(0);
+  const [videoSpeaking, setVideoSpeaking] = useState(false);
+  const [videoCaptionsOn, setVideoCaptionsOn] = useState(true);
   const [quizAnswers, setQuizAnswers] = useState({}); // { questionIndex: optionIndex }
   const [quizResult, setQuizResult] = useState(null); // { scorePercent, passed, recordId }
   const [certSignatureDraft, setCertSignatureDraft] = useState(null); // data URL from SignaturePad, for either employee or employer signing
@@ -17835,9 +17849,129 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         </div>
                       ))}
                     </div>
-                    <Btn onClick={() => { setCourseStage('quiz'); setQuizAnswers({}); }}>Take the Quiz</Btn>
+                    <div className="flex gap-2 flex-wrap">
+                      {COURSE_VIDEO_CHECKPOINTS[selectedCourse] && (
+                        <Btn
+                          variant="ghost"
+                          onClick={() => { setVideoSlideIndex(0); setQuizAnswers({}); setCourseStage('video'); }}
+                        >
+                          ▶ Watch as a Video Instead
+                        </Btn>
+                      )}
+                      <Btn onClick={() => { setCourseStage('quiz'); setQuizAnswers({}); }}>Take the Quiz</Btn>
+                    </div>
                   </div>
                 )}
+
+                {courseStage === 'video' && (() => {
+                  const course = TRAINING_COURSES[selectedCourse];
+                  const checkpoints = COURSE_VIDEO_CHECKPOINTS[selectedCourse] || {};
+                  // Flatten modules into a single slide sequence: one title
+                  // slide + one slide per paragraph, per module, with that
+                  // module's checkpoint question(s) inserted right after —
+                  // built fresh each render rather than stored in state
+                  // since it's a pure function of the course data.
+                  const slides = [];
+                  course.modules.forEach((m, mi) => {
+                    slides.push({ type: 'title', moduleIndex: mi, title: m.title });
+                    m.content.forEach((text) => slides.push({ type: 'text', moduleIndex: mi, title: m.title, text }));
+                    (checkpoints[mi] || []).forEach((qi) => slides.push({ type: 'quiz', qi }));
+                  });
+                  const slide = slides[videoSlideIndex];
+                  const isLastSlide = videoSlideIndex === slides.length - 1;
+                  const canAdvance = slide.type !== 'quiz' || quizAnswers[slide.qi] !== undefined;
+
+                  const speak = (text) => {
+                    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+                    window.speechSynthesis.cancel();
+                    const utter = new SpeechSynthesisUtterance(text);
+                    utter.rate = 0.95;
+                    utter.onstart = () => setVideoSpeaking(true);
+                    utter.onend = () => setVideoSpeaking(false);
+                    utter.onerror = () => setVideoSpeaking(false);
+                    window.speechSynthesis.speak(utter);
+                  };
+                  const stopSpeaking = () => {
+                    if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
+                    setVideoSpeaking(false);
+                  };
+
+                  const goNext = async () => {
+                    stopSpeaking();
+                    if (isLastSlide) {
+                      const quiz = course.quiz;
+                      const numCorrect = quiz.reduce((sum, q, qi) => sum + (quizAnswers[qi] === q.correct ? 1 : 0), 0);
+                      const scorePercent = Math.round((numCorrect / quiz.length) * 100);
+                      const passed = scorePercent >= course.passScore;
+                      const full = await submitTrainingQuiz(selectedCourse, scorePercent, passed, quizAnswers);
+                      setQuizResult({ scorePercent, passed, recordId: full.id });
+                      setCourseStage('result');
+                    } else {
+                      setVideoSlideIndex((i) => i + 1);
+                    }
+                  };
+
+                  return (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>
+                          {slide.moduleIndex !== undefined ? `Module ${slide.moduleIndex + 1} of ${course.modules.length}` : 'Checkpoint'} · Slide {videoSlideIndex + 1}/{slides.length}
+                        </p>
+                        <button onClick={() => setVideoCaptionsOn((x) => !x)} className="text-xs underline" style={{ color: COLORS.inkDim }}>
+                          {videoCaptionsOn ? 'Hide captions' : 'Show captions'}
+                        </button>
+                      </div>
+
+                      <div className="rounded-lg p-5 mb-3 text-center" style={{ background: COLORS.surfaceRaised, minHeight: 180, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                        {slide.type === 'title' && (
+                          <p className="font-display text-lg font-bold">{slide.title}</p>
+                        )}
+                        {slide.type === 'text' && (
+                          <div>
+                            <p className="text-xs uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>{slide.title}</p>
+                            {videoCaptionsOn && <p className="text-sm">{slide.text}</p>}
+                          </div>
+                        )}
+                        {slide.type === 'quiz' && (
+                          <div className="text-left">
+                            <p className="text-xs uppercase tracking-wide mb-2 text-center" style={{ color: COLORS.accent }}>Quick check</p>
+                            <p className="text-sm font-semibold mb-3">{course.quiz[slide.qi].q}</p>
+                            <div className="space-y-1.5">
+                              {course.quiz[slide.qi].options.map((opt, oi) => (
+                                <button
+                                  key={oi}
+                                  onClick={() => setQuizAnswers((prev) => ({ ...prev, [slide.qi]: oi }))}
+                                  className="w-full text-left text-xs rounded-lg px-3 py-2"
+                                  style={{
+                                    background: quizAnswers[slide.qi] === oi ? COLORS.accent + '33' : COLORS.bg,
+                                    border: `1px solid ${quizAnswers[slide.qi] === oi ? COLORS.accent : COLORS.line}`,
+                                    color: COLORS.ink,
+                                  }}
+                                >
+                                  {opt}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2 flex-wrap mb-4">
+                        {slide.type !== 'quiz' && (
+                          videoSpeaking ? (
+                            <Btn variant="ghost" onClick={stopSpeaking}>⏸ Pause narration</Btn>
+                          ) : (
+                            <Btn variant="ghost" onClick={() => speak(slide.type === 'title' ? slide.title : slide.text)}>🔊 Play narration</Btn>
+                          )
+                        )}
+                        <Btn onClick={goNext} disabled={!canAdvance}>{isLastSlide ? 'Finish & See Results' : 'Next →'}</Btn>
+                      </div>
+                      <button onClick={() => { stopSpeaking(); setSelectedCourse(null); setCourseStage('modules'); }} className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>
+                        ← Exit video
+                      </button>
+                    </div>
+                  );
+                })()}
 
                 {courseStage === 'quiz' && (
                   <div>
