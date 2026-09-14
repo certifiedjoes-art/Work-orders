@@ -178,6 +178,18 @@
     100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
   }
   .mix-burst-text { animation: mix-burst-text-in 0.3s ease-out 0.3s backwards; }
+
+  /* "Placard must match the load" scene — TDG's equivalent cautionary
+     moment (see PlacardMismatchScene). Same pop/text mechanism as the
+     WHMIS mix-chemicals scene above (mix-burst-pop / mix-burst-text),
+     just a different setup: the placard on the trailer flips blank
+     partway through, then the burst warns it has to match the load. */
+  @keyframes placard-flip {
+    0%, 40% { transform: scaleX(1); }
+    50% { transform: scaleX(0); }
+    60%, 100% { transform: scaleX(1); }
+  }
+  .placard-flip-el { animation: placard-flip 1.3s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
   /* Keep content clear of the iPhone notch/status bar and the home indicator */
   #root {
     padding-top: env(safe-area-inset-top);
@@ -1101,18 +1113,9 @@ const TRAINING_COURSES = {
         content: ['TDG requires anyone who handles, offers for transport, or transports dangerous goods to be adequately trained — trained means you understand the hazards and TDG requirements relevant to your specific duties.', 'Depending on your role, formal TDG certification (typically valid for a set period before requiring renewal) may be legally required, not just recommended. This awareness course does not replace that certification where it\'s required.', 'Talk to your supervisor about whether your specific job (e.g. fuel truck driver) requires a certified TDG course, and when your certification is due for renewal.'],
       },
     ],
-    quiz: [
-      { q: 'What TDG class does diesel fuel fall under?', options: ['Class 8 — Corrosives', 'Class 3 — Flammable Liquids', 'Class 2 — Gases', 'Class 9 — Miscellaneous'], correct: 1 },
-      { q: 'How many classes of dangerous goods are there under TDG?', options: ['6', '9', '12', '4'], correct: 1 },
-      { q: 'Where must the shipping document be kept while driving?', options: ['Mailed to the office later', 'Locked in a separate compartment', 'Within reach of the driver', 'It isn\'t required'], correct: 2 },
-      { q: 'What are placards?', options: ['Paperwork filed after delivery', 'Diamond-shaped safety marks showing the class of dangerous goods on board', 'A type of fire extinguisher', 'The driver\'s TDG certificate'], correct: 1 },
-      { q: 'What should you do first in a dangerous goods incident like a spill or fire?', options: ['Try to fix it alone no matter the size', 'Get clear and ensure safety, then report to your supervisor', 'Leave the placards up and drive away', 'Wait until end of shift to mention it'], correct: 1 },
-      { q: 'Does this awareness course replace certified TDG training where it\'s legally required?', options: ['Yes, always', 'No — check with your supervisor about certification requirements for your role', 'Only for fuel truck drivers', 'Only if you pass with 100%'], correct: 1 },
-      { q: 'What class covers corrosives like battery acid?', options: ['Class 8', 'Class 3', 'Class 1', 'Class 5'], correct: 0 },
-      { q: 'What should placards on a vehicle always match?', options: ['The driver\'s mood', 'Whatever was carried last month', 'What\'s actually being carried right now', 'The company logo'], correct: 2 },
-      { q: 'What is an ERAP?', options: ['A type of fuel additive', 'An Emergency Response Assistance Plan for higher-risk goods', 'A vehicle inspection form', 'A worker\'s TDG certificate number'], correct: 1 },
-      { q: 'Who is responsible for knowing which TDG rules apply to a load (e.g. exemptions for small quantities)?', options: ['No one, it doesn\'t matter', 'The driver/employer — never just assume', 'The manufacturer of the fuel', 'The customer receiving the load'], correct: 1 },
-    ],
+    quiz: [], // TDG now uses the video course + TDG_QUESTION_POOLS below,
+              // same as WHMIS — kept as an empty array (not removed) for
+              // the same defensive-fallback reason as WHMIS's above.
   },
 };
 
@@ -1183,14 +1186,55 @@ const WHMIS_QUESTION_POOLS = {
 // which is what keeps the audio-narration chain and the on-screen slide
 // list guaranteed to agree on slide count even though it's built from two
 // separate closures (see buildCourseSlides' comment for why that matters).
+// TDG's own per-module question pools, same idea as WHMIS_QUESTION_POOLS
+// above — several candidates per module so a retake genuinely varies.
+// The old flat 10-question quiz's content is folded in here (nothing
+// lost), plus a couple of new questions to round out modules 0 and 4
+// which the flat quiz hadn't covered directly. 9 checkpoint questions
+// across the course (vs WHMIS's 11) — module 1 (the 9 classes) and
+// module 3 (placards) are TDG's densest content, so they draw 2 each.
+const TDG_QUESTION_POOLS = {
+  0: [
+    { q: 'What does the TDGR (Transportation of Dangerous Goods Regulations) govern?', options: ['How dangerous goods are handled, offered for transport, and transported on Canadian roads', 'Only international shipping by sea', 'Warehouse storage only', 'Nothing — it\'s voluntary guidance'], correct: 0 },
+    { q: 'At Harder Contracting, TDG mainly applies to which activity?', options: ['Office paperwork', 'Diesel fuel transport and hauling equipment/materials classified as dangerous goods', 'Payroll processing', 'Radio communication'], correct: 1 },
+  ],
+  1: [
+    { q: 'What TDG class does diesel fuel fall under?', options: ['Class 8 — Corrosives', 'Class 3 — Flammable Liquids', 'Class 2 — Gases', 'Class 9 — Miscellaneous'], correct: 1 },
+    { q: 'How many classes of dangerous goods are there under TDG?', options: ['6', '9', '12', '4'], correct: 1 },
+    { q: 'What class covers corrosives like battery acid?', options: ['Class 8', 'Class 3', 'Class 1', 'Class 5'], correct: 0 },
+  ],
+  2: [
+    { q: 'Where must the shipping document be kept while driving?', options: ['Mailed to the office later', 'Locked in a separate compartment', 'Within reach of the driver', 'It isn\'t required'], correct: 2 },
+    { q: 'What must a dangerous goods shipping document show?', options: ['Shipping name, class, UN number, packing group, and quantity', 'Just the driver\'s name', 'Only the delivery address', 'Nothing specific — any note will do'], correct: 0 },
+  ],
+  3: [
+    { q: 'What are placards?', options: ['Paperwork filed after delivery', 'Diamond-shaped safety marks showing the class of dangerous goods on board', 'A type of fire extinguisher', 'The driver\'s TDG certificate'], correct: 1 },
+    { q: 'What should placards on a vehicle always match?', options: ['The driver\'s mood', 'Whatever was carried last month', 'What\'s actually being carried right now', 'The company logo'], correct: 2 },
+    { q: 'On how many sides of the vehicle/trailer must placards be visible?', options: ['One', 'Two, front and back only', 'All four sides', 'None — placards are optional'], correct: 2 },
+  ],
+  4: [
+    { q: 'When fueling machines in the field, what should you keep away from the fuel?', options: ['Ignition sources', 'Your gloves', 'The shipping document', 'Other workers'], correct: 0 },
+    { q: 'Whose responsibility is it to know which TDG rules apply to a load (e.g. exemptions for small quantities)?', options: ['No one, it doesn\'t matter', 'The driver/employer — never just assume', 'The manufacturer of the fuel', 'The customer receiving the load'], correct: 1 },
+  ],
+  5: [
+    { q: 'What should you do first in a dangerous goods incident like a spill or fire?', options: ['Try to fix it alone no matter the size', 'Get clear and ensure safety, then report to your supervisor', 'Leave the placards up and drive away', 'Wait until end of shift to mention it'], correct: 1 },
+    { q: 'What is an ERAP?', options: ['A type of fuel additive', 'An Emergency Response Assistance Plan for higher-risk goods', 'A vehicle inspection form', 'A worker\'s TDG certificate number'], correct: 1 },
+  ],
+  6: [
+    { q: 'Does this awareness course replace certified TDG training where it\'s legally required?', options: ['Yes, always', 'No — check with your supervisor about certification requirements for your role', 'Only for fuel truck drivers', 'Only if you pass with 100%'], correct: 1 },
+    { q: 'Under TDG, what does being "trained" actually mean?', options: ['You watched a video once, any video', 'You understand the hazards and TDG requirements relevant to your specific duties', 'You own a truck', 'Nothing in particular — it\'s informal'], correct: 1 },
+  ],
+};
 const COURSE_VIDEO_CHECKPOINTS = {
   whmis: { 0: [0], 1: [0], 2: [0, 1], 3: [0, 1, 2], 4: [0, 1], 5: [0], 6: [0] },
+  tdg: { 0: [0], 1: [0, 1], 2: [0], 3: [0, 1], 4: [0], 5: [0, 1], 6: [0] },
 };
 // Which courses draw checkpoint questions from a per-module pool (see
 // startQuizSession) — keyed by course, so a future course's pools plug
 // in the same way WHMIS's do.
 const WHMIS_QUESTION_POOLS_BY_COURSE = {
   whmis: WHMIS_QUESTION_POOLS,
+  tdg: TDG_QUESTION_POOLS,
 };
 // Worker training/certification matrix — restored from an earlier backup
 // after being lost to an older-upload overwrite. Tracks license,
@@ -7183,8 +7227,11 @@ function AdminSection({ icon, title, expanded, onToggle, children }) {
 // as inline SVG so the video stays fully self-contained and works offline.
 // Diamond frame (white fill, red border) matches the real pictogram shape;
 // the icon inside is a simplified version of each hazard class's symbol.
-function WhmisPictogram({ symbol, size = 84, animateClass = '' }) {
-  const icons = {
+// Pulled out to module scope (rather than declared inside
+// WhmisPictogram) so TdgPlacard can also borrow the icons that overlap
+// between the two courses (flame, gasCylinder, corrosion,
+// skullCrossbones, flameOverCircle) instead of redrawing them.
+const WHMIS_PICTOGRAM_ICONS = {
     flame: (
       <path d="M12 2c-.3 2.8-2.2 4.1-3.4 5.8-1.3 1.8-2 3.5-2 5A5.4 5.4 0 0012 18.2a5.4 5.4 0 005.4-5.4c0-1.6-.7-2.7-1.5-3.7.1.9-.1 1.7-.6 2.3-.1-2.3-1.2-3.6-2.1-4.8C12.5 5.2 12.2 3.6 12 2zm0 4.8c.5.9.9 1.7.9 2.8a2.1 2.1 0 01-4.2 0c0-.5.1-1 .4-1.5-.1.9.2 1.7.9 2.1-.3-1.3.4-2.4 2-3.4z" fill="#111" />
     ),
@@ -7255,7 +7302,9 @@ function WhmisPictogram({ symbol, size = 84, animateClass = '' }) {
         </g>
       </g>
     ),
-  };
+};
+function WhmisPictogram({ symbol, size = 84, animateClass = '' }) {
+  const icons = WHMIS_PICTOGRAM_ICONS;
   // Eight of the nine WHMIS pictograms use the red "diamond" (a square
   // rotated 45°) border. Biohazardous Infectious Materials is the one
   // exception — it's the only WHMIS pictogram with a round black border
@@ -7283,6 +7332,54 @@ function WhmisPictogram({ symbol, size = 84, animateClass = '' }) {
     </div>
   );
 }
+// TDG's equivalent of WhmisPictogram — the 9 dangerous-goods class
+// placards. Unlike WHMIS_PICTOGRAM_ICONS above (hand-drawn line art),
+// these are the actual official reference images for each class,
+// straight from CCOHS's "Transportation of Dangerous Goods (TDG) - 9
+// Classes" OSH Answers fact sheet (a Government-of-Canada-affiliated
+// source, same table Transport Canada itself points to) rather than a
+// redrawn approximation — this is the one place in the course where
+// showing crews the real thing, not a simplified stand-in, actually
+// matters (they need to recognize the placard on the truck next to
+// them, not a cartoon of it). A few of these (2, 6, 9) show more than
+// one placard side by side because CCOHS's source image does — that's
+// the division/sub-class detail mentioned earlier, left in rather than
+// cropped out.
+const TDG_PLACARD_IMAGES = {
+  1: { src: 'https://www.ccohs.ca/images/oshanswers/class-1-explosives.gif', alt: 'Class 1 — Explosives placard' },
+  2: { src: 'https://www.ccohs.ca/images/oshanswers/class-2-gases.png', alt: 'Class 2 — Gases placards (flammable, non-flammable/non-toxic, toxic, oxidizing)' },
+  3: { src: 'https://www.ccohs.ca/images/oshanswers/class-3-flammable-liquids.gif', alt: 'Class 3 — Flammable Liquids placard' },
+  4: { src: 'https://www.ccohs.ca/images/oshanswers/class-4-substances.gif', alt: 'Class 4 — Flammable Solids placard' },
+  5: { src: 'https://www.ccohs.ca/images/oshanswers/class-5-oxidizing-substances.gif', alt: 'Class 5 — Oxidizing Substances placard' },
+  6: { src: 'https://www.ccohs.ca/images/oshanswers/class-6-toxic-infectious-substances.gif', alt: 'Class 6 — Toxic and Infectious Substances placards' },
+  7: { src: 'https://www.ccohs.ca/images/oshanswers/class-7-radioactive-materials.gif', alt: 'Class 7 — Radioactive Materials placard' },
+  8: { src: 'https://www.ccohs.ca/images/oshanswers/class-8-corrosive-substances.gif', alt: 'Class 8 — Corrosive Substances placard' },
+  9: { src: 'https://www.ccohs.ca/images/oshanswers/class-9-miscellaneous-products.gif', alt: 'Class 9 — Miscellaneous Products placards' },
+};
+function TdgPlacard({ classNum, size = 84, animateClass = '' }) {
+  const img = TDG_PLACARD_IMAGES[classNum] || TDG_PLACARD_IMAGES[9];
+  return (
+    <div
+      className={animateClass}
+      style={{
+        width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        background: '#fff', borderRadius: 10, padding: 6, boxSizing: 'border-box', position: 'relative',
+        boxShadow: '0 2px 8px #00000022',
+      }}
+    >
+      {/* faint class number sits behind the image so something still
+          reads even if the image fails to load (e.g. no signal) */}
+      <span style={{ position: 'absolute', fontWeight: 800, fontSize: size * 0.32, color: '#e2e2e2' }}>{classNum}</span>
+      <img
+        src={img.src}
+        alt={img.alt}
+        loading="lazy"
+        style={{ position: 'relative', maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+      />
+    </div>
+  );
+}
 // Which pictogram(s) to show alongside each WHMIS module/paragraph slide in
 // the video — keyed by "moduleIndex-paragraphIndex" (0-based, matching the
 // order in TRAINING_COURSES.whmis.modules). Only the pictogram module and
@@ -7291,6 +7388,21 @@ function WhmisPictogram({ symbol, size = 84, animateClass = '' }) {
 const WHMIS_SLIDE_PICTOGRAMS = {
   '3-0': ['flame', 'flameOverCircle', 'explodingBomb', 'gasCylinder', 'corrosion', 'skullCrossbones', 'healthHazard', 'exclamation', 'biohazard'],
   '3-1': ['flame', 'corrosion', 'gasCylinder'],
+};
+// TDG's version of the same idea — module 1 (the 9 classes) shows the
+// relevant placard numbers; module 3 (safety marks) shows the one placard
+// crews will actually see day to day (diesel, Class 3).
+const TDG_SLIDE_PICTOGRAMS = {
+  '1-0': [1, 2, 3, 4],
+  '1-1': [5, 6, 7, 8, 9],
+  '3-0': [3],
+};
+// Course-keyed lookup so buildCourseSlides can pull the right pictogram
+// set no matter which course it's flattening, instead of hardcoding
+// WHMIS's constant — see also SLIDE_ILLUSTRATION_BY_COURSE below.
+const SLIDE_PICTOGRAMS_BY_COURSE = {
+  whmis: WHMIS_SLIDE_PICTOGRAMS,
+  tdg: TDG_SLIDE_PICTOGRAMS,
 };
 // Accent color pair per WHMIS module — vivid, saturated colors picked
 // from the standard safety-signage palette (blue = informational, green =
@@ -7309,6 +7421,23 @@ const MODULE_BACKGROUND = [
   { color: '#4CAF50', colorDark: '#2E7D32' }, // 5: Safe handling / PPE — a second, brighter green
   { color: '#E4002B', colorDark: '#A3001F' }, // 6: Spills / emergency — safety red/danger
 ];
+// TDG's own module→color mapping — same 7-color safety-signage palette
+// as WHMIS above (kept identical so the two courses read as one visual
+// family) but re-ordered to fit TDG's own module themes rather than
+// reusing WHMIS's order by coincidence of position.
+const TDG_MODULE_BACKGROUND = [
+  { color: '#0072CE', colorDark: '#003E7E' }, // 0: What is TDG — safety blue (informational)
+  { color: '#FF6A13', colorDark: '#CC540F' }, // 1: The 9 classes — safety orange/warning
+  { color: '#F2A900', colorDark: '#B37D00' }, // 2: Shipping documents — safety amber (paperwork/procedure)
+  { color: '#0057B8', colorDark: '#00305F' }, // 3: Placards & labels — a second, deeper safety blue (official signage)
+  { color: '#4CAF50', colorDark: '#2E7D32' }, // 4: Handling at Harder Contracting — safety green (procedural)
+  { color: '#E4002B', colorDark: '#A3001F' }, // 5: Emergency response — safety red/danger
+  { color: '#00A651', colorDark: '#00642F' }, // 6: Training & certification — a second safety green
+];
+const MODULE_BACKGROUND_BY_COURSE = {
+  whmis: MODULE_BACKGROUND,
+  tdg: TDG_MODULE_BACKGROUND,
+};
 
 // Small full-color prop icons — what the cartoon worker below is shown
 // holding/gesturing toward on each slide. Kept in their own object so a
@@ -7406,6 +7535,38 @@ const WORKER_PROPS = {
       <circle cx="0" cy="-2" r="16" fill="#F2C230" stroke="none" />
       <path d="M-5 -8a5 5 0 019 3c0 3-4 4-4 8" fill="none" />
       <circle cx="0" cy="9" r="1.6" fill="#1B1F19" stroke="none" />
+    </g>
+  ),
+  // TDG-specific props, added alongside the WHMIS set above so
+  // WorkerFigure can carry either course's icons interchangeably.
+  placard: (
+    <g stroke="#1B1F19" strokeWidth="1.6" strokeLinejoin="round">
+      <rect x="-9" y="-9" width="18" height="18" rx="2" fill="#E4002B" stroke="#fff" strokeWidth="1.4" transform="rotate(45)" />
+      <path d="M0 -6c-2 3-4 4-4 7a4 4 0 008 0c0-2-1-3-2-4 .1 1-.1 2-.6 2.6-.1-2-1-3-1.4-5.6z" fill="#fff" stroke="none" />
+    </g>
+  ),
+  truck: (
+    <g stroke="#1B1F19" strokeWidth="1.6" strokeLinejoin="round">
+      <rect x="-16" y="-6" width="20" height="14" rx="2" fill="#3E7CB1" />
+      <path d="M4 -6h8l7 8v6h-15z" fill="#8A97A6" />
+      <circle cx="-9" cy="10" r="4" fill="#1B1F19" stroke="none" />
+      <circle cx="8" cy="10" r="4" fill="#1B1F19" stroke="none" />
+      <circle cx="-9" cy="10" r="1.5" fill="#fff" stroke="none" />
+      <circle cx="8" cy="10" r="1.5" fill="#fff" stroke="none" />
+    </g>
+  ),
+  folder: (
+    <g stroke="#1B1F19" strokeWidth="1.6" strokeLinejoin="round">
+      <path d="M-14 -10h11l3 4h14v20h-28z" fill="#F2C230" />
+      <path d="M-14 -6h28" stroke="#1B1F19" strokeWidth="1.2" opacity="0.35" />
+    </g>
+  ),
+  radio: (
+    <g stroke="#1B1F19" strokeWidth="1.6" strokeLinejoin="round">
+      <rect x="-8" y="-6" width="16" height="24" rx="3" fill="#33404D" />
+      <rect x="-2" y="-16" width="4" height="10" rx="1.5" fill="#8A97A6" />
+      <circle cx="0" cy="2" r="2.4" fill="#E8703A" stroke="none" />
+      <rect x="-5" y="8" width="10" height="6" rx="1" fill="#8A97A6" stroke="none" />
     </g>
   ),
 };
@@ -7506,6 +7667,67 @@ function MixExplosionScene({ size = 200 }) {
     </div>
   );
 }
+// TDG's equivalent looping cautionary scene — same pop/text mechanism as
+// MixExplosionScene above (a held pose that periodically interrupts
+// itself with a comic burst + printed warning), but built around TDG's
+// own content instead of WHMIS's: a placard on a trailer that flips
+// blank partway through the loop, landing on "PLACARD MUST MATCH LOAD"
+// (module 3's point about never leaving up a placard for a load that's
+// no longer on board). Reuses MIX_BURST_PATH/mix-burst-pop/mix-burst-text
+// so the burst itself looks identical between courses — only the scene
+// leading into it differs.
+function PlacardMismatchScene({ size = 200 }) {
+  const [phase, setPhase] = useState('flip'); // 'flip' -> 'burst' -> back to 'flip'
+  useEffect(() => {
+    const delay = phase === 'flip' ? 2600 : 2800;
+    const t = setTimeout(() => setPhase((p) => (p === 'flip' ? 'burst' : 'flip')), delay);
+    return () => clearTimeout(t);
+  }, [phase]);
+
+  return (
+    <div style={{ position: 'relative', width: size, height: size * 190 / 120 }}>
+      <svg viewBox="-60 -90 120 190" width="100%" height="100%" style={{ overflow: 'visible' }}>
+        {/* simple trailer silhouette with a placard on its side, the
+            whole scene fading back during the burst so the warning
+            reads clearly on top, same as MixExplosionScene's figure. */}
+        <g style={{ transition: 'opacity 0.3s ease', opacity: phase === 'burst' ? 0.2 : 1 }} transform="translate(0, -10)">
+          <rect x="-34" y="-14" width="52" height="30" rx="3" fill="#3E7CB1" stroke="#1B1F19" strokeWidth="2" strokeLinejoin="round" />
+          <path d="M18 -14h12l10 11v19h-22z" fill="#8A97A6" stroke="#1B1F19" strokeWidth="2" strokeLinejoin="round" />
+          <circle cx="-22" cy="20" r="7" fill="#1B1F19" stroke="none" />
+          <circle cx="8" cy="20" r="7" fill="#1B1F19" stroke="none" />
+          <circle cx="-22" cy="20" r="2.4" fill="#fff" stroke="none" />
+          <circle cx="8" cy="20" r="2.4" fill="#fff" stroke="none" />
+          {/* the placard — flips to blank white and back, on its own
+              timer tied to the 'flip' phase via the placard-flip-el
+              CSS animation rather than the outer phase toggle, so it
+              keeps cycling smoothly through both phases. */}
+          <g transform="translate(-8, 0)">
+            <rect x="-9" y="-9" width="18" height="18" rx="2" fill="#E4002B" stroke="#fff" strokeWidth="1.6" strokeLinejoin="round" transform="rotate(45)" className="placard-flip-el" />
+          </g>
+        </g>
+
+        {phase === 'burst' && (
+          <g transform="translate(0,-24)" className="mix-burst-pop">
+            <path d={MIX_BURST_PATH} fill="#FF6A13" stroke="#E4002B" strokeWidth="2.5" strokeLinejoin="round" transform="scale(1.9)" />
+          </g>
+        )}
+      </svg>
+
+      {phase === 'burst' && (
+        <div
+          className="mix-burst-text"
+          style={{
+            position: 'absolute', top: '30%', left: '50%', transform: 'translate(-50%, -50%)',
+            color: '#fff', fontWeight: 800, fontSize: 12, lineHeight: 1.15, textAlign: 'center',
+            width: '72%', textShadow: '0 1px 3px #00000066',
+          }}
+        >
+          PLACARD MUST<br />MATCH LOAD
+        </div>
+      )}
+    </div>
+  );
+}
 // Which prop the worker holds on each slide — keyed the same way as
 // WHMIS_SLIDE_PICTOGRAMS ("moduleIndex-paragraphIndex"), plus a
 // "title-N" key for each module's title slide. Every entry here is
@@ -7519,6 +7741,27 @@ const WHMIS_SLIDE_ILLUSTRATION = {
   'title-4': 'clipboard', '4-0': 'storage', '4-1': 'book', '4-2': 'firstaid',
   'title-5': 'ppe', '5-0': 'ppe', '5-1': 'storage', '5-2': 'mixExplosion',
   'title-6': 'firstaid', '6-0': 'firstaid', '6-1': 'spill', '6-2': 'thumbsup',
+};
+// TDG's version of the same map — same "title-N" / "moduleIndex-
+// paragraphIndex" keying, own set of props (placard, truck, folder,
+// radio) mixed in alongside the WHMIS-shared ones (clipboard, storage,
+// toolbox, question, book...) wherever they genuinely fit TDG content.
+const TDG_SLIDE_ILLUSTRATION = {
+  'title-0': 'truck', '0-0': 'placard', '0-1': 'truck', '0-2': 'question',
+  'title-1': 'clipboard', '1-0': 'chart', '1-1': 'truck',
+  'title-2': 'folder', '2-0': 'folder', '2-1': 'clipboard', '2-2': 'truck',
+  'title-3': 'placard', '3-0': 'placard', '3-1': 'placardMismatch', '3-2': 'tag',
+  'title-4': 'truck', '4-0': 'truck', '4-1': 'storage', '4-2': 'spill',
+  'title-5': 'radio', '5-0': 'spill', '5-1': 'folder', '5-2': 'radio',
+  'title-6': 'book', '6-0': 'book', '6-1': 'clipboard', '6-2': 'question',
+};
+// Course-keyed lookup mirroring SLIDE_PICTOGRAMS_BY_COURSE above, so the
+// video slide-builders (buildCourseSlides and the inline copy in the
+// video render) pull the right illustration map for whichever course is
+// actually playing instead of hardcoding WHMIS's constant.
+const SLIDE_ILLUSTRATION_BY_COURSE = {
+  whmis: WHMIS_SLIDE_ILLUSTRATION,
+  tdg: TDG_SLIDE_ILLUSTRATION,
 };
 
 function CertificateOfTraining({ record, course }) {
@@ -12431,7 +12674,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const slides = [];
     course.modules.forEach((m, mi) => {
       slides.push({ type: 'title', moduleIndex: mi, title: m.title, audioId: `${courseKey}-${mi}-title` });
-      m.content.forEach((text, pi) => slides.push({ type: 'text', moduleIndex: mi, title: m.title, text, pictograms: WHMIS_SLIDE_PICTOGRAMS[`${mi}-${pi}`], audioId: `${courseKey}-${mi}-${pi}` }));
+      m.content.forEach((text, pi) => slides.push({ type: 'text', moduleIndex: mi, title: m.title, text, pictograms: (SLIDE_PICTOGRAMS_BY_COURSE[courseKey] || {})[`${mi}-${pi}`], audioId: `${courseKey}-${mi}-${pi}` }));
       (checkpoints[mi] || []).forEach((qi) => slides.push({ type: 'quiz', qi, moduleIndex: mi, audioId: `${courseKey}-quiz-${qi}` }));
     });
     return slides;
@@ -18494,10 +18737,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         setQuizResult(null);
                         setVideoSlideIndex(0);
                         startQuizSession(key);
-                        // Courses with a video go straight into it — no
-                        // separate text-reading screen at all. Courses
-                        // without one yet (TDG, for now) fall back to the
-                        // read-then-quiz screen.
+                        // Courses with a video (WHMIS and TDG both, now)
+                        // go straight into it — no separate text-reading
+                        // screen at all. A future course with no video
+                        // yet would fall back to the read-then-quiz
+                        // screen here.
                         if (COURSE_VIDEO_CHECKPOINTS[key]) {
                           setCourseStage('video');
                           // Started directly inside this click handler —
@@ -18573,8 +18817,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   // question for that slot comes from checkpointQuestions.
                   const slides = [];
                   course.modules.forEach((m, mi) => {
-                    slides.push({ type: 'title', moduleIndex: mi, title: m.title, illustration: WHMIS_SLIDE_ILLUSTRATION[`title-${mi}`] || 'thumbsup', audioId: `${selectedCourse}-${mi}-title` });
-                    m.content.forEach((text, pi) => slides.push({ type: 'text', moduleIndex: mi, title: m.title, text, pictograms: WHMIS_SLIDE_PICTOGRAMS[`${mi}-${pi}`], illustration: WHMIS_SLIDE_ILLUSTRATION[`${mi}-${pi}`] || 'book', audioId: `${selectedCourse}-${mi}-${pi}` }));
+                    const illustrationMap = SLIDE_ILLUSTRATION_BY_COURSE[selectedCourse] || {};
+                    const pictogramMap = SLIDE_PICTOGRAMS_BY_COURSE[selectedCourse] || {};
+                    slides.push({ type: 'title', moduleIndex: mi, title: m.title, illustration: illustrationMap[`title-${mi}`] || 'thumbsup', audioId: `${selectedCourse}-${mi}-title` });
+                    m.content.forEach((text, pi) => slides.push({ type: 'text', moduleIndex: mi, title: m.title, text, pictograms: pictogramMap[`${mi}-${pi}`], illustration: illustrationMap[`${mi}-${pi}`] || 'book', audioId: `${selectedCourse}-${mi}-${pi}` }));
                     (checkpoints[mi] || []).forEach((qi) => slides.push({ type: 'quiz', qi, moduleIndex: mi, illustration: 'question', audioId: `${selectedCourse}-quiz-${qi}` }));
                   });
                   const slide = slides[videoSlideIndex];
@@ -18611,7 +18857,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     playTrainingSlide(selectedCourse, videoSlideIndex + 1);
                   };
 
-                  const bg = MODULE_BACKGROUND[slide.moduleIndex] || MODULE_BACKGROUND[0];
+                  const courseBackgrounds = MODULE_BACKGROUND_BY_COURSE[selectedCourse] || MODULE_BACKGROUND;
+                  const bg = courseBackgrounds[slide.moduleIndex] || courseBackgrounds[0];
 
                   return (
                     <div
@@ -18627,6 +18874,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       <div className="flex justify-center pt-2" style={{ position: 'relative' }}>
                         {slide.illustration === 'mixExplosion' ? (
                           <MixExplosionScene size={168} />
+                        ) : slide.illustration === 'placardMismatch' ? (
+                          <PlacardMismatchScene size={168} />
                         ) : (
                           <WorkerFigure propKey={slide.illustration} vestColor={bg.color} size={168} />
                         )}
@@ -18660,7 +18909,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                             {slide.pictograms && (
                               <div className="flex flex-wrap gap-2 justify-center mb-4">
                                 {slide.pictograms.map((sym, si) => (
-                                  <WhmisPictogram key={sym + si} symbol={sym} size={slide.pictograms.length > 4 ? 56 : 78} animateClass="pictogram-enter pictogram-pulse" />
+                                  selectedCourse === 'tdg' ? (
+                                    <TdgPlacard key={sym + '-' + si} classNum={sym} size={slide.pictograms.length > 4 ? 56 : 78} animateClass="pictogram-enter pictogram-pulse" />
+                                  ) : (
+                                    <WhmisPictogram key={sym + si} symbol={sym} size={slide.pictograms.length > 4 ? 56 : 78} animateClass="pictogram-enter pictogram-pulse" />
+                                  )
                                 ))}
                               </div>
                             )}
