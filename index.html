@@ -9960,6 +9960,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // ref rather than state since audio playback control doesn't need
   // re-renders — only the derived "is something playing" flag does.
   const trainingAudioRef = useRef(null);
+  // Tracks which slide index we've already auto-started narration for, so
+  // the slideshow-style auto-advance (see courseStage 'video' below) only
+  // triggers once per slide instead of re-firing on every unrelated
+  // re-render (e.g. a Firebase listener updating some other piece of
+  // state). Reset to -1 whenever a video is (re)started.
+  const autoplayedSlideRef = useRef(-1);
   const [quizAnswers, setQuizAnswers] = useState({}); // { questionIndex: optionIndex }
   const [quizResult, setQuizResult] = useState(null); // { scorePercent, passed, recordId }
   const [certSignatureDraft, setCertSignatureDraft] = useState(null); // data URL from SignaturePad, for either employee or employer signing
@@ -18003,7 +18009,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       {COURSE_VIDEO_CHECKPOINTS[selectedCourse] && (
                         <Btn
                           variant="ghost"
-                          onClick={() => { setVideoSlideIndex(0); setQuizAnswers({}); setCourseStage('video'); }}
+                          onClick={() => { setVideoSlideIndex(0); setQuizAnswers({}); autoplayedSlideRef.current = -1; setCourseStage('video'); }}
                         >
                           ▶ Watch as a Video Instead
                         </Btn>
@@ -18040,7 +18046,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     utter.rate = 0.93;
                     utter.pitch = 1;
                     utter.onstart = () => setVideoSpeaking(true);
-                    utter.onend = () => setVideoSpeaking(false);
+                    utter.onend = () => { setVideoSpeaking(false); advanceIfNotQuiz(); };
                     utter.onerror = () => setVideoSpeaking(false);
                     window.speechSynthesis.speak(utter);
                   };
@@ -18059,7 +18065,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     const audio = new Audio(`./audio/${selectedCourse}/${audioId}.mp3`);
                     trainingAudioRef.current = audio;
                     audio.onplay = () => setVideoSpeaking(true);
-                    audio.onended = () => setVideoSpeaking(false);
+                    audio.onended = () => { setVideoSpeaking(false); advanceIfNotQuiz(); };
                     audio.onerror = () => { speakWithBrowserVoice(text); };
                     audio.play().catch(() => speakWithBrowserVoice(text));
                   };
@@ -18083,6 +18089,26 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       setVideoSlideIndex((i) => i + 1);
                     }
                   };
+                  // Plays like an actual video: title/text slides narrate
+                  // themselves and move on automatically once the audio
+                  // ends. A quiz slide stops the auto-advance dead — it
+                  // waits for an answer and a manual tap on Next, same as
+                  // before. isLastSlide is skipped here since the Finish
+                  // button on a quiz slide already needs a manual tap
+                  // regardless.
+                  const advanceIfNotQuiz = () => {
+                    if (slide.type !== 'quiz' && !isLastSlide) {
+                      setTimeout(() => goNext(), 400);
+                    }
+                  };
+                  // Auto-starts narration for a title/text slide the first
+                  // time it's shown — guarded by autoplayedSlideRef so it
+                  // fires once per slide, not on every re-render. Quiz
+                  // slides are silent and wait for the person.
+                  if (slide.type !== 'quiz' && autoplayedSlideRef.current !== videoSlideIndex) {
+                    autoplayedSlideRef.current = videoSlideIndex;
+                    setTimeout(() => speak(slide.type === 'title' ? slide.title : slide.text, slide.audioId), 50);
+                  }
 
                   return (
                     <div>
@@ -18159,9 +18185,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       <div className="flex gap-2 flex-wrap mb-4">
                         {slide.type !== 'quiz' && (
                           videoSpeaking ? (
-                            <Btn variant="ghost" onClick={stopSpeaking}>⏸ Pause narration</Btn>
+                            <Btn variant="ghost" onClick={stopSpeaking}>⏸ Pause</Btn>
                           ) : (
-                            <Btn variant="ghost" onClick={() => speak(slide.type === 'title' ? slide.title : slide.text, slide.audioId)}>🔊 Play narration</Btn>
+                            <Btn variant="ghost" onClick={() => speak(slide.type === 'title' ? slide.title : slide.text, slide.audioId)}>🔁 Replay</Btn>
                           )
                         )}
                         <Btn onClick={goNext} disabled={!canAdvance}>{isLastSlide ? 'Finish & See Results' : 'Next →'}</Btn>
