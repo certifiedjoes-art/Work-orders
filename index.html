@@ -11938,6 +11938,92 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   };
   // Records one quiz attempt — a retake adds a new record rather than
   // overwriting, so the full attempt history is kept for admins.
+  // Narration playback for the video-style courses. Lifted to the top
+  // level (rather than defined inside the video-render block) specifically
+  // so it can be called directly, synchronously, from the exact tap that
+  // starts a course — mobile Safari/Chrome only allow audio to start
+  // playing when the play() call happens as an immediate, uninterrupted
+  // continuation of a real user gesture. Routing it through a setTimeout
+  // or a state-driven re-render (even a few ms later) breaks that chain
+  // and the browser silently blocks it — for the recording AND the
+  // built-in-voice fallback, since both are gesture-gated the same way.
+  const chosenTrainingVoice = ttsVoices.find((v) => v.voiceURI === ttsVoiceURI) || pickBestVoice(ttsVoices);
+  const speakWithBrowserVoice = (text, onDone) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    if (chosenTrainingVoice) utter.voice = chosenTrainingVoice;
+    utter.rate = 0.93;
+    utter.pitch = 1;
+    utter.onstart = () => setVideoSpeaking(true);
+    utter.onend = () => { setVideoSpeaking(false); if (onDone) onDone(); };
+    utter.onerror = () => setVideoSpeaking(false);
+    window.speechSynthesis.speak(utter);
+  };
+  // Prefers a pre-recorded narration clip (natural-sounding, generated
+  // ahead of time — see the "Narrator voice" section) at
+  // ./audio/{course}/{slideId}.mp3, falling back to the phone's built-in
+  // voice for any slide that doesn't have a recorded clip yet, so nothing
+  // ever goes silent just because audio hasn't been generated for it.
+  // Once played once online, the service worker caches the file
+  // automatically for offline playback after that.
+  // onDone fires when the clip finishes — used to chain straight into the
+  // next slide's narration (see the video render block), which browsers
+  // treat as a continuation of already-permitted playback rather than a
+  // fresh autoplay attempt, as long as it's called synchronously from
+  // here rather than deferred.
+  const speakTraining = (text, audioId, courseKey, onDone) => {
+    if (trainingAudioRef.current) { trainingAudioRef.current.pause(); trainingAudioRef.current = null; }
+    if (!audioId) { speakWithBrowserVoice(text, onDone); return; }
+    const audio = new Audio(`./audio/${courseKey}/${audioId}.mp3`);
+    trainingAudioRef.current = audio;
+    audio.onplay = () => setVideoSpeaking(true);
+    audio.onended = () => { setVideoSpeaking(false); if (onDone) onDone(); };
+    audio.onerror = () => { speakWithBrowserVoice(text, onDone); };
+    audio.play().catch(() => speakWithBrowserVoice(text, onDone));
+  };
+  const stopTrainingSpeech = () => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
+    if (trainingAudioRef.current) { trainingAudioRef.current.pause(); trainingAudioRef.current = null; }
+    setVideoSpeaking(false);
+  };
+  // Pure function of a course's data — same flattening used by the video
+  // render block, kept here too so playTrainingSlide below doesn't need
+  // that block to exist yet (it's called from the course-selection tap,
+  // before courseStage has even switched to 'video').
+  const buildCourseSlides = (courseKey) => {
+    const course = TRAINING_COURSES[courseKey];
+    const checkpoints = COURSE_VIDEO_CHECKPOINTS[courseKey] || {};
+    const slides = [];
+    course.modules.forEach((m, mi) => {
+      slides.push({ type: 'title', moduleIndex: mi, title: m.title, audioId: `${courseKey}-${mi}-title` });
+      m.content.forEach((text, pi) => slides.push({ type: 'text', moduleIndex: mi, title: m.title, text, pictograms: WHMIS_SLIDE_PICTOGRAMS[`${mi}-${pi}`], audioId: `${courseKey}-${mi}-${pi}` }));
+      (checkpoints[mi] || []).forEach((qi) => slides.push({ type: 'quiz', qi, audioId: `${courseKey}-quiz-${qi}` }));
+    });
+    return slides;
+  };
+  // Plays slide `idx` of `courseKey`'s video, and — once its narration
+  // ends — automatically advances and plays the next slide too,
+  // continuing the chain until it hits a quiz slide (stops, waits for an
+  // answer) or the end of the course. Always takes an explicit index
+  // rather than reading videoSlideIndex from a closure, so each link in
+  // the chain recomputes fresh instead of a stale one replaying itself.
+  // Called directly from the tap that starts it (course selection, or a
+  // manual Next) so the first audio.play() is a genuine user gesture;
+  // every link after that fires from inside the previous clip's 'ended'
+  // event, which browsers treat as a continuation of already-permitted
+  // playback rather than a fresh autoplay attempt.
+  const playTrainingSlide = (courseKey, idx) => {
+    const slides = buildCourseSlides(courseKey);
+    const s = slides[idx];
+    if (!s || s.type === 'quiz') return;
+    const isLast = idx === slides.length - 1;
+    speakTraining(s.type === 'title' ? s.title : s.text, s.audioId, courseKey, () => {
+      if (isLast) return;
+      setVideoSlideIndex(idx + 1);
+      playTrainingSlide(courseKey, idx + 1);
+    });
+  };
   const submitTrainingQuiz = async (courseKey, scorePercent, passed, answers) => {
     const full = {
       id: uid(),
@@ -17973,12 +18059,20 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         setQuizAnswers({});
                         setQuizResult(null);
                         setVideoSlideIndex(0);
-                        autoplayedSlideRef.current = -1;
                         // Courses with a video go straight into it — no
                         // separate text-reading screen at all. Courses
                         // without one yet (TDG, for now) fall back to the
                         // read-then-quiz screen.
-                        setCourseStage(COURSE_VIDEO_CHECKPOINTS[key] ? 'video' : 'modules');
+                        if (COURSE_VIDEO_CHECKPOINTS[key]) {
+                          setCourseStage('video');
+                          // Started directly inside this click handler —
+                          // not deferred — so it's a genuine user gesture
+                          // as far as the browser's audio policy is
+                          // concerned. See playTrainingSlide's comment.
+                          playTrainingSlide(key, 0);
+                        } else {
+                          setCourseStage('modules');
+                        }
                       }}
                       className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
                       style={{ background: COLORS.surfaceRaised }}
@@ -18048,46 +18142,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   const isLastSlide = videoSlideIndex === slides.length - 1;
                   const canAdvance = slide.type !== 'quiz' || quizAnswers[slide.qi] !== undefined;
 
-                  const chosenVoice = ttsVoices.find((v) => v.voiceURI === ttsVoiceURI) || pickBestVoice(ttsVoices);
-                  const speakWithBrowserVoice = (text) => {
-                    if (typeof window === 'undefined' || !window.speechSynthesis) return;
-                    window.speechSynthesis.cancel();
-                    const utter = new SpeechSynthesisUtterance(text);
-                    if (chosenVoice) utter.voice = chosenVoice;
-                    utter.rate = 0.93;
-                    utter.pitch = 1;
-                    utter.onstart = () => setVideoSpeaking(true);
-                    utter.onend = () => { setVideoSpeaking(false); advanceIfNotQuiz(); };
-                    utter.onerror = () => setVideoSpeaking(false);
-                    window.speechSynthesis.speak(utter);
-                  };
-                  // Prefers a pre-recorded narration clip (natural-sounding,
-                  // generated ahead of time — see the "Narrator voice"
-                  // section) when one exists at ./audio/{course}/{slideId}.mp3.
-                  // Falls back to the phone's built-in voice for any slide
-                  // that doesn't have a recorded clip yet, so nothing ever
-                  // goes silent just because audio hasn't been generated
-                  // for it. Once played once online, the service worker
-                  // caches the file automatically for offline playback
-                  // after that — no extra caching code needed here.
-                  const speak = (text, audioId) => {
-                    if (trainingAudioRef.current) { trainingAudioRef.current.pause(); trainingAudioRef.current = null; }
-                    if (!audioId) { speakWithBrowserVoice(text); return; }
-                    const audio = new Audio(`./audio/${selectedCourse}/${audioId}.mp3`);
-                    trainingAudioRef.current = audio;
-                    audio.onplay = () => setVideoSpeaking(true);
-                    audio.onended = () => { setVideoSpeaking(false); advanceIfNotQuiz(); };
-                    audio.onerror = () => { speakWithBrowserVoice(text); };
-                    audio.play().catch(() => speakWithBrowserVoice(text));
-                  };
-                  const stopSpeaking = () => {
-                    if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
-                    if (trainingAudioRef.current) { trainingAudioRef.current.pause(); trainingAudioRef.current = null; }
-                    setVideoSpeaking(false);
-                  };
-
                   const goNext = async () => {
-                    stopSpeaking();
+                    stopTrainingSpeech();
                     if (isLastSlide) {
                       const quiz = course.quiz;
                       const numCorrect = quiz.reduce((sum, q, qi) => sum + (quizAnswers[qi] === q.correct ? 1 : 0), 0);
@@ -18096,30 +18152,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       const full = await submitTrainingQuiz(selectedCourse, scorePercent, passed, quizAnswers);
                       setQuizResult({ scorePercent, passed, recordId: full.id });
                       setCourseStage('result');
-                    } else {
-                      setVideoSlideIndex((i) => i + 1);
+                      return;
                     }
+                    // A manual Next tap is itself a fresh user gesture, so
+                    // starting the next slide's narration right here (via
+                    // playTrainingSlide, which also picks the chain back
+                    // up automatically from there) is always safe.
+                    setVideoSlideIndex(videoSlideIndex + 1);
+                    playTrainingSlide(selectedCourse, videoSlideIndex + 1);
                   };
-                  // Plays like an actual video: title/text slides narrate
-                  // themselves and move on automatically once the audio
-                  // ends. A quiz slide stops the auto-advance dead — it
-                  // waits for an answer and a manual tap on Next, same as
-                  // before. isLastSlide is skipped here since the Finish
-                  // button on a quiz slide already needs a manual tap
-                  // regardless.
-                  const advanceIfNotQuiz = () => {
-                    if (slide.type !== 'quiz' && !isLastSlide) {
-                      setTimeout(() => goNext(), 400);
-                    }
-                  };
-                  // Auto-starts narration for a title/text slide the first
-                  // time it's shown — guarded by autoplayedSlideRef so it
-                  // fires once per slide, not on every re-render. Quiz
-                  // slides are silent and wait for the person.
-                  if (slide.type !== 'quiz' && autoplayedSlideRef.current !== videoSlideIndex) {
-                    autoplayedSlideRef.current = videoSlideIndex;
-                    setTimeout(() => speak(slide.type === 'title' ? slide.title : slide.text, slide.audioId), 50);
-                  }
 
                   return (
                     <div>
@@ -18136,7 +18177,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         <div className="mb-3">
                           <label className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Narrator voice</label>
                           <select
-                            value={chosenVoice ? chosenVoice.voiceURI : ''}
+                            value={chosenTrainingVoice ? chosenTrainingVoice.voiceURI : ''}
                             onChange={(e) => {
                               setTtsVoiceURI(e.target.value);
                               try { localStorage.setItem('trainingVoiceURI', e.target.value); } catch (err) {}
@@ -18196,14 +18237,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       <div className="flex gap-2 flex-wrap mb-4">
                         {slide.type !== 'quiz' && (
                           videoSpeaking ? (
-                            <Btn variant="ghost" onClick={stopSpeaking}>⏸ Pause</Btn>
+                            <Btn variant="ghost" onClick={stopTrainingSpeech}>⏸ Pause</Btn>
                           ) : (
-                            <Btn variant="ghost" onClick={() => speak(slide.type === 'title' ? slide.title : slide.text, slide.audioId)}>🔁 Replay</Btn>
+                            <Btn variant="ghost" onClick={() => playTrainingSlide(selectedCourse, videoSlideIndex)}>🔁 Replay</Btn>
                           )
                         )}
                         <Btn onClick={goNext} disabled={!canAdvance}>{isLastSlide ? 'Finish & See Results' : 'Next →'}</Btn>
                       </div>
-                      <button onClick={() => { stopSpeaking(); setSelectedCourse(null); setCourseStage('modules'); }} className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>
+                      <button onClick={() => { stopTrainingSpeech(); setSelectedCourse(null); setCourseStage('modules'); }} className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>
                         ← Exit video
                       </button>
                     </div>
@@ -18323,8 +18364,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           setCertSignatureDraft(null);
                           if (COURSE_VIDEO_CHECKPOINTS[selectedCourse]) {
                             setVideoSlideIndex(0);
-                            autoplayedSlideRef.current = -1;
                             setCourseStage('video');
+                            playTrainingSlide(selectedCourse, 0);
                           } else {
                             setCourseStage('quiz');
                           }
