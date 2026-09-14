@@ -9950,6 +9950,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [courseStage, setCourseStage] = useState('modules'); // 'modules' | 'video' | 'quiz' | 'result'
   const [videoSlideIndex, setVideoSlideIndex] = useState(0);
   const [videoSpeaking, setVideoSpeaking] = useState(false);
+  const [audioDebugMsg, setAudioDebugMsg] = useState(''); // temporary diagnostic — shows exactly why narration failed, if it does
   const [videoCaptionsOn, setVideoCaptionsOn] = useState(true);
   const [ttsVoices, setTtsVoices] = useState([]);
   const [ttsVoiceURI, setTtsVoiceURI] = useState(() => {
@@ -11949,15 +11950,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // built-in-voice fallback, since both are gesture-gated the same way.
   const chosenTrainingVoice = ttsVoices.find((v) => v.voiceURI === ttsVoiceURI) || pickBestVoice(ttsVoices);
   const speakWithBrowserVoice = (text, onDone) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    if (typeof window === 'undefined' || !window.speechSynthesis) {
+      setAudioDebugMsg('This browser has no speech synthesis available at all.');
+      return;
+    }
     window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(text);
     if (chosenTrainingVoice) utter.voice = chosenTrainingVoice;
     utter.rate = 0.93;
     utter.pitch = 1;
-    utter.onstart = () => setVideoSpeaking(true);
+    utter.onstart = () => { setVideoSpeaking(true); setAudioDebugMsg(''); };
     utter.onend = () => { setVideoSpeaking(false); if (onDone) onDone(); };
-    utter.onerror = () => setVideoSpeaking(false);
+    utter.onerror = (e) => { setVideoSpeaking(false); setAudioDebugMsg('Browser voice also failed: ' + (e && e.error ? e.error : 'unknown error')); };
     window.speechSynthesis.speak(utter);
   };
   // Prefers a pre-recorded narration clip (natural-sounding, generated
@@ -11977,10 +11981,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (!audioId) { speakWithBrowserVoice(text, onDone); return; }
     const audio = new Audio(`./audio/${courseKey}/${audioId}.mp3`);
     trainingAudioRef.current = audio;
-    audio.onplay = () => setVideoSpeaking(true);
+    audio.onplay = () => { setVideoSpeaking(true); setAudioDebugMsg(''); };
     audio.onended = () => { setVideoSpeaking(false); if (onDone) onDone(); };
-    audio.onerror = () => { speakWithBrowserVoice(text, onDone); };
-    audio.play().catch(() => speakWithBrowserVoice(text, onDone));
+    audio.onerror = () => { setAudioDebugMsg(`Recording didn't load (./audio/${courseKey}/${audioId}.mp3) — falling back to browser voice.`); speakWithBrowserVoice(text, onDone); };
+    audio.play().catch((err) => { setAudioDebugMsg('Recording blocked from playing: ' + (err && err.name ? err.name + ' — ' + err.message : String(err))); speakWithBrowserVoice(text, onDone); });
   };
   const stopTrainingSpeech = () => {
     if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
@@ -18190,6 +18194,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                             ))}
                           </select>
                           <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>Some voices on your phone sound a lot more natural than others — pick whichever sounds best here, it'll remember it next time.</p>
+                        </div>
+                      )}
+
+                      {audioDebugMsg && (
+                        <div className="rounded-lg p-3 mb-3 text-xs" style={{ background: '#E07A5F22', border: '1px solid #E07A5F', color: '#E07A5F' }}>
+                          ⚠️ {audioDebugMsg}
                         </div>
                       )}
 
