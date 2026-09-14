@@ -4073,6 +4073,16 @@ function addDeviceUser(name) {
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
+// Fisher–Yates — returns a new shuffled array, never mutates the input
+// (several callers pass in a shared const like a course's quiz array).
+function shuffleArray(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 // Browser/OS text-to-speech voices vary a lot in how natural they sound —
 // this picks the best-available one automatically rather than whatever the
@@ -10169,6 +10179,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // state). Reset to -1 whenever a video is (re)started.
   const autoplayedSlideRef = useRef(-1);
   const [quizAnswers, setQuizAnswers] = useState({}); // { questionIndex: optionIndex }
+  // Per-attempt shuffled copies — regenerated every time a quiz/video
+  // starts (see startQuizSession below) so the same questions don't
+  // always appear in the same order with the correct answer sitting in
+  // the same spot every time, which just teaches "it's the third option"
+  // instead of the actual material.
+  const [sessionQuiz, setSessionQuiz] = useState(null); // course.quiz, same length/index positions, options shuffled + correct re-mapped per question
+  const [sessionQuizOrder, setSessionQuizOrder] = useState(null); // shuffled array of indices into sessionQuiz — display order only, for the flat (non-video) quiz screen
   const [quizResult, setQuizResult] = useState(null); // { scorePercent, passed, recordId }
   const [certSignatureDraft, setCertSignatureDraft] = useState(null); // data URL from SignaturePad, for either employee or employer signing
   const [inspectionsExpanded, setInspectionsExpanded] = useState(false);
@@ -12218,10 +12235,33 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setVideoSpeaking(false);
     setVideoPaused(false);
   };
+  // Regenerates the shuffled quiz state for a fresh attempt — call this
+  // any time a course's quiz or video is (re)started (course selection,
+  // "Take the Quiz", Retake). Doesn't touch TRAINING_COURSES itself;
+  // everything downstream (video checkpoints, the flat quiz screen,
+  // scoring) reads from sessionQuiz/sessionCheckpoints/sessionQuizOrder
+  // instead of the raw course data once a session is running.
+  const startQuizSession = (courseKey) => {
+    const quiz = TRAINING_COURSES[courseKey].quiz;
+    const shuffled = quiz.map((q) => {
+      const order = shuffleArray(q.options.map((_, i) => i));
+      return { ...q, options: order.map((i) => q.options[i]), correct: order.indexOf(q.correct) };
+    });
+    setSessionQuiz(shuffled);
+    setSessionQuizOrder(shuffleArray(quiz.map((_, i) => i)));
+  };
   // Pure function of a course's data — same flattening used by the video
   // render block, kept here too so playTrainingSlide below doesn't need
   // that block to exist yet (it's called from the course-selection tap,
-  // before courseStage has even switched to 'video').
+  // before courseStage has even switched to 'video'). Deliberately reads
+  // the checkpoint STRUCTURE straight from the fixed COURSE_VIDEO_CHECKPOINTS
+  // constant rather than anything session-shuffled — this function gets
+  // called from inside a recursive audio-chain closure that can run several
+  // renders removed from a state update, so it needs a value that's
+  // guaranteed identical no matter which render's closure is reading it.
+  // (Only the multiple-choice options get shuffled per attempt — see
+  // sessionQuiz — which is safe to read fresh each render since it never
+  // changes slide count or order, only which text sits in which position.)
   const buildCourseSlides = (courseKey) => {
     const course = TRAINING_COURSES[courseKey];
     const checkpoints = COURSE_VIDEO_CHECKPOINTS[courseKey] || {};
@@ -18290,6 +18330,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         setQuizAnswers({});
                         setQuizResult(null);
                         setVideoSlideIndex(0);
+                        startQuizSession(key);
                         // Courses with a video go straight into it — no
                         // separate text-reading screen at all. Courses
                         // without one yet (TDG, for now) fall back to the
@@ -18350,13 +18391,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           ▶ Watch as a Video Instead
                         </Btn>
                       )}
-                      <Btn onClick={() => { setCourseStage('quiz'); setQuizAnswers({}); }}>Take the Quiz</Btn>
+                      <Btn onClick={() => { startQuizSession(selectedCourse); setCourseStage('quiz'); setQuizAnswers({}); }}>Take the Quiz</Btn>
                     </div>
                   </div>
                 )}
 
                 {courseStage === 'video' && (() => {
                   const course = TRAINING_COURSES[selectedCourse];
+                  const activeQuiz = sessionQuiz || course.quiz; // shuffled-options copy for this attempt, falling back defensively
                   const checkpoints = COURSE_VIDEO_CHECKPOINTS[selectedCourse] || {};
                   // Flatten modules into a single slide sequence: one title
                   // slide + one slide per paragraph, per module, with that
@@ -18376,7 +18418,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   const goNext = async () => {
                     stopTrainingSpeech();
                     if (isLastSlide) {
-                      const quiz = course.quiz;
+                      const quiz = activeQuiz;
                       const numCorrect = quiz.reduce((sum, q, qi) => sum + (quizAnswers[qi] === q.correct ? 1 : 0), 0);
                       const scorePercent = Math.round((numCorrect / quiz.length) * 100);
                       const passed = scorePercent >= course.passScore;
@@ -18448,9 +18490,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         {slide.type === 'quiz' && (
                           <div className="text-left w-full" style={{ maxWidth: 480 }}>
                             <p className="text-xs uppercase tracking-widest mb-2 text-center" style={{ color: bg.color, background: '#fff', display: 'inline-block', padding: '2px 10px', borderRadius: 999 }}>Quick check</p>
-                            <p className="text-lg font-semibold mb-4 text-center" style={{ color: '#fff', textShadow: '0 1px 8px #00000099' }}>{course.quiz[slide.qi].q}</p>
+                            <p className="text-lg font-semibold mb-4 text-center" style={{ color: '#fff', textShadow: '0 1px 8px #00000099' }}>{activeQuiz[slide.qi].q}</p>
                             <div className="space-y-2">
-                              {course.quiz[slide.qi].options.map((opt, oi) => (
+                              {activeQuiz[slide.qi].options.map((opt, oi) => (
                                 <button
                                   key={oi}
                                   onClick={() => setQuizAnswers((prev) => ({ ...prev, [slide.qi]: oi }))}
@@ -18504,47 +18546,53 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   );
                 })()}
 
-                {courseStage === 'quiz' && (
-                  <div>
-                    <div className="space-y-4 mb-4">
-                      {TRAINING_COURSES[selectedCourse].quiz.map((q, qi) => (
-                        <div key={qi} className="rounded-lg px-3 py-3" style={{ background: COLORS.surfaceRaised }}>
-                          <p className="text-sm font-semibold mb-2">{qi + 1}. {q.q}</p>
-                          <div className="space-y-1.5">
-                            {q.options.map((opt, oi) => (
-                              <button
-                                key={oi}
-                                onClick={() => setQuizAnswers((prev) => ({ ...prev, [qi]: oi }))}
-                                className="w-full text-left text-xs rounded-lg px-3 py-2"
-                                style={{
-                                  background: quizAnswers[qi] === oi ? COLORS.accent + '33' : COLORS.bg,
-                                  border: `1px solid ${quizAnswers[qi] === oi ? COLORS.accent : COLORS.line}`,
-                                  color: COLORS.ink,
-                                }}
-                              >
-                                {opt}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
+                {courseStage === 'quiz' && (() => {
+                  const quiz = sessionQuiz || TRAINING_COURSES[selectedCourse].quiz;
+                  const order = sessionQuizOrder || quiz.map((_, i) => i);
+                  return (
+                    <div>
+                      <div className="space-y-4 mb-4">
+                        {order.map((qi, displayIdx) => {
+                          const q = quiz[qi];
+                          return (
+                            <div key={qi} className="rounded-lg px-3 py-3" style={{ background: COLORS.surfaceRaised }}>
+                              <p className="text-sm font-semibold mb-2">{displayIdx + 1}. {q.q}</p>
+                              <div className="space-y-1.5">
+                                {q.options.map((opt, oi) => (
+                                  <button
+                                    key={oi}
+                                    onClick={() => setQuizAnswers((prev) => ({ ...prev, [qi]: oi }))}
+                                    className="w-full text-left text-xs rounded-lg px-3 py-2"
+                                    style={{
+                                      background: quizAnswers[qi] === oi ? COLORS.accent + '33' : COLORS.bg,
+                                      border: `1px solid ${quizAnswers[qi] === oi ? COLORS.accent : COLORS.line}`,
+                                      color: COLORS.ink,
+                                    }}
+                                  >
+                                    {opt}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <Btn
+                        disabled={Object.keys(quizAnswers).length < quiz.length}
+                        onClick={async () => {
+                          const numCorrect = quiz.reduce((sum, q, qi) => sum + (quizAnswers[qi] === q.correct ? 1 : 0), 0);
+                          const scorePercent = Math.round((numCorrect / quiz.length) * 100);
+                          const passed = scorePercent >= TRAINING_COURSES[selectedCourse].passScore;
+                          const full = await submitTrainingQuiz(selectedCourse, scorePercent, passed, quizAnswers);
+                          setQuizResult({ scorePercent, passed, recordId: full.id });
+                          setCourseStage('result');
+                        }}
+                      >
+                        Submit Quiz
+                      </Btn>
                     </div>
-                    <Btn
-                      disabled={Object.keys(quizAnswers).length < TRAINING_COURSES[selectedCourse].quiz.length}
-                      onClick={async () => {
-                        const quiz = TRAINING_COURSES[selectedCourse].quiz;
-                        const numCorrect = quiz.reduce((sum, q, qi) => sum + (quizAnswers[qi] === q.correct ? 1 : 0), 0);
-                        const scorePercent = Math.round((numCorrect / quiz.length) * 100);
-                        const passed = scorePercent >= TRAINING_COURSES[selectedCourse].passScore;
-                        const full = await submitTrainingQuiz(selectedCourse, scorePercent, passed, quizAnswers);
-                        setQuizResult({ scorePercent, passed, recordId: full.id });
-                        setCourseStage('result');
-                      }}
-                    >
-                      Submit Quiz
-                    </Btn>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {courseStage === 'result' && quizResult && (
                   <div>
@@ -18615,6 +18663,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           setQuizAnswers({});
                           setQuizResult(null);
                           setCertSignatureDraft(null);
+                          startQuizSession(selectedCourse);
                           if (COURSE_VIDEO_CHECKPOINTS[selectedCourse]) {
                             setVideoSlideIndex(0);
                             setCourseStage('video');
