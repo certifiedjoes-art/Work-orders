@@ -7179,6 +7179,23 @@ function WhmisPictogram({ symbol, size = 84, animateClass = '' }) {
       </g>
     ),
   };
+  // Eight of the nine WHMIS pictograms use the red "diamond" (a square
+  // rotated 45°) border. Biohazardous Infectious Materials is the one
+  // exception — it's the only WHMIS pictogram with a round black border
+  // instead, per CCOHS. Easy to miss if you're not checking against the
+  // real standard, so it gets its own frame here rather than reusing the
+  // diamond for all nine.
+  if (symbol === 'biohazard') {
+    return (
+      <div className={animateClass} style={{ width: size, height: size, display: 'inline-block' }}>
+        <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#fff', border: '4px solid #111', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: '68%', height: '68%' }}>
+            <svg viewBox="0 0 24 24" width="100%" height="100%">{icons.biohazard}</svg>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={animateClass} style={{ width: size, height: size, display: 'inline-block' }}>
       <div style={{ width: '100%', height: '100%', transform: 'rotate(45deg)', background: '#fff', border: '4px solid #C8102E', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
@@ -7198,47 +7215,22 @@ const WHMIS_SLIDE_PICTOGRAMS = {
   '3-0': ['flame', 'flameOverCircle', 'explodingBomb', 'gasCylinder', 'corrosion', 'skullCrossbones', 'healthHazard', 'exclamation', 'biohazard'],
   '3-1': ['flame', 'corrosion', 'gasCylinder'],
 };
-// One big line-art illustration + accent color per WHMIS module, used as
-// the full-screen video background so each module has a visual identity
-// matching its topic at a glance — not a literal depiction of every
-// sentence, but a consistent scene-setter for that chunk of the course.
+// Accent color pair per WHMIS module — vivid, saturated colors picked
+// from the standard safety-signage palette (blue = informational, green =
+// safe/procedural, amber/orange = caution/warning, red = danger) rather
+// than muted tones, so the full-screen video reads as vibrant rather than
+// flat. color is the lighter/primary shade (also used for the worker's
+// vest and quiz highlight color); colorDark is the gradient's bottom
+// shade — both fully opaque, no transparency, so the video is its own
+// solid screen rather than a tint over the page behind it.
 const MODULE_BACKGROUND = [
-  { color: '#3E6B8A', icon: ( // 0: What is WHMIS — a shield with a checkmark (right-to-know / protection)
-    <path d="M50 6L14 18v28c0 26 16 42 36 48 20-6 36-22 36-48V18L50 6z M38 50l8 8 18-20" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinejoin="round" strokeLinecap="round" />
-  )},
-  { color: '#6B8F5C', icon: ( // 1: Rights & responsibilities — two people
-    <g fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="36" cy="30" r="11" />
-      <path d="M14 78c0-16 10-27 22-27s22 11 22 27" />
-      <circle cx="68" cy="26" r="9" />
-      <path d="M52 78c1-14 9-23 20-23s20 9 22 23" />
-    </g>
-  )},
-  { color: '#B08A3E', icon: ( // 2: Labels — a hanging tag
-    <g fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinejoin="round" strokeLinecap="round">
-      <path d="M44 10H78a6 6 0 016 6v34a6 6 0 01-1.8 4.3L44 92 12 60a6 6 0 010-8.6L44 10z" />
-      <circle cx="66" cy="30" r="6" fill="currentColor" stroke="none" />
-    </g>
-  )},
-  { color: '#8A5CA8', icon: ( // 3: Pictograms module — a diamond outline (echoes the pictogram frame itself)
-    <rect x="26" y="26" width="48" height="48" rx="6" transform="rotate(45 50 50)" fill="none" stroke="currentColor" strokeWidth="4" />
-  )},
-  { color: '#4A7B9D', icon: ( // 4: SDS — a document with lines
-    <g fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinejoin="round" strokeLinecap="round">
-      <path d="M28 8h30l14 14v62a4 4 0 01-4 4H28a4 4 0 01-4-4V12a4 4 0 014-4z" />
-      <path d="M58 8v14h14" />
-      <path d="M32 46h36M32 58h36M32 70h22" />
-    </g>
-  )},
-  { color: '#5C9668', icon: ( // 5: Safe handling / PPE — a glove
-    <path d="M30 92V52c0-4 3-7 7-7s7 3 7 7v-6l0-24c0-4 3-7 7-7s7 3 7 7v20c0-4 3-7 7-7s7 3 7 7v6c0-4 3-7 7-7s7 3 7 7v22c0 12-8 22-20 25H44c-8 0-14-5-14-13z" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinejoin="round" strokeLinecap="round" />
-  )},
-  { color: '#B0563E', icon: ( // 6: Spills / emergency — an alert triangle with a drop
-    <g fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinejoin="round" strokeLinecap="round">
-      <path d="M50 10L92 82H8L50 10z" />
-      <path d="M50 36c-5 7-8 12-8 16a8 8 0 0016 0c0-4-3-9-8-16z" fill="currentColor" stroke="none" />
-    </g>
-  )},
+  { color: '#0072CE', colorDark: '#003E7E' }, // 0: What is WHMIS — safety blue (informational)
+  { color: '#00A651', colorDark: '#00642F' }, // 1: Rights & responsibilities — safety green
+  { color: '#F2A900', colorDark: '#B37D00' }, // 2: Labels — safety amber/caution
+  { color: '#FF6A13', colorDark: '#CC540F' }, // 3: Pictograms — safety orange/warning
+  { color: '#0057B8', colorDark: '#00305F' }, // 4: SDS — a second, deeper safety blue
+  { color: '#4CAF50', colorDark: '#2E7D32' }, // 5: Safe handling / PPE — a second, brighter green
+  { color: '#E4002B', colorDark: '#A3001F' }, // 6: Spills / emergency — safety red/danger
 ];
 
 // Small full-color prop icons — what the cartoon worker below is shown
@@ -10150,6 +10142,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [videoSpeaking, setVideoSpeaking] = useState(false);
   const [audioDebugMsg, setAudioDebugMsg] = useState(''); // temporary diagnostic — shows exactly why narration failed, if it does
   const [videoPaused, setVideoPaused] = useState(false); // true only when deliberately paused mid-clip — distinct from "finished" or "not yet started"
+  // Locks the page behind it from scrolling while the full-screen training
+  // video is open — belt-and-suspenders alongside the video's own opaque
+  // background, so there's no way to see the app peeking through at the
+  // edges on any device.
+  useEffect(() => {
+    if (courseStage !== 'video') return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [courseStage]);
   const [videoCaptionsOn, setVideoCaptionsOn] = useState(true);
   const [ttsVoices, setTtsVoices] = useState([]);
   const [ttsVoiceURI, setTtsVoiceURI] = useState(() => {
@@ -18397,7 +18399,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     <div
                       style={{
                         position: 'fixed', inset: 0, zIndex: 9000,
-                        background: `linear-gradient(180deg, ${bg.color}dd, #14171288 60%, #14171288)`,
+                        background: `linear-gradient(160deg, ${bg.color} 0%, ${bg.colorDark} 100%)`,
                         display: 'flex', flexDirection: 'column', overflow: 'hidden',
                       }}
                     >
