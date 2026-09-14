@@ -11979,11 +11979,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const speakTraining = (text, audioId, courseKey, onDone) => {
     if (trainingAudioRef.current) { trainingAudioRef.current.pause(); trainingAudioRef.current = null; }
     if (!audioId) { speakWithBrowserVoice(text, onDone); return; }
-    const audio = new Audio(`./audio/${courseKey}/${audioId}.mp3`);
+    const audio = new Audio(`./${audioId}.mp3`);
     trainingAudioRef.current = audio;
     audio.onplay = () => { setVideoSpeaking(true); setAudioDebugMsg(''); };
     audio.onended = () => { setVideoSpeaking(false); if (onDone) onDone(); };
-    audio.onerror = () => { setAudioDebugMsg(`Recording didn't load (./audio/${courseKey}/${audioId}.mp3) — falling back to browser voice.`); speakWithBrowserVoice(text, onDone); };
+    audio.onerror = () => { setAudioDebugMsg(`Recording didn't load (./${audioId}.mp3) — falling back to browser voice.`); speakWithBrowserVoice(text, onDone); };
     audio.play().catch((err) => { setAudioDebugMsg('Recording blocked from playing: ' + (err && err.name ? err.name + ' — ' + err.message : String(err))); speakWithBrowserVoice(text, onDone); });
   };
   const stopTrainingSpeech = () => {
