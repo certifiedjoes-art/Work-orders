@@ -7109,66 +7109,80 @@ function AdminSection({ icon, title, expanded, onToggle, children }) {
 function WhmisPictogram({ symbol, size = 84, animateClass = '' }) {
   const icons = {
     flame: (
-      <path d="M12 2.5c-1.2 3-3.8 3.9-3.8 7.3a3.8 3.8 0 007.6 0c0-1-.4-1.8-.9-2.6.9.6 1.7 1.6 1.7 2.9a4.6 4.6 0 01-9.2 0c0-3.9 2.9-5 4.6-7.6z" fill="#111" />
+      <path d="M12 2c-.3 2.8-2.2 4.1-3.4 5.8-1.3 1.8-2 3.5-2 5A5.4 5.4 0 0012 18.2a5.4 5.4 0 005.4-5.4c0-1.6-.7-2.7-1.5-3.7.1.9-.1 1.7-.6 2.3-.1-2.3-1.2-3.6-2.1-4.8C12.5 5.2 12.2 3.6 12 2zm0 4.8c.5.9.9 1.7.9 2.8a2.1 2.1 0 01-4.2 0c0-.5.1-1 .4-1.5-.1.9.2 1.7.9 2.1-.3-1.3.4-2.4 2-3.4z" fill="#111" />
     ),
     flameOverCircle: (
       <g fill="#111">
-        <circle cx="12" cy="17" r="4" fill="none" stroke="#111" strokeWidth="1.4" />
-        <path d="M12 3.5c-1 2.6-3.2 3.4-3.2 6.2a3.2 3.2 0 006.4 0c0-.9-.3-1.5-.8-2.2.8.5 1.4 1.3 1.4 2.4a3.9 3.9 0 01-7.8 0c0-3.3 2.4-4.2 4-6.4z" />
+        <circle cx="12" cy="16.5" r="4.3" fill="none" stroke="#111" strokeWidth="1.4" />
+        <path d="M12 2.8c-.3 2.3-1.8 3.4-2.8 4.8-1 1.4-1.6 2.8-1.6 4a4.4 4.4 0 008.8 0c0-1.3-.6-2.2-1.2-3 .1.7-.1 1.4-.5 1.9-.1-1.9-1-2.9-1.7-3.9.3-1 .1-2.3 0-3.8zm0 3.9c.4.7.7 1.4.7 2.3a1.7 1.7 0 01-3.4 0c0-.4.1-.8.3-1.2-.1.7.2 1.3.7 1.7-.2-1.1.3-2 1.7-2.8z" />
       </g>
     ),
     explodingBomb: (
-      <g fill="none" stroke="#111" strokeWidth="1.6" strokeLinecap="round">
-        <circle cx="10" cy="15" r="4.2" fill="#111" stroke="none" />
-        <path d="M13 12l3-3M15 5l-1 4M20 8l-4 1.5M9 5l1 3.5" />
+      <g fill="none" stroke="#111" strokeWidth="1.5" strokeLinecap="round">
+        <circle cx="10.5" cy="14.5" r="4" fill="#111" stroke="none" />
+        <path d="M9 11l-1.5-2M12.5 10l.5-2.5M15.5 11.5l2-1.5M16.5 15l2.5.5M8 8l-1.5-1M14 7.5L14.5 5M18 8.5l1.8-1.3" />
       </g>
     ),
     gasCylinder: (
-      <g fill="none" stroke="#111" strokeWidth="1.6">
-        <rect x="9" y="6" width="6" height="14" rx="2" />
-        <path d="M10.5 6V4h3v2" />
+      <g fill="none" stroke="#111" strokeWidth="1.6" strokeLinejoin="round">
+        <rect x="8.5" y="6.5" width="7" height="13.5" rx="2.5" />
+        <rect x="10.3" y="3.3" width="3.4" height="2.2" rx="0.6" />
+        <path d="M9.5 6.5V4.8" strokeWidth="1.2" />
+        <path d="M14.5 6.5V4.8" strokeWidth="1.2" />
       </g>
     ),
     corrosion: (
-      <g fill="none" stroke="#111" strokeWidth="1.4" strokeLinecap="round">
-        <path d="M9 3.5l-.6 6a1.6 1.6 0 003.2 0l-.6-6z" fill="#111" />
-        <path d="M10 10.5c0 2-1.5 2.5-1.5 4.5" />
-        <path d="M4 20c0-3 2-5 5-5s5 2 5 5" />
-        <path d="M15 13.5c1 .8 1.6 1.6 1.6 3" />
-        <path d="M20 20c0-2.2-1.4-3.8-3.4-4.4" />
+      <g fill="none" stroke="#111" strokeWidth="1.3" strokeLinecap="round">
+        <path d="M7.5 2.5l-.4 4.5a1.4 1.4 0 002.8 0l-.4-4.5z" fill="#111" transform="rotate(-18 7.5 4.5)" />
+        <path d="M7 8.3c.3 1.3-.6 2-1.3 3.2" transform="rotate(-18 7 8)" />
+        <path d="M3 20c0-2.6 1.7-4.4 4.3-4.4S11.6 17.4 11.6 20" />
+        <path d="M16.5 3l-.35 4a1.2 1.2 0 002.4 0l-.35-4z" fill="#111" />
+        <path d="M16.1 8.2c.25 1.1-.5 1.7-1 2.7" />
+        <path d="M13.5 20c0-2.2 1.4-3.7 3.5-3.7s3.5 1.5 3.5 3.7" />
       </g>
     ),
     skullCrossbones: (
-      <g fill="none" stroke="#111" strokeWidth="1.3">
-        <circle cx="12" cy="10" r="4.3" fill="#111" stroke="none" />
-        <circle cx="10.3" cy="9.5" r="0.9" fill="#fff" stroke="none" />
-        <circle cx="13.7" cy="9.5" r="0.9" fill="#fff" stroke="none" />
-        <path d="M10.5 13.2l3 0M11 14.3l0 1.2M13 14.3l0 1.2" stroke="#111" />
-        <path d="M6 17l12 4M18 17l-12 4" strokeWidth="1.6" strokeLinecap="round" />
+      <g fill="none" stroke="#111" strokeWidth="1.2">
+        <path d="M12 4.2c-2.7 0-4.6 2-4.6 4.5 0 1.7.8 2.7 1.6 3.5.4.4.5.7.5 1.2v.9h5v-.9c0-.5.1-.8.5-1.2.8-.8 1.6-1.8 1.6-3.5 0-2.5-1.9-4.5-4.6-4.5z" fill="#111" stroke="none" />
+        <circle cx="10.1" cy="8.7" r="1" fill="#fff" stroke="none" />
+        <circle cx="13.9" cy="8.7" r="1" fill="#fff" stroke="none" />
+        <path d="M10.7 12.3h2.6" stroke="#fff" strokeWidth="0.9" />
+        <path d="M11 14.3v2.3M13 14.3v2.3" stroke="#111" strokeWidth="1.1" />
+        <path d="M5.5 15.8l13 5.4M18.5 15.8l-13 5.4" strokeWidth="1.6" strokeLinecap="round" />
+        <circle cx="5.5" cy="15.8" r="0.9" fill="#111" stroke="none" />
+        <circle cx="18.5" cy="15.8" r="0.9" fill="#111" stroke="none" />
+        <circle cx="18.5" cy="21.2" r="0.9" fill="#111" stroke="none" />
+        <circle cx="5.5" cy="21.2" r="0.9" fill="#111" stroke="none" />
       </g>
     ),
     healthHazard: (
-      <g fill="none" stroke="#111" strokeWidth="1.4" strokeLinecap="round">
-        <path d="M12 5v13M8 8.5l8 7M16 8.5l-8 7" />
-        <circle cx="12" cy="11.5" r="1.4" fill="#111" stroke="none" />
+      <g fill="none" stroke="#111" strokeWidth="1.3" strokeLinejoin="round">
+        <circle cx="12" cy="6" r="2.6" fill="#111" stroke="none" />
+        <path d="M6 19c0-3.6 2.7-6.2 6-6.2s6 2.6 6 6.2" fill="#111" stroke="none" />
+        <path d="M12 9.5v3.3M9.8 13.8l1.5 1.5-1 3M14.2 13.8l-1.5 1.5 1 3" stroke="#fff" strokeWidth="1" />
       </g>
     ),
     exclamation: (
-      <text x="12" y="17" fontSize="15" fontWeight="bold" textAnchor="middle" fill="#111" fontFamily="Georgia, serif">!</text>
+      <g fill="#111">
+        <rect x="10.8" y="3" width="2.4" height="10.5" rx="1.1" />
+        <circle cx="12" cy="18.5" r="1.6" />
+      </g>
     ),
     biohazard: (
-      <g fill="none" stroke="#111" strokeWidth="1.3">
-        <circle cx="12" cy="7.5" r="2.3" />
-        <circle cx="8" cy="14.5" r="2.3" />
-        <circle cx="16" cy="14.5" r="2.3" />
-        <circle cx="12" cy="12" r="1.6" fill="#111" stroke="none" />
+      <g fill="#111">
+        <circle cx="12" cy="12" r="1.6" />
+        <g>
+          <path d="M12 12 A4.2 4.2 0 1 1 8.4 9.9 A2.6 2.6 0 1 0 11 12z" />
+          <path d="M12 12 A4.2 4.2 0 1 1 14.4 15.9 A2.6 2.6 0 1 0 13 12z" transform="rotate(120 12 12)" />
+          <path d="M12 12 A4.2 4.2 0 1 1 14.4 15.9 A2.6 2.6 0 1 0 13 12z" transform="rotate(240 12 12)" />
+        </g>
       </g>
     ),
   };
   return (
     <div className={animateClass} style={{ width: size, height: size, display: 'inline-block' }}>
       <div style={{ width: '100%', height: '100%', transform: 'rotate(45deg)', background: '#fff', border: '4px solid #C8102E', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-        <div style={{ transform: 'rotate(-45deg)', width: '62%', height: '62%' }}>
+        <div style={{ transform: 'rotate(-45deg)', width: '66%', height: '66%' }}>
           <svg viewBox="0 0 24 24" width="100%" height="100%">{icons[symbol]}</svg>
         </div>
       </div>
@@ -7184,6 +7198,48 @@ const WHMIS_SLIDE_PICTOGRAMS = {
   '3-0': ['flame', 'flameOverCircle', 'explodingBomb', 'gasCylinder', 'corrosion', 'skullCrossbones', 'healthHazard', 'exclamation', 'biohazard'],
   '3-1': ['flame', 'corrosion', 'gasCylinder'],
 };
+// One big line-art illustration + accent color per WHMIS module, used as
+// the full-screen video background so each module has a visual identity
+// matching its topic at a glance — not a literal depiction of every
+// sentence, but a consistent scene-setter for that chunk of the course.
+const MODULE_BACKGROUND = [
+  { color: '#3E6B8A', icon: ( // 0: What is WHMIS — a shield with a checkmark (right-to-know / protection)
+    <path d="M50 6L14 18v28c0 26 16 42 36 48 20-6 36-22 36-48V18L50 6z M38 50l8 8 18-20" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinejoin="round" strokeLinecap="round" />
+  )},
+  { color: '#6B8F5C', icon: ( // 1: Rights & responsibilities — two people
+    <g fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="36" cy="30" r="11" />
+      <path d="M14 78c0-16 10-27 22-27s22 11 22 27" />
+      <circle cx="68" cy="26" r="9" />
+      <path d="M52 78c1-14 9-23 20-23s20 9 22 23" />
+    </g>
+  )},
+  { color: '#B08A3E', icon: ( // 2: Labels — a hanging tag
+    <g fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinejoin="round" strokeLinecap="round">
+      <path d="M44 10H78a6 6 0 016 6v34a6 6 0 01-1.8 4.3L44 92 12 60a6 6 0 010-8.6L44 10z" />
+      <circle cx="66" cy="30" r="6" fill="currentColor" stroke="none" />
+    </g>
+  )},
+  { color: '#8A5CA8', icon: ( // 3: Pictograms module — a diamond outline (echoes the pictogram frame itself)
+    <rect x="26" y="26" width="48" height="48" rx="6" transform="rotate(45 50 50)" fill="none" stroke="currentColor" strokeWidth="4" />
+  )},
+  { color: '#4A7B9D', icon: ( // 4: SDS — a document with lines
+    <g fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinejoin="round" strokeLinecap="round">
+      <path d="M28 8h30l14 14v62a4 4 0 01-4 4H28a4 4 0 01-4-4V12a4 4 0 014-4z" />
+      <path d="M58 8v14h14" />
+      <path d="M32 46h36M32 58h36M32 70h22" />
+    </g>
+  )},
+  { color: '#5C9668', icon: ( // 5: Safe handling / PPE — a glove
+    <path d="M30 92V52c0-4 3-7 7-7s7 3 7 7v-6l0-24c0-4 3-7 7-7s7 3 7 7v20c0-4 3-7 7-7s7 3 7 7v6c0-4 3-7 7-7s7 3 7 7v22c0 12-8 22-20 25H44c-8 0-14-5-14-13z" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinejoin="round" strokeLinecap="round" />
+  )},
+  { color: '#B0563E', icon: ( // 6: Spills / emergency — an alert triangle with a drop
+    <g fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinejoin="round" strokeLinecap="round">
+      <path d="M50 10L92 82H8L50 10z" />
+      <path d="M50 36c-5 7-8 12-8 16a8 8 0 0016 0c0-4-3-9-8-16z" fill="currentColor" stroke="none" />
+    </g>
+  )},
+];
 
 function CertificateOfTraining({ record, course }) {
   const issuedDate = record.certIssuedAt ? new Date(record.certIssuedAt) : null;
@@ -9951,6 +10007,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [videoSlideIndex, setVideoSlideIndex] = useState(0);
   const [videoSpeaking, setVideoSpeaking] = useState(false);
   const [audioDebugMsg, setAudioDebugMsg] = useState(''); // temporary diagnostic — shows exactly why narration failed, if it does
+  const [videoPaused, setVideoPaused] = useState(false); // true only when deliberately paused mid-clip — distinct from "finished" or "not yet started"
   const [videoCaptionsOn, setVideoCaptionsOn] = useState(true);
   const [ttsVoices, setTtsVoices] = useState([]);
   const [ttsVoiceURI, setTtsVoiceURI] = useState(() => {
@@ -11959,18 +12016,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (chosenTrainingVoice) utter.voice = chosenTrainingVoice;
     utter.rate = 0.93;
     utter.pitch = 1;
-    utter.onstart = () => { setVideoSpeaking(true); setAudioDebugMsg(''); };
-    utter.onend = () => { setVideoSpeaking(false); if (onDone) onDone(); };
-    utter.onerror = (e) => { setVideoSpeaking(false); setAudioDebugMsg('Browser voice also failed: ' + (e && e.error ? e.error : 'unknown error')); };
+    utter.onstart = () => { setVideoSpeaking(true); setVideoPaused(false); setAudioDebugMsg(''); };
+    utter.onend = () => { setVideoSpeaking(false); setVideoPaused(false); if (onDone) onDone(); };
+    utter.onerror = (e) => { setVideoSpeaking(false); setVideoPaused(false); setAudioDebugMsg('Browser voice also failed: ' + (e && e.error ? e.error : 'unknown error')); };
     window.speechSynthesis.speak(utter);
   };
   // Prefers a pre-recorded narration clip (natural-sounding, generated
-  // ahead of time — see the "Narrator voice" section) at
-  // ./audio/{course}/{slideId}.mp3, falling back to the phone's built-in
-  // voice for any slide that doesn't have a recorded clip yet, so nothing
-  // ever goes silent just because audio hasn't been generated for it.
-  // Once played once online, the service worker caches the file
-  // automatically for offline playback after that.
+  // ahead of time — see the "Narrator voice" section) at ./{slideId}.mp3,
+  // falling back to the phone's built-in voice for any slide that doesn't
+  // have a recorded clip yet, so nothing ever goes silent just because
+  // audio hasn't been generated for it. Once played once online, the
+  // service worker caches the file automatically for offline playback
+  // after that.
   // onDone fires when the clip finishes — used to chain straight into the
   // next slide's narration (see the video render block), which browsers
   // treat as a continuation of already-permitted playback rather than a
@@ -11981,15 +12038,41 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (!audioId) { speakWithBrowserVoice(text, onDone); return; }
     const audio = new Audio(`./${audioId}.mp3`);
     trainingAudioRef.current = audio;
-    audio.onplay = () => { setVideoSpeaking(true); setAudioDebugMsg(''); };
-    audio.onended = () => { setVideoSpeaking(false); if (onDone) onDone(); };
+    audio.onplay = () => { setVideoSpeaking(true); setVideoPaused(false); setAudioDebugMsg(''); };
+    audio.onended = () => { setVideoSpeaking(false); setVideoPaused(false); if (onDone) onDone(); };
     audio.onerror = () => { setAudioDebugMsg(`Recording didn't load (./${audioId}.mp3) — falling back to browser voice.`); speakWithBrowserVoice(text, onDone); };
     audio.play().catch((err) => { setAudioDebugMsg('Recording blocked from playing: ' + (err && err.name ? err.name + ' — ' + err.message : String(err))); speakWithBrowserVoice(text, onDone); });
   };
+  // True pause — keeps the current clip's position instead of throwing it
+  // away, so Resume picks up where it left off rather than restarting
+  // from the top (that was the old "Pause" bug: it discarded the Audio
+  // element entirely, so hitting play again always replayed from 0:00).
+  const pauseTrainingSpeech = () => {
+    if (trainingAudioRef.current && !trainingAudioRef.current.ended) trainingAudioRef.current.pause();
+    if (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.speaking) window.speechSynthesis.pause();
+    setVideoSpeaking(false);
+    setVideoPaused(true);
+  };
+  const resumeTrainingSpeech = () => {
+    if (trainingAudioRef.current && !trainingAudioRef.current.ended) {
+      trainingAudioRef.current.play().catch(() => {});
+      setVideoSpeaking(true);
+      setVideoPaused(false);
+      return;
+    }
+    if (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+      setVideoSpeaking(true);
+      setVideoPaused(false);
+    }
+  };
+  // Hard stop — for actually moving on (slide change, exit), not for a
+  // deliberate pause. Throws away position on purpose.
   const stopTrainingSpeech = () => {
     if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
     if (trainingAudioRef.current) { trainingAudioRef.current.pause(); trainingAudioRef.current = null; }
     setVideoSpeaking(false);
+    setVideoPaused(false);
   };
   // Pure function of a course's data — same flattening used by the video
   // render block, kept here too so playTrainingSlide below doesn't need
@@ -12002,7 +12085,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     course.modules.forEach((m, mi) => {
       slides.push({ type: 'title', moduleIndex: mi, title: m.title, audioId: `${courseKey}-${mi}-title` });
       m.content.forEach((text, pi) => slides.push({ type: 'text', moduleIndex: mi, title: m.title, text, pictograms: WHMIS_SLIDE_PICTOGRAMS[`${mi}-${pi}`], audioId: `${courseKey}-${mi}-${pi}` }));
-      (checkpoints[mi] || []).forEach((qi) => slides.push({ type: 'quiz', qi, audioId: `${courseKey}-quiz-${qi}` }));
+      (checkpoints[mi] || []).forEach((qi) => slides.push({ type: 'quiz', qi, moduleIndex: mi, audioId: `${courseKey}-quiz-${qi}` }));
     });
     return slides;
   };
@@ -18140,7 +18223,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   course.modules.forEach((m, mi) => {
                     slides.push({ type: 'title', moduleIndex: mi, title: m.title, audioId: `${selectedCourse}-${mi}-title` });
                     m.content.forEach((text, pi) => slides.push({ type: 'text', moduleIndex: mi, title: m.title, text, pictograms: WHMIS_SLIDE_PICTOGRAMS[`${mi}-${pi}`], audioId: `${selectedCourse}-${mi}-${pi}` }));
-                    (checkpoints[mi] || []).forEach((qi) => slides.push({ type: 'quiz', qi, audioId: `${selectedCourse}-quiz-${qi}` }));
+                    (checkpoints[mi] || []).forEach((qi) => slides.push({ type: 'quiz', qi, moduleIndex: mi, audioId: `${selectedCourse}-quiz-${qi}` }));
                   });
                   const slide = slides[videoSlideIndex];
                   const isLastSlide = videoSlideIndex === slides.length - 1;
@@ -18166,74 +18249,76 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     playTrainingSlide(selectedCourse, videoSlideIndex + 1);
                   };
 
+                  const bg = MODULE_BACKGROUND[slide.moduleIndex] || MODULE_BACKGROUND[0];
+
                   return (
-                    <div>
-                      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-                        <p className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>
-                          {slide.moduleIndex !== undefined ? `Module ${slide.moduleIndex + 1} of ${course.modules.length}` : 'Checkpoint'} · Slide {videoSlideIndex + 1}/{slides.length}
+                    <div
+                      style={{
+                        position: 'fixed', inset: 0, zIndex: 9000,
+                        background: `linear-gradient(180deg, ${bg.color}dd, #14171288 60%, #14171288)`,
+                        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+                      }}
+                    >
+                      {/* Big watermark illustration behind everything — sized to the
+                          viewport, not the slide, so it doesn't jump around between
+                          slides in the same module. */}
+                      <svg
+                        viewBox="0 0 100 100"
+                        style={{ position: 'absolute', top: '50%', left: '50%', width: '140vmin', height: '140vmin', transform: 'translate(-50%, -50%)', color: '#ffffff22', pointerEvents: 'none' }}
+                      >
+                        {bg.icon}
+                      </svg>
+
+                      <div className="flex items-center justify-between gap-2 flex-wrap px-4 pt-4" style={{ position: 'relative' }}>
+                        <button onClick={() => { stopTrainingSpeech(); setSelectedCourse(null); setCourseStage('modules'); }} className="text-xs uppercase tracking-wide" style={{ color: '#ffffffcc' }}>
+                          ← Exit
+                        </button>
+                        <p className="text-xs uppercase tracking-wide" style={{ color: '#ffffffcc' }}>
+                          {slide.moduleIndex !== undefined ? `Module ${slide.moduleIndex + 1} of ${course.modules.length}` : 'Checkpoint'} · {videoSlideIndex + 1}/{slides.length}
                         </p>
-                        <button onClick={() => setVideoCaptionsOn((x) => !x)} className="text-xs underline" style={{ color: COLORS.inkDim }}>
+                        <button onClick={() => setVideoCaptionsOn((x) => !x)} className="text-xs underline" style={{ color: '#ffffffcc' }}>
                           {videoCaptionsOn ? 'Hide captions' : 'Show captions'}
                         </button>
                       </div>
 
-                      {ttsVoices.length > 0 && (
-                        <div className="mb-3">
-                          <label className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Narrator voice</label>
-                          <select
-                            value={chosenTrainingVoice ? chosenTrainingVoice.voiceURI : ''}
-                            onChange={(e) => {
-                              setTtsVoiceURI(e.target.value);
-                              try { localStorage.setItem('trainingVoiceURI', e.target.value); } catch (err) {}
-                            }}
-                            className="w-full px-3 py-2 rounded-lg text-sm"
-                            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
-                          >
-                            {ttsVoices.filter((v) => v.lang && v.lang.toLowerCase().startsWith('en')).map((v) => (
-                              <option key={v.voiceURI} value={v.voiceURI}>{v.name} ({v.lang})</option>
-                            ))}
-                          </select>
-                          <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>Some voices on your phone sound a lot more natural than others — pick whichever sounds best here, it'll remember it next time.</p>
-                        </div>
-                      )}
-
                       {audioDebugMsg && (
-                        <div className="rounded-lg p-3 mb-3 text-xs" style={{ background: '#E07A5F22', border: '1px solid #E07A5F', color: '#E07A5F' }}>
+                        <div className="mx-4 mt-2 rounded-lg p-3 text-xs" style={{ position: 'relative', background: '#E07A5Fdd', color: '#fff' }}>
                           ⚠️ {audioDebugMsg}
                         </div>
                       )}
 
-                      <div className="rounded-lg p-5 mb-3 text-center" style={{ background: COLORS.surfaceRaised, minHeight: 180, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                      <div className="flex-1 flex flex-col items-center justify-center px-6 text-center" style={{ position: 'relative' }}>
                         {slide.type === 'title' && (
-                          <p className="font-display text-lg font-bold">{slide.title}</p>
+                          <p className="font-display font-bold" style={{ color: '#fff', fontSize: 'clamp(1.5rem, 6vw, 2.75rem)', textShadow: '0 2px 12px #00000088' }}>{slide.title}</p>
                         )}
                         {slide.type === 'text' && (
-                          <div>
-                            <p className="text-xs uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>{slide.title}</p>
+                          <div style={{ maxWidth: 560 }}>
+                            <p className="text-xs uppercase tracking-widest mb-3" style={{ color: bg.color, background: '#fff', display: 'inline-block', padding: '2px 10px', borderRadius: 999 }}>{slide.title}</p>
                             {slide.pictograms && (
-                              <div className="flex flex-wrap gap-2 justify-center mb-3">
+                              <div className="flex flex-wrap gap-2 justify-center mb-4">
                                 {slide.pictograms.map((sym, si) => (
-                                  <WhmisPictogram key={sym + si} symbol={sym} size={slide.pictograms.length > 4 ? 52 : 72} animateClass="pictogram-enter pictogram-pulse" />
+                                  <WhmisPictogram key={sym + si} symbol={sym} size={slide.pictograms.length > 4 ? 56 : 78} animateClass="pictogram-enter pictogram-pulse" />
                                 ))}
                               </div>
                             )}
-                            {videoCaptionsOn && <p className="text-sm">{slide.text}</p>}
+                            {videoCaptionsOn && <p style={{ color: '#fff', fontSize: 'clamp(1rem, 3.2vw, 1.4rem)', lineHeight: 1.4, textShadow: '0 1px 8px #00000099' }}>{slide.text}</p>}
                           </div>
                         )}
                         {slide.type === 'quiz' && (
-                          <div className="text-left">
-                            <p className="text-xs uppercase tracking-wide mb-2 text-center" style={{ color: COLORS.accent }}>Quick check</p>
-                            <p className="text-sm font-semibold mb-3">{course.quiz[slide.qi].q}</p>
-                            <div className="space-y-1.5">
+                          <div className="text-left w-full" style={{ maxWidth: 480 }}>
+                            <p className="text-xs uppercase tracking-widest mb-2 text-center" style={{ color: bg.color, background: '#fff', display: 'inline-block', padding: '2px 10px', borderRadius: 999 }}>Quick check</p>
+                            <p className="text-lg font-semibold mb-4 text-center" style={{ color: '#fff', textShadow: '0 1px 8px #00000099' }}>{course.quiz[slide.qi].q}</p>
+                            <div className="space-y-2">
                               {course.quiz[slide.qi].options.map((opt, oi) => (
                                 <button
                                   key={oi}
                                   onClick={() => setQuizAnswers((prev) => ({ ...prev, [slide.qi]: oi }))}
-                                  className="w-full text-left text-xs rounded-lg px-3 py-2"
+                                  className="w-full text-left text-sm rounded-lg px-4 py-3"
                                   style={{
-                                    background: quizAnswers[slide.qi] === oi ? COLORS.accent + '33' : COLORS.bg,
-                                    border: `1px solid ${quizAnswers[slide.qi] === oi ? COLORS.accent : COLORS.line}`,
-                                    color: COLORS.ink,
+                                    background: quizAnswers[slide.qi] === oi ? bg.color : '#ffffffee',
+                                    border: `2px solid ${quizAnswers[slide.qi] === oi ? '#fff' : 'transparent'}`,
+                                    color: quizAnswers[slide.qi] === oi ? '#fff' : '#1B1F19',
+                                    fontWeight: quizAnswers[slide.qi] === oi ? 600 : 500,
                                   }}
                                 >
                                   {opt}
@@ -18244,19 +18329,36 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         )}
                       </div>
 
-                      <div className="flex gap-2 flex-wrap mb-4">
+                      {ttsVoices.length > 0 && (
+                        <div className="px-4" style={{ position: 'relative' }}>
+                          <select
+                            value={chosenTrainingVoice ? chosenTrainingVoice.voiceURI : ''}
+                            onChange={(e) => {
+                              setTtsVoiceURI(e.target.value);
+                              try { localStorage.setItem('trainingVoiceURI', e.target.value); } catch (err) {}
+                            }}
+                            className="w-full px-3 py-2 rounded-lg text-xs mb-2"
+                            style={{ background: '#ffffffdd', color: '#1B1F19', border: 'none' }}
+                          >
+                            {ttsVoices.filter((v) => v.lang && v.lang.toLowerCase().startsWith('en')).map((v) => (
+                              <option key={v.voiceURI} value={v.voiceURI}>{v.name} ({v.lang})</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      <div className="flex gap-2 flex-wrap px-4 pb-6" style={{ position: 'relative' }}>
                         {slide.type !== 'quiz' && (
-                          videoSpeaking ? (
-                            <Btn variant="ghost" onClick={stopTrainingSpeech}>⏸ Pause</Btn>
-                          ) : (
-                            <Btn variant="ghost" onClick={() => playTrainingSlide(selectedCourse, videoSlideIndex)}>🔁 Replay</Btn>
-                          )
+                          <button
+                            onClick={videoSpeaking ? pauseTrainingSpeech : videoPaused ? resumeTrainingSpeech : () => playTrainingSlide(selectedCourse, videoSlideIndex)}
+                            className="font-display font-bold uppercase tracking-wide text-base px-6 py-3.5 rounded-xl active:scale-95"
+                            style={{ background: 'transparent', color: '#fff', border: '2.5px solid #ffffffaa' }}
+                          >
+                            {videoSpeaking ? '⏸ Pause' : videoPaused ? '▶ Resume' : '🔁 Replay'}
+                          </button>
                         )}
                         <Btn onClick={goNext} disabled={!canAdvance}>{isLastSlide ? 'Finish & See Results' : 'Next →'}</Btn>
                       </div>
-                      <button onClick={() => { stopTrainingSpeech(); setSelectedCourse(null); setCourseStage('modules'); }} className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>
-                        ← Exit video
-                      </button>
                     </div>
                   );
                 })()}
