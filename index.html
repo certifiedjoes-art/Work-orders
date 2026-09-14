@@ -17968,7 +17968,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   return (
                     <button
                       key={key}
-                      onClick={() => { setSelectedCourse(key); setCourseStage('modules'); setQuizAnswers({}); setQuizResult(null); }}
+                      onClick={() => {
+                        setSelectedCourse(key);
+                        setQuizAnswers({});
+                        setQuizResult(null);
+                        setVideoSlideIndex(0);
+                        autoplayedSlideRef.current = -1;
+                        // Courses with a video go straight into it — no
+                        // separate text-reading screen at all. Courses
+                        // without one yet (TDG, for now) fall back to the
+                        // read-then-quiz screen.
+                        setCourseStage(COURSE_VIDEO_CHECKPOINTS[key] ? 'video' : 'modules');
+                      }}
                       className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
                       style={{ background: COLORS.surfaceRaised }}
                     >
@@ -18305,7 +18316,22 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     })()}
 
                     <div className="flex gap-2 no-print">
-                      <Btn onClick={() => { setCourseStage('quiz'); setQuizAnswers({}); setQuizResult(null); setCertSignatureDraft(null); }}>Retake Quiz</Btn>
+                      <Btn
+                        onClick={() => {
+                          setQuizAnswers({});
+                          setQuizResult(null);
+                          setCertSignatureDraft(null);
+                          if (COURSE_VIDEO_CHECKPOINTS[selectedCourse]) {
+                            setVideoSlideIndex(0);
+                            autoplayedSlideRef.current = -1;
+                            setCourseStage('video');
+                          } else {
+                            setCourseStage('quiz');
+                          }
+                        }}
+                      >
+                        Retake {COURSE_VIDEO_CHECKPOINTS[selectedCourse] ? 'Video' : 'Quiz'}
+                      </Btn>
                       <Btn variant="ghost" onClick={() => { setSelectedCourse(null); setCourseStage('modules'); setQuizAnswers({}); setQuizResult(null); setCertSignatureDraft(null); }}>Back to Training</Btn>
                     </div>
                   </div>
