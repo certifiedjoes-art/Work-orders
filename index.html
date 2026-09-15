@@ -4016,6 +4016,8 @@ function SidebarMenu({ show, onClose, mechanic, isAdmin, isForeman, isProduction
             {item('🗺️', 'Maps', () => onNavigate('maps'))}
             {item('🛣️', 'Highway Map', () => onNavigate('highwayMap'))}
             {!(isAdmin || isForeman) && item('🦺', 'Safety', () => onNavigate('safety'))}
+            {isAdmin && item('🔢', 'Unit Numbers', () => onNavigate('admin', 'units'))}
+            {isAdmin && item('📍', 'Block Numbers', () => onNavigate('admin', 'blocks'))}
             {!isProduction && item('🎉', t('shoutouts'), () => onNavigate('shoutouts'))}
             {!isProduction && item('📋', t('checklists'), () => onNavigate('checklists'))}
             {item('⚙️', 'Settings', () => onNavigate('settings'))}
@@ -15794,7 +15796,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             isAdmin={isAdmin}
             isForeman={isForeman}
             isProduction={jobTypeFor(currentMechanic) === 'production'}
-            onNavigate={(s) => setScreen(s)}
+            onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
             onCheckUpdates={async () => {
               try {
                 const regs = await navigator.serviceWorker.getRegistrations();
@@ -16195,7 +16197,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           isProduction={jobTypeFor(currentMechanic) === 'production'}
           isForeman={isForeman}
           isAdmin={isAdmin}
-          onNavigate={(s) => setScreen(s)}
+          onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
           onCheckUpdates={async () => {
             try {
               const regs = await navigator.serviceWorker.getRegistrations();
@@ -17123,7 +17125,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           isAdmin={isAdmin}
           isForeman={isForeman}
           isProduction={jobTypeFor(currentMechanic) === 'production'}
-          onNavigate={(s) => setScreen(s)}
+          onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
           onCheckUpdates={async () => {
             try {
               const regs = await navigator.serviceWorker.getRegistrations();
@@ -18339,17 +18341,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </div>
           </AdminSection>
           )}
-
-          {isAdmin && (
-          <AdminSection
-            icon="🔔"
-            title="Push Notification Wording"
-            expanded={expandedAdmin === 'push'}
-            onToggle={() => setExpandedAdmin(expandedAdmin === 'push' ? null : 'push')}
-          >
-          <PushMessageEditor pushMessages={pushMessages} onSave={savePushMessages} />
-          </AdminSection>
-          )}
         </div>
 
         {showTimesheetMigration && (
@@ -19273,6 +19264,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               />
             </label>
           </div>
+
+          {isAdmin && (
+            <div className="rounded-lg p-5 mt-4" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+              <h2 className="font-display text-sm font-bold uppercase tracking-wide mb-4">🔔 Push Notification Wording</h2>
+              <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>What everyone's shift-reminder notifications actually say.</p>
+              <PushMessageEditor pushMessages={pushMessages} onSave={savePushMessages} />
+            </div>
+          )}
 
           {isAdmin && (
             <div className="rounded-lg p-5 mt-4" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
