@@ -8162,6 +8162,8 @@ function LongPressReorderList({ entries, onReorder, renderItem, disabled }) {
           style={{
             touchAction: draggingKey ? 'none' : 'pan-y',
             userSelect: 'none',
+            WebkitUserSelect: 'none', // iOS Safari needs its own prefixed property, or the long-press still pops up the text-selection bubbles/magnifier before our drag timer fires
+            WebkitTouchCallout: 'none', // suppresses iOS's press-and-hold callout menu (Copy/Look Up/etc.) on the row too
             opacity: draggingKey === entry.key ? 0.6 : 1,
             transform: draggingKey === entry.key ? 'scale(1.02)' : 'none',
             boxShadow: draggingKey === entry.key ? '0 4px 14px #00000055' : 'none',
@@ -8182,7 +8184,10 @@ function OrganizeChecklistRow({ label, dragging }) {
   return (
     <div
       className="flex items-center gap-3 px-3 py-3 mb-1.5 rounded-lg"
-      style={{ background: dragging ? COLORS.surfaceRaised : COLORS.surface, border: `1px solid ${COLORS.line}` }}
+      style={{
+        background: dragging ? COLORS.surfaceRaised : COLORS.surface, border: `1px solid ${COLORS.line}`,
+        userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none',
+      }}
     >
       <span style={{ color: COLORS.inkDim, fontSize: 18, lineHeight: 1 }}>☰</span>
       <span className="text-sm flex-1">{label}</span>
