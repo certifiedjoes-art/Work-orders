@@ -5725,6 +5725,36 @@ function productionSummary(s, unitTypesMap) {
   }
   return '—';
 }
+// Raw production totals for one block, broken out by machine type —
+// every production shift logged against that block, summed per type
+// (not per individual unit — two bunchers in the same block add
+// together), using the same per-type fields productionSummary above
+// reads for a single shift. Types with nothing quantifiable to show
+// (crawler, grader, winch — hours only, no production count) are left
+// out entirely rather than shown empty.
+function blockProductionBreakdown(block, shifts, unitTypesMap) {
+  const totals = {};
+  shifts.filter((s) => s.block === block).forEach((s) => {
+    const type = machineType(s.machine, unitTypesMap);
+    if (!type || type === 'fuel') return;
+    if (!totals[type]) totals[type] = { trees: 0, spruce: 0, aspen: 0, loadCount: 0, machines: new Set(), shiftCount: 0 };
+    const t = totals[type];
+    t.machines.add(s.machine);
+    t.shiftCount += 1;
+    if (type === 'buncher') t.trees += Number(s.trees) || 0;
+    if (type === 'skidder' || type === 'processor') {
+      t.spruce += Number(s.spruce) || 0;
+      t.aspen += Number(s.aspen) || 0;
+    }
+    if (type === 'loader') {
+      t.loadCount += Number(s.loadCount) || 0;
+    }
+  });
+  // Order matches the harvest sequence (fell → skid → process → load)
+  // rather than alphabetically, so it reads like the actual workflow.
+  const order = ['buncher', 'skidder', 'processor', 'loader'];
+  return order.filter((type) => totals[type]).map((type) => ({ type, ...totals[type] }));
+}
 
 const FONT_STYLE = (
   <style>{`
@@ -18411,18 +18441,51 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             {blocks.length === 0 ? (
               <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>No blocks added yet.</p>
             ) : (
-              <div className="flex flex-wrap gap-2 mb-3">
-                {blocks.map((b) => (
-                  <span key={b} className="text-xs font-mono rounded-lg px-2 py-1.5 flex items-center gap-2" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
-                    {b}
-                    <button
-                      onClick={() => persistBlocks(blocks.filter((x) => x !== b))}
-                      style={{ color: COLORS.inkDim }}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
+              <div className="space-y-3 mb-3">
+                {blocks.map((b) => {
+                  const breakdown = blockProductionBreakdown(b, productionShifts, unitTypes);
+                  return (
+                    <div key={b} className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="text-sm font-mono font-bold">{b}</span>
+                        <button
+                          onClick={() => persistBlocks(blocks.filter((x) => x !== b))}
+                          className="text-xs"
+                          style={{ color: COLORS.inkDim }}
+                        >
+                          Remove ×
+                        </button>
+                      </div>
+                      {breakdown.length === 0 ? (
+                        <p className="text-xs" style={{ color: COLORS.inkDim }}>No production logged in this block yet.</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {breakdown.map((row) => {
+                            const parts = [];
+                            if (row.type === 'buncher') parts.push(`${row.trees} trees`);
+                            if (row.type === 'skidder' || row.type === 'processor') {
+                              if (row.spruce) parts.push(`${row.spruce} spruce`);
+                              if (row.aspen) parts.push(`${row.aspen} aspen`);
+                              if (!row.spruce && !row.aspen) parts.push('0 spruce, 0 aspen');
+                            }
+                            if (row.type === 'loader') {
+                              parts.push(`${row.loadCount || 0} loads`);
+                            }
+                            return (
+                              <div key={row.type} className="flex items-center justify-between gap-2 text-xs">
+                                <span style={{ color: COLORS.inkDim }}>
+                                  {MACHINE_TYPE_LABELS[row.type]}
+                                  <span style={{ opacity: 0.7 }}> ({[...row.machines].join(', ')})</span>
+                                </span>
+                                <span className="font-mono font-semibold">{parts.join(', ')}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
             {addingBlock ? (
