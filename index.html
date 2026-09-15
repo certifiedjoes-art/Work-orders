@@ -823,11 +823,42 @@ const STATUSES = ['Open', 'In Progress', 'Done'];
 // included) can view every one of these — monthly equipment inspections
 // and incident/near-miss reports are handled elsewhere and are NOT part
 // of this open library.
-const SAFETY_CATEGORIES = ['Employee Safety Orientation', 'Driver Orientation', 'Safety Manual', 'OHS Manual', 'SDS Sheets', 'Safety Meeting Minutes', 'Committee Meeting Minutes', 'SFI Booklet'];
+const SAFETY_CATEGORIES = ['Office Administration', 'Driver Orientation', 'Safety Manual', 'OHS Manual', 'SDS Sheets', 'Safety Meeting Minutes', 'Committee Meeting Minutes', 'SFI Booklet'];
 // Categories where a document is just something to hand a new hire a
 // paper copy of — the row only gets a Print button, no Open (view
 // in-app) or Send (share digitally), since that's not how it gets used.
-const PRINT_ONLY_SAFETY_CATEGORIES = ['Employee Safety Orientation', 'Driver Orientation'];
+const PRINT_ONLY_SAFETY_CATEGORIES = ['Office Administration', 'Driver Orientation'];
+
+// Digitized versions of Harder Contracting's two paper orientation
+// checklists (the third page of that same packet — the Office
+// Administration info/banking form — stays paper-only above, since it
+// collects SIN and banking details that have no business living in this
+// app). Both lists are grouped into sections matching the paper forms'
+// layout, transcribed from the actual blank master template pages.
+const EMPLOYEE_ORIENTATION_SECTIONS = [
+  { name: 'Introduction', items: ['Company Safety Policies/Safety Manual', 'Job Specific Training and Hazard Assessment', 'Job Specific Hazards, Responsibilities and Safety Precautions', 'Employee right to refuse unsafe work, right to know of hazards on the work site, right to participate in health and safety activities', 'OH&S Act, Regulations and Code'] },
+  { name: 'Safety Responsibilities', items: ['Worker', 'Supervisor', 'Owner/Manager'] },
+  { name: 'Safe Practices/Procedures', items: ['Equipment', 'Driving'] },
+  { name: 'Emergency Procedures', items: ['First Aid/location of first aid kits/fire extinguishers', 'Emergency Response Procedures and Evacuation Plans', 'Spill Response', 'Accident/Incident/Hazard/Near Miss/Health Occurrence Reporting', 'Emergency Phone 911'] },
+  { name: 'General Rules', items: ['Alcohol/drugs', 'Discipline process', 'Violence/Harassment Policy/Training', 'Lockout /Tag Out Procedures', 'Vehicle operating policies'] },
+  { name: 'Meetings (expectations)', items: ['Safety/Staff', 'Tailgate'] },
+  { name: 'Personal Protective Equipment', items: ['Proper usage/maintenance/inspection', 'Hard hats', 'Hearing protection', 'Foot Protection', 'Eye/limb protection'] },
+];
+const OPERATOR_TRAINING_SECTIONS = [
+  { name: 'Equipment Overview', items: ['Equipment Purpose', 'General Overview', 'Production Expectations', 'Production Requirements'] },
+  { name: 'Equipment Safety', items: ['Mounting/Dismounting', 'Danger Areas', 'Safety Guards', 'Operators Compartment', 'Fire Extinguisher/Suppression', 'Radio & Communications', "Operator's Manual", 'Lockouts'] },
+  { name: 'Employee Health and Safety', items: ['Specific Hazards Identified', 'First Aid Locations', 'Emergency Response', 'Job Specific PPE', 'Job Procedures Reviewed', 'Radio Checks'] },
+  { name: 'Pre Start Checks', items: ['Walk Around – General', 'Tires/Tracks', 'Winch/Grapple/Attachments', 'Fluid Check Locations', 'Leaks', 'Brakes', 'Walk Around Checklist (Form)', 'Seat Belts'] },
+  { name: 'Equipment Operation', items: ['Engine Start', 'Warm Up', 'Gauge Checks', 'Gauge Operations Range', 'Control Checks', 'General Operation', 'Equipment Stabilization', 'Tips and Tricks', 'Equipment Shut Down'] },
+  { name: 'Equipment Servicing', items: ['Servicing Tools', 'Grease Locations', 'Track Cleaning', 'Checking for Leaks', 'Reporting', 'Cleanliness/Housekeeping', 'Waste Disposal'] },
+  { name: 'Environmental Items', items: ['Company Policies', 'Watercourses', 'Operating Plans', 'Emergency Procedures', 'Forest Fire Protection'] },
+];
+// Whether every item across every section of a checklist has been
+// checked off — used to gate submission the same way the inspection
+// forms require every item answered before they'll submit.
+function allChecklistItemsChecked(sections, checked) {
+  return sections.every((s) => s.items.every((_, i2) => checked[`${s.name}-${i2}`]));
+}
 
 // Job-specific hazard data digitized from Harder Contracting's Job Hazard
 // Analysis manual (task inventory + critical task flags per occupation).
@@ -9057,7 +9088,312 @@ function EquipmentInspectionDetail({ record, isAdmin, onReview, onDelete, onBack
   );
 }
 
-// New Incident Report form. Covers the standard ISO 45001 / WCB-style
+// A single checklist row for the two Worker Orientation checklists below
+// — plain checked/unchecked (the paper forms just have a blank to
+// initial when a topic's been covered), unlike the inspection rows which
+// need OK/N/A/Req.Att.
+function ChecklistItemRow({ label, checked, onChange, readOnly }) {
+  if (readOnly) {
+    return (
+      <div className="flex items-center gap-2 py-1.5">
+        <span style={{ color: checked ? COLORS.accent : COLORS.inkDim, fontSize: 15 }}>{checked ? '☑' : '☐'}</span>
+        <span className="text-sm">{label}</span>
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className="w-full flex items-center gap-2 py-1.5 text-left"
+    >
+      <span style={{ color: checked ? COLORS.accent : COLORS.inkDim, fontSize: 15 }}>{checked ? '☑' : '☐'}</span>
+      <span className="text-sm">{label}</span>
+    </button>
+  );
+}
+function ChecklistSections({ sections, checked, onChange, readOnly }) {
+  return sections.map((section) => (
+    <div key={section.name} className="mb-3">
+      <p className="font-display text-xs font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>{section.name}</p>
+      {section.items.map((label, i2) => {
+        const key = `${section.name}-${i2}`;
+        return (
+          <ChecklistItemRow
+            key={key}
+            label={label}
+            checked={!!checked[key]}
+            readOnly={readOnly}
+            onChange={readOnly ? undefined : (v) => onChange(key, v)}
+          />
+        );
+      })}
+    </div>
+  ));
+}
+function PrintableChecklist({ title, sections, checked, fields, employeeSigLabel, counterpartSigLabel, employeeSignature, counterpartSignature, comments }) {
+  return (
+    <div style={{ background: '#fff', color: '#1B1F19', padding: 16 }}>
+      <p style={{ fontWeight: 700, fontSize: 16 }}>Harder Contracting Ltd — {title}</p>
+      <div style={{ fontSize: 11, color: '#555', marginBottom: 10 }}>
+        {fields.map((f, i) => <div key={i}>{f.label}: {f.value || '—'}</div>)}
+      </div>
+      {sections.map((section) => (
+        <div key={section.name} style={{ marginBottom: 8 }}>
+          <p style={{ fontWeight: 700, fontSize: 11, marginBottom: 2 }}>{section.name}</p>
+          {section.items.map((label, i2) => {
+            const key = `${section.name}-${i2}`;
+            return (
+              <div key={key} style={{ fontSize: 11, display: 'flex', gap: 6 }}>
+                <span>{checked[key] ? '☑' : '☐'}</span><span>{label}</span>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      {comments != null && (
+        <div style={{ marginTop: 8, marginBottom: 8 }}>
+          <p style={{ fontWeight: 700, fontSize: 11 }}>Comments:</p>
+          <p style={{ fontSize: 11 }}>{comments || '—'}</p>
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 40, marginTop: 20 }}>
+        <div>
+          <p style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>{employeeSigLabel}:</p>
+          {employeeSignature ? <img src={employeeSignature} alt="Signature" style={{ height: 45 }} /> : <p style={{ fontSize: 11 }}>—</p>}
+        </div>
+        <div>
+          <p style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>{counterpartSigLabel}:</p>
+          {counterpartSignature ? <img src={counterpartSignature} alt="Signature" style={{ height: 45 }} /> : <p style={{ fontSize: 11 }}>—</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// New Employee Safety Orientation checklist — the digitized version of
+// the "Employee Safety Orientation" paper form: a topic-by-topic
+// walkthrough a supervisor completes with a new hire, closed out with
+// both signatures. Every topic must be checked before it'll submit,
+// same completion-gating idea as the inspection forms.
+function NewEmployeeOrientationForm({ defaultCoordinator, submitting, onCancel, onSubmit }) {
+  const [employeeName, setEmployeeName] = useState('');
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [dateOfHire, setDateOfHire] = useState('');
+  const [checked, setChecked] = useState({});
+  const [employeeSignature, setEmployeeSignature] = useState(null);
+  const [coordinatorSignature, setCoordinatorSignature] = useState(null);
+  const savedCoordinatorSig = defaultCoordinator ? localStorage.getItem('savedSignature_' + defaultCoordinator) : null;
+
+  const allChecked = allChecklistItemsChecked(EMPLOYEE_ORIENTATION_SECTIONS, checked);
+  const canSubmit = employeeName.trim() && date && allChecked && employeeSignature && coordinatorSignature;
+
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <p className="font-display text-lg font-bold mb-3">New Employee Orientation</p>
+      <input type="text" placeholder="Employee Name" value={employeeName} onChange={(e) => setEmployeeName(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+      <div className="flex gap-2 mb-3">
+        <div className="flex-1">
+          <label className="text-xs" style={{ color: COLORS.inkDim }}>Date</label>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+        </div>
+        <div className="flex-1">
+          <label className="text-xs" style={{ color: COLORS.inkDim }}>Date of Hire</label>
+          <input type="date" value={dateOfHire} onChange={(e) => setDateOfHire(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+        </div>
+      </div>
+
+      <ChecklistSections sections={EMPLOYEE_ORIENTATION_SECTIONS} checked={checked} onChange={(key, v) => setChecked((prev) => ({ ...prev, [key]: v }))} />
+      <p className="text-xs my-2" style={{ color: allChecked ? COLORS.accent : COLORS.inkDim }}>
+        {Object.values(checked).filter(Boolean).length} / {EMPLOYEE_ORIENTATION_SECTIONS.reduce((n, s) => n + s.items.length, 0)} topics covered
+      </p>
+
+      <p className="text-xs font-semibold uppercase tracking-wide mt-3 mb-1" style={{ color: COLORS.inkDim }}>Employee Signature</p>
+      <SignaturePad onChange={setEmployeeSignature} />
+      <p className="text-xs font-semibold uppercase tracking-wide mt-3 mb-1" style={{ color: COLORS.inkDim }}>Safety Coordinator Signature</p>
+      <SignaturePad onChange={setCoordinatorSignature} savedSignature={savedCoordinatorSig} />
+
+      <div className="flex gap-2 mt-4">
+        <Btn onClick={onCancel} variant="secondary">Cancel</Btn>
+        <Btn
+          onClick={async () => {
+            if (defaultCoordinator && coordinatorSignature) localStorage.setItem('savedSignature_' + defaultCoordinator, coordinatorSignature);
+            await onSubmit({ employeeName: employeeName.trim(), date, dateOfHire, items: checked, employeeSignature, coordinatorSignature });
+          }}
+          disabled={!canSubmit || submitting}
+        >
+          {submitting ? 'Submitting\u2026' : 'Submit'}
+        </Btn>
+      </div>
+      {!allChecked && <p className="text-xs mt-2" style={{ color: COLORS.inkDim }}>Every topic must be checked off before this can be submitted.</p>}
+    </div>
+  );
+}
+function EmployeeOrientationDetail({ record, isAdmin, onDelete, onBack }) {
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <div className="flex items-center justify-between mb-3 no-print">
+        <button onClick={onBack} className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>← Back to list</button>
+        <button onClick={() => window.print()} className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-1.5 rounded-lg" style={{ color: COLORS.accent, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>🖨️ Export</button>
+      </div>
+      <PrintPortal>
+        <PrintableChecklist
+          title="Employee Safety Orientation"
+          sections={EMPLOYEE_ORIENTATION_SECTIONS}
+          checked={record.items || {}}
+          fields={[{ label: 'Employee Name', value: record.employeeName }, { label: 'Date', value: fmtDate(record.date) }, { label: 'Date of Hire', value: fmtDate(record.dateOfHire) }]}
+          employeeSigLabel="Employee Signature"
+          counterpartSigLabel="Safety Coordinator Signature"
+          employeeSignature={record.employeeSignature}
+          counterpartSignature={record.coordinatorSignature}
+        />
+      </PrintPortal>
+      <p className="font-display text-lg font-bold">{record.employeeName}</p>
+      <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>{fmtDate(record.date)}{record.dateOfHire ? ` · Hired ${fmtDate(record.dateOfHire)}` : ''}</p>
+      <ChecklistSections sections={EMPLOYEE_ORIENTATION_SECTIONS} checked={record.items || {}} readOnly />
+      {record.employeeSignature && (
+        <div className="mt-3">
+          <p className="text-xs mb-1" style={{ color: COLORS.inkDim }}>Employee Signature</p>
+          <img src={record.employeeSignature} alt="Signature" style={{ height: 50, background: '#fff', borderRadius: 4 }} />
+        </div>
+      )}
+      {record.coordinatorSignature && (
+        <div className="mt-3">
+          <p className="text-xs mb-1" style={{ color: COLORS.inkDim }}>Safety Coordinator Signature</p>
+          <img src={record.coordinatorSignature} alt="Signature" style={{ height: 50, background: '#fff', borderRadius: 4 }} />
+        </div>
+      )}
+      {isAdmin && (
+        <button onClick={() => { if (confirm('Delete this orientation record? This cannot be undone.')) onDelete(); }} className="text-xs mt-4 no-print" style={{ color: '#E07A5F' }}>🗑️ Delete Record</button>
+      )}
+    </div>
+  );
+}
+
+// New Operator Training Checklist — the digitized version of the paper
+// per-equipment training sign-off. Same completion gating as above, plus
+// the four signature fields the paper form actually has (Employee,
+// Instructor/Trainer, and a separate Management Review sign-off — the
+// paper form's Date field under Management Review is folded into the one
+// record date here rather than tracked separately).
+function NewOperatorTrainingForm({ defaultInstructor, submitting, onCancel, onSubmit }) {
+  const [employeeName, setEmployeeName] = useState('');
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [instructorName, setInstructorName] = useState(defaultInstructor || '');
+  const [instructorTitle, setInstructorTitle] = useState('');
+  const [equipmentDescription, setEquipmentDescription] = useState('');
+  const [unitNo, setUnitNo] = useState('');
+  const [checked, setChecked] = useState({});
+  const [comments, setComments] = useState('');
+  const [employeeSignature, setEmployeeSignature] = useState(null);
+  const [instructorSignature, setInstructorSignature] = useState(null);
+  const savedInstructorSig = defaultInstructor ? localStorage.getItem('savedSignature_' + defaultInstructor) : null;
+
+  const allChecked = allChecklistItemsChecked(OPERATOR_TRAINING_SECTIONS, checked);
+  const canSubmit = employeeName.trim() && date && equipmentDescription.trim() && allChecked && employeeSignature && instructorSignature;
+
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <p className="font-display text-lg font-bold mb-3">New Operator Training Record</p>
+      <input type="text" placeholder="Employee (Trainee) Name" value={employeeName} onChange={(e) => setEmployeeName(e.target.value)} className="w-full mb-2 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+      <div className="flex gap-2 mb-2">
+        <input type="text" placeholder="Equipment Description" value={equipmentDescription} onChange={(e) => setEquipmentDescription(e.target.value)} className="flex-1 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+        <input type="text" placeholder="Unit No." value={unitNo} onChange={(e) => setUnitNo(e.target.value)} className="w-28 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+      </div>
+      <div className="flex gap-2 mb-2">
+        <input type="text" placeholder="Instructor Name" value={instructorName} onChange={(e) => setInstructorName(e.target.value)} className="flex-1 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+        <input type="text" placeholder="Instructor Title" value={instructorTitle} onChange={(e) => setInstructorTitle(e.target.value)} className="flex-1 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+      </div>
+      <label className="text-xs" style={{ color: COLORS.inkDim }}>Date</label>
+      <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full mb-3 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+
+      <ChecklistSections sections={OPERATOR_TRAINING_SECTIONS} checked={checked} onChange={(key, v) => setChecked((prev) => ({ ...prev, [key]: v }))} />
+      <p className="text-xs my-2" style={{ color: allChecked ? COLORS.accent : COLORS.inkDim }}>
+        {Object.values(checked).filter(Boolean).length} / {OPERATOR_TRAINING_SECTIONS.reduce((n, s) => n + s.items.length, 0)} items covered
+      </p>
+
+      <textarea placeholder="Comments" value={comments} onChange={(e) => setComments(e.target.value)} rows={2} className="w-full mb-3 px-3 py-2 rounded-lg text-sm" style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+
+      <p className="text-xs font-semibold uppercase tracking-wide mt-2 mb-1" style={{ color: COLORS.inkDim }}>Employee Signature</p>
+      <SignaturePad onChange={setEmployeeSignature} />
+      <p className="text-xs font-semibold uppercase tracking-wide mt-3 mb-1" style={{ color: COLORS.inkDim }}>Instructor (Trainer) Signature</p>
+      <SignaturePad onChange={setInstructorSignature} savedSignature={savedInstructorSig} />
+
+      <div className="flex gap-2 mt-4">
+        <Btn onClick={onCancel} variant="secondary">Cancel</Btn>
+        <Btn
+          onClick={async () => {
+            if (instructorName.trim() && instructorSignature) localStorage.setItem('savedSignature_' + instructorName.trim(), instructorSignature);
+            await onSubmit({
+              employeeName: employeeName.trim(), date, instructorName: instructorName.trim(), instructorTitle: instructorTitle.trim(),
+              equipmentDescription: equipmentDescription.trim(), unitNo: unitNo.trim(), items: checked, comments: comments.trim(),
+              employeeSignature, instructorSignature,
+            });
+          }}
+          disabled={!canSubmit || submitting}
+        >
+          {submitting ? 'Submitting\u2026' : 'Submit'}
+        </Btn>
+      </div>
+      {!allChecked && <p className="text-xs mt-2" style={{ color: COLORS.inkDim }}>Every item must be checked off before this can be submitted.</p>}
+    </div>
+  );
+}
+function OperatorTrainingDetail({ record, isAdmin, onDelete, onBack }) {
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <div className="flex items-center justify-between mb-3 no-print">
+        <button onClick={onBack} className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>← Back to list</button>
+        <button onClick={() => window.print()} className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-1.5 rounded-lg" style={{ color: COLORS.accent, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>🖨️ Export</button>
+      </div>
+      <PrintPortal>
+        <PrintableChecklist
+          title="Operator Training Checklist"
+          sections={OPERATOR_TRAINING_SECTIONS}
+          checked={record.items || {}}
+          fields={[
+            { label: 'Employee (Trainee) Name', value: record.employeeName }, { label: 'Date', value: fmtDate(record.date) },
+            { label: 'Instructor Name', value: record.instructorName }, { label: 'Instructor Title', value: record.instructorTitle },
+            { label: 'Equipment Description', value: record.equipmentDescription }, { label: 'Unit No.', value: record.unitNo },
+          ]}
+          employeeSigLabel="Employee Signature"
+          counterpartSigLabel="Instructor (Trainer) Signature"
+          employeeSignature={record.employeeSignature}
+          counterpartSignature={record.instructorSignature}
+          comments={record.comments}
+        />
+      </PrintPortal>
+      <p className="font-display text-lg font-bold">{record.employeeName}</p>
+      <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>
+        {record.equipmentDescription}{record.unitNo ? ` · Unit ${record.unitNo}` : ''} · {fmtDate(record.date)} · Instructor {record.instructorName}
+      </p>
+      <ChecklistSections sections={OPERATOR_TRAINING_SECTIONS} checked={record.items || {}} readOnly />
+      {record.comments && (
+        <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+          <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Comments</p>
+          <p className="text-sm">{record.comments}</p>
+        </div>
+      )}
+      {record.employeeSignature && (
+        <div className="mt-3">
+          <p className="text-xs mb-1" style={{ color: COLORS.inkDim }}>Employee Signature</p>
+          <img src={record.employeeSignature} alt="Signature" style={{ height: 50, background: '#fff', borderRadius: 4 }} />
+        </div>
+      )}
+      {record.instructorSignature && (
+        <div className="mt-3">
+          <p className="text-xs mb-1" style={{ color: COLORS.inkDim }}>Instructor Signature</p>
+          <img src={record.instructorSignature} alt="Signature" style={{ height: 50, background: '#fff', borderRadius: 4 }} />
+        </div>
+      )}
+      {isAdmin && (
+        <button onClick={() => { if (confirm('Delete this training record? This cannot be undone.')) onDelete(); }} className="text-xs mt-4 no-print" style={{ color: '#E07A5F' }}>🗑️ Delete Record</button>
+      )}
+    </div>
+  );
+}
+
+
 // fields: what happened and where, who was involved, injury details (only
 // asked about if an injury actually occurred), and the investigation
 // section (cause, corrective/preventive actions, follow-up). The reporter
@@ -10955,6 +11291,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [incidentReportActionBusy, setIncidentReportActionBusy] = useState(null);
   const [safetyInspectionType, setSafetyInspectionType] = useState(null); // one of SAFETY_INSPECTION_TYPES.key, or null (showing the menu)
   const [organizingChecklistType, setOrganizingChecklistType] = useState(null); // 'vehicle' | 'equipment' | 'yard' | null — shows the long-press "Organize" screen for that checklist instead of the normal list
+  const [workerOrientations, setWorkerOrientations] = useState(() => cacheGet('workerOrientations', []));
+  const [workerOrientationType, setWorkerOrientationType] = useState(null); // 'employeeOrientation' | 'operatorTraining' | null
+  const [newWorkerOrientationOpen, setNewWorkerOrientationOpen] = useState(false);
+  const [viewingWorkerOrientationId, setViewingWorkerOrientationId] = useState(null);
+  const [submittingWorkerOrientation, setSubmittingWorkerOrientation] = useState(false);
+  const [workerOrientationExpanded, setWorkerOrientationExpanded] = useState(false);
   const [inspectionChecklistOrder, setInspectionChecklistOrder] = useState(() => cacheGet('inspectionChecklistOrder', {}));
   const [safetyInspectionSite, setSafetyInspectionSite] = useState(null); // which site's list is expanded, for types that are bySite
   const [newYardInspectionOpen, setNewYardInspectionOpen] = useState(false);
@@ -11286,6 +11628,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = snap.val() || {};
       setInspectionChecklistOrder(val);
       cacheSet('inspectionChecklistOrder', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('workerOrientations');
+    const on = ref.on('value', (snap) => {
+      const val = Object.values(snap.val() || {});
+      setWorkerOrientations(val);
+      cacheSet('workerOrientations', val);
     });
     return () => ref.off('value', on);
   }, []);
@@ -12906,6 +13258,20 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setSafetyInspections(next);
     cacheSet('safetyInspections', next);
     await queueWrite('safetyInspections', { kind: 'delete', entryId: recordId });
+  };
+  const submitWorkerOrientation = async (record) => {
+    const full = { id: uid(), createdBy: currentMechanic, createdAt: Date.now(), ...record };
+    const next = [...workerOrientations, full];
+    setWorkerOrientations(next);
+    cacheSet('workerOrientations', next);
+    await queueWrite('workerOrientations', { kind: 'save', entry: full });
+    return full;
+  };
+  const deleteWorkerOrientation = async (recordId) => {
+    const next = workerOrientations.filter((r) => r.id !== recordId);
+    setWorkerOrientations(next);
+    cacheSet('workerOrientations', next);
+    await queueWrite('workerOrientations', { kind: 'delete', entryId: recordId });
   };
   // Records one quiz attempt — a retake adds a new record rather than
   // overwriting, so the full attempt history is kept for admins.
@@ -20080,6 +20446,137 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   )}
                 </div>
               ) : null}
+            </AdminSection>
+          )}
+
+          {(isAdmin || isSafety) && (
+            <AdminSection
+              icon="🪪"
+              title={`Worker Orientation${workerOrientationType ? ' — ' + (workerOrientationType === 'employeeOrientation' ? 'Employee Orientation' : 'Operator Training') : ''}`}
+              expanded={workerOrientationExpanded}
+              onToggle={() => setWorkerOrientationExpanded((x) => !x)}
+            >
+              {!workerOrientationType ? (
+                <div className="space-y-2">
+                  {[
+                    { key: 'employeeOrientation', label: 'Employee Orientation' },
+                    { key: 'operatorTraining', label: 'Operator Training' },
+                  ].map((type) => {
+                    const count = workerOrientations.filter((r) => r.type === type.key).length;
+                    return (
+                      <button
+                        key={type.key}
+                        onClick={() => setWorkerOrientationType(type.key)}
+                        className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                        style={{ background: COLORS.surfaceRaised }}
+                      >
+                        <span className="text-sm font-semibold">{type.label}</span>
+                        <span className="text-xs font-bold" style={{ color: COLORS.inkDim }}>{count} on file</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div>
+                  <button
+                    onClick={() => { setWorkerOrientationType(null); setNewWorkerOrientationOpen(false); setViewingWorkerOrientationId(null); }}
+                    className="text-xs uppercase tracking-wide mb-3"
+                    style={{ color: COLORS.inkDim }}
+                  >
+                    ← Back to Worker Orientation
+                  </button>
+
+                  {viewingWorkerOrientationId ? (
+                    workerOrientationType === 'employeeOrientation' ? (
+                      <EmployeeOrientationDetail
+                        record={workerOrientations.find((r) => r.id === viewingWorkerOrientationId)}
+                        isAdmin={isAdmin || isSafety}
+                        onBack={() => setViewingWorkerOrientationId(null)}
+                        onDelete={async () => { await deleteWorkerOrientation(viewingWorkerOrientationId); setViewingWorkerOrientationId(null); }}
+                      />
+                    ) : (
+                      <OperatorTrainingDetail
+                        record={workerOrientations.find((r) => r.id === viewingWorkerOrientationId)}
+                        isAdmin={isAdmin || isSafety}
+                        onBack={() => setViewingWorkerOrientationId(null)}
+                        onDelete={async () => { await deleteWorkerOrientation(viewingWorkerOrientationId); setViewingWorkerOrientationId(null); }}
+                      />
+                    )
+                  ) : newWorkerOrientationOpen ? (
+                    workerOrientationType === 'employeeOrientation' ? (
+                      <NewEmployeeOrientationForm
+                        defaultCoordinator={currentMechanic}
+                        submitting={submittingWorkerOrientation}
+                        onCancel={() => setNewWorkerOrientationOpen(false)}
+                        onSubmit={async (record) => {
+                          setSubmittingWorkerOrientation(true);
+                          await submitWorkerOrientation({ type: 'employeeOrientation', ...record });
+                          setSubmittingWorkerOrientation(false);
+                          setNewWorkerOrientationOpen(false);
+                        }}
+                      />
+                    ) : (
+                      <NewOperatorTrainingForm
+                        defaultInstructor={currentMechanic}
+                        submitting={submittingWorkerOrientation}
+                        onCancel={() => setNewWorkerOrientationOpen(false)}
+                        onSubmit={async (record) => {
+                          setSubmittingWorkerOrientation(true);
+                          await submitWorkerOrientation({ type: 'operatorTraining', ...record });
+                          setSubmittingWorkerOrientation(false);
+                          setNewWorkerOrientationOpen(false);
+                        }}
+                      />
+                    )
+                  ) : (
+                    <div>
+                      <button
+                        onClick={() => setNewWorkerOrientationOpen(true)}
+                        className="text-xs font-semibold px-3 py-2 rounded-lg mb-4"
+                        style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                      >
+                        + New Record
+                      </button>
+
+                      {[...new Set(workerOrientations.filter((r) => r.type === workerOrientationType).map((r) => r.employeeName))]
+                        .sort((a, b) => a.localeCompare(b))
+                        .map((name) => {
+                          const records = workerOrientations
+                            .filter((r) => r.type === workerOrientationType && r.employeeName === name)
+                            .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+                          return (
+                            <div key={name} className="mb-4">
+                              <p className="font-display text-sm font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>
+                                {name} ({records.length})
+                              </p>
+                              <div className="space-y-2">
+                                {records.map((r) => (
+                                  <button
+                                    key={r.id}
+                                    onClick={() => setViewingWorkerOrientationId(r.id)}
+                                    className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                                    style={{ background: COLORS.surfaceRaised }}
+                                  >
+                                    <span className="text-sm">
+                                      {fmtDate(r.date)}{workerOrientationType === 'operatorTraining' && r.equipmentDescription ? ` · ${r.equipmentDescription}` : ''}
+                                    </span>
+                                    <span className="text-xs" style={{ color: COLORS.accent }}>View →</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                      {workerOrientations.filter((r) => r.type === workerOrientationType).length === 0 && (
+                        <p className="text-sm" style={{ color: COLORS.inkDim }}>
+                          No {workerOrientationType === 'employeeOrientation' ? 'employee orientation' : 'operator training'} records on file yet.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </AdminSection>
           )}
 
