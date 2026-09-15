@@ -4016,8 +4016,8 @@ function SidebarMenu({ show, onClose, mechanic, isAdmin, isForeman, isProduction
             {item('🗺️', 'Maps', () => onNavigate('maps'))}
             {item('🛣️', 'Highway Map', () => onNavigate('highwayMap'))}
             {!(isAdmin || isForeman) && item('🦺', 'Safety', () => onNavigate('safety'))}
-            {isAdmin && item('🔢', 'Unit Numbers', () => onNavigate('admin', 'units'))}
-            {isAdmin && item('📍', 'Block Numbers', () => onNavigate('admin', 'blocks'))}
+            {isAdmin && item('🔢', 'Unit Numbers', () => onNavigate('units'))}
+            {isAdmin && item('📍', 'Block Numbers', () => onNavigate('blocks'))}
             {!isProduction && item('🎉', t('shoutouts'), () => onNavigate('shoutouts'))}
             {!isProduction && item('📋', t('checklists'), () => onNavigate('checklists'))}
             {item('⚙️', 'Settings', () => onNavigate('settings'))}
@@ -18157,18 +18157,69 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </div>
           </AdminSection>
           )}
+        </div>
 
-          {isAdmin && (
-          <AdminSection
-            icon="🔢"
-            title="Unit Numbers"
-            expanded={expandedAdmin === 'units'}
-            onToggle={() => setExpandedAdmin(expandedAdmin === 'units' ? null : 'units')}
-          >
+        {showTimesheetMigration && (
+          <DataMigrationOverlay onClose={() => setShowTimesheetMigration(false)} />
+        )}
+      </div>
+    );
+  }
+
+  // ---------- UNIT NUMBERS ---------- (moved out of the Admin accordion
+  // to its own screen, reachable straight from the ☰ menu)
+  if (screen === 'units') {
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
+        {FONT_STYLE}
+        <OfflineBanner isOnline={isOnline} />
+        <SidebarMenu
+          show={showSidebar}
+          onClose={() => setShowSidebar(false)}
+          mechanic={currentMechanic}
+          isAdmin={isAdmin}
+          isForeman={isForeman}
+          isProduction={jobTypeFor(currentMechanic) === 'production'}
+          onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
+          onCheckUpdates={async () => {
+            try {
+              const regs = await navigator.serviceWorker.getRegistrations();
+              await Promise.all(regs.map((r) => r.unregister()));
+              const keys = await caches.keys();
+              await Promise.all(keys.map((k) => caches.delete(k)));
+            } catch (e) {}
+            window.location.reload(true);
+          }}
+          onLogout={async () => {
+            const keepSession = !!localStorage.getItem('webauthn_cred_' + currentMechanic);
+            if (!keepSession && !navigator.onLine) {
+              const proceed = confirm("You're offline right now. Logging out means you won't be able to sign back in until you have signal again. Log out anyway?");
+              if (!proceed) return;
+            }
+            if (!keepSession) { await firebase.auth().signOut().catch(() => {}); }
+            setCurrentMechanic(null);
+            setScreen('login');
+          }}
+          t={t}
+        />
+        <div className="max-w-lg mx-auto">
+          <div className="flex items-center justify-between mb-6">
+            <button onClick={() => setScreen('admin')} className="font-display text-xs uppercase tracking-wider focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
+              {t('backToBoard')}
+            </button>
+            <button
+              onClick={() => setShowSidebar(true)}
+              className="text-3xl leading-none px-3 py-2 rounded-lg transition-all hover:scale-105"
+              style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+            >
+              ☰
+            </button>
+          </div>
+          <h1 className="font-display text-3xl font-bold mb-2">🔢 Unit Numbers</h1>
+          <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>
+            The same units used for work orders. Tagging a unit here is what decides who's a mechanic vs. an operator when you invite or reassign someone — untagged units still work fine for work orders, they just won't show up as pickable in Timesheets.
+          </p>
           <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-            <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>
-              The same units used for work orders. Tagging a unit here is what decides who's a mechanic vs. an operator when you invite or reassign someone — untagged units still work fine for work orders, they just won't show up as pickable in Timesheets.
-            </p>
             {units.length === 0 ? (
               <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>No units added yet.</p>
             ) : (
@@ -18301,16 +18352,61 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               <Btn variant="ghost" onClick={() => setShowAddUnit(true)}>+ Add unit</Btn>
             )}
           </div>
-          </AdminSection>
-          )}
+        </div>
+      </div>
+    );
+  }
 
-          {isAdmin && (
-          <AdminSection
-            icon="📍"
-            title="Block Numbers"
-            expanded={expandedAdmin === 'blocks'}
-            onToggle={() => setExpandedAdmin(expandedAdmin === 'blocks' ? null : 'blocks')}
-          >
+  // ---------- BLOCK NUMBERS ---------- (moved out of the Admin accordion
+  // to its own screen, reachable straight from the ☰ menu)
+  if (screen === 'blocks') {
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
+        {FONT_STYLE}
+        <OfflineBanner isOnline={isOnline} />
+        <SidebarMenu
+          show={showSidebar}
+          onClose={() => setShowSidebar(false)}
+          mechanic={currentMechanic}
+          isAdmin={isAdmin}
+          isForeman={isForeman}
+          isProduction={jobTypeFor(currentMechanic) === 'production'}
+          onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
+          onCheckUpdates={async () => {
+            try {
+              const regs = await navigator.serviceWorker.getRegistrations();
+              await Promise.all(regs.map((r) => r.unregister()));
+              const keys = await caches.keys();
+              await Promise.all(keys.map((k) => caches.delete(k)));
+            } catch (e) {}
+            window.location.reload(true);
+          }}
+          onLogout={async () => {
+            const keepSession = !!localStorage.getItem('webauthn_cred_' + currentMechanic);
+            if (!keepSession && !navigator.onLine) {
+              const proceed = confirm("You're offline right now. Logging out means you won't be able to sign back in until you have signal again. Log out anyway?");
+              if (!proceed) return;
+            }
+            if (!keepSession) { await firebase.auth().signOut().catch(() => {}); }
+            setCurrentMechanic(null);
+            setScreen('login');
+          }}
+          t={t}
+        />
+        <div className="max-w-lg mx-auto">
+          <div className="flex items-center justify-between mb-6">
+            <button onClick={() => setScreen('admin')} className="font-display text-xs uppercase tracking-wider focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
+              {t('backToBoard')}
+            </button>
+            <button
+              onClick={() => setShowSidebar(true)}
+              className="text-3xl leading-none px-3 py-2 rounded-lg transition-all hover:scale-105"
+              style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+            >
+              ☰
+            </button>
+          </div>
+          <h1 className="font-display text-3xl font-bold mb-4">📍 Block Numbers</h1>
           <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
             {blocks.length === 0 ? (
               <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>No blocks added yet.</p>
@@ -18339,13 +18435,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               <Btn variant="ghost" onClick={() => setAddingBlock(true)}>+ Add block</Btn>
             )}
           </div>
-          </AdminSection>
-          )}
         </div>
-
-        {showTimesheetMigration && (
-          <DataMigrationOverlay onClose={() => setShowTimesheetMigration(false)} />
-        )}
       </div>
     );
   }
