@@ -824,10 +824,10 @@ const STATUSES = ['Open', 'In Progress', 'Done'];
 // and incident/near-miss reports are handled elsewhere and are NOT part
 // of this open library.
 const SAFETY_CATEGORIES = ['Office Administration', 'Driver Orientation', 'Safety Manual', 'OHS Manual', 'SDS Sheets', 'Safety Meeting Minutes', 'Committee Meeting Minutes', 'SFI Booklet'];
-// Categories where a document is just something to hand a new hire a
-// paper copy of — the row only gets a Print button, no Open (view
-// in-app) or Send (share digitally), since that's not how it gets used.
-const PRINT_ONLY_SAFETY_CATEGORIES = ['Office Administration', 'Driver Orientation'];
+// These two are admin/safety-only in the document library — regular
+// employees don't need HR intake forms or the driver sign-off packet,
+// just the general safety references below.
+const ADMIN_ONLY_SAFETY_CATEGORIES = ['Office Administration', 'Driver Orientation'];
 
 // Digitized versions of Harder Contracting's two paper orientation
 // checklists (the third page of that same packet — the Office
@@ -4015,8 +4015,7 @@ function SidebarMenu({ show, onClose, mechanic, isAdmin, isForeman, isProduction
             {item('⏱️', 'Shift', () => onNavigate('shift'))}
             {item('🗺️', 'Maps', () => onNavigate('maps'))}
             {item('🛣️', 'Highway Map', () => onNavigate('highwayMap'))}
-            {item('🦺', 'Safety', () => onNavigate('safety'))}
-            {(isAdmin || isForeman) && item('⚙️', 'Admin', () => onNavigate('admin'))}
+            {!(isAdmin || isForeman) && item('🦺', 'Safety', () => onNavigate('safety'))}
             {!isProduction && item('🎉', t('shoutouts'), () => onNavigate('shoutouts'))}
             {!isProduction && item('📋', t('checklists'), () => onNavigate('checklists'))}
             {item('⚙️', 'Settings', () => onNavigate('settings'))}
@@ -9610,7 +9609,14 @@ function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete 
   );
 }
 
-function NewNearMissForm({ defaultReporter, submitting, onCancel, onSubmit }) {
+// Generic quick-report form — used both for near-miss requests (admin-
+// initiated, via the "Request Near Miss Report" flow below) and for any
+// employee reporting a regular incident on their own, unprompted. Same
+// shape either way: what happened, where, when, who's reporting it —
+// the deep WCB-style investigation form (NewIncidentReportForm) is for
+// admin/safety to fill in afterward, not something a reporting employee
+// should have to wade through.
+function NewNearMissForm({ defaultReporter, submitting, onCancel, onSubmit, title, subtitle, submitLabel }) {
   const inputStyle = { background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
   const [dateOfOccurrence, setDateOfOccurrence] = useState(() => new Date().toISOString().slice(0, 10));
   const [timeOfOccurrence, setTimeOfOccurrence] = useState('');
@@ -9625,8 +9631,8 @@ function NewNearMissForm({ defaultReporter, submitting, onCancel, onSubmit }) {
 
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-      <p className="font-display text-lg font-bold mb-1">Near Miss Report</p>
-      <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>A quick report — no fault, just what almost happened, so it can get fixed before it does.</p>
+      <p className="font-display text-lg font-bold mb-1">{title || 'Near Miss Report'}</p>
+      <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>{subtitle || 'A quick report — no fault, just what almost happened, so it can get fixed before it does.'}</p>
 
       <div className="grid grid-cols-2 gap-2 mb-2">
         <div>
@@ -9661,7 +9667,7 @@ function NewNearMissForm({ defaultReporter, submitting, onCancel, onSubmit }) {
           })}
           disabled={!canSubmit}
         >
-          {submitting ? 'Submitting…' : 'Submit Near Miss Report'}
+          {submitting ? 'Submitting…' : (submitLabel || 'Submit Near Miss Report')}
         </Btn>
         <Btn variant="ghost" onClick={onCancel} disabled={submitting}>Cancel</Btn>
       </div>
@@ -9942,7 +9948,7 @@ function RoleSelect({ value, onChange }) {
   );
 }
 
-function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onSetStatus, onAction, onDelete, onCreateSignLink, onBack }) {
+function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onSetStatus, onFollowUp, onAction, onDelete, onCreateSignLink, onBack }) {
   const [addingSignature, setAddingSignature] = useState(false);
   const [signerName, setSignerName] = useState('');
   const [signerRole, setSignerRole] = useState('');
@@ -9952,6 +9958,7 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
   const [linkSignerName, setLinkSignerName] = useState('');
   const [linkSignerRole, setLinkSignerRole] = useState('');
   const [creatingLink, setCreatingLink] = useState(false);
+  const [followUpNotes, setFollowUpNotes] = useState(record.followUpNotes || '');
 
   const field = (label, value) => {
     if (!value) return null;
@@ -10154,10 +10161,24 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
         )}
       </div>
 
+      {isAdmin && record.status !== 'closed' && (
+        <div className="mt-4 pt-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+          <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Follow-up Notes</p>
+          <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>For anything minor that doesn't need a full investigation — a line on what was done, then close it out.</p>
+          <textarea
+            placeholder="What was done about it?"
+            value={followUpNotes}
+            onChange={(e) => setFollowUpNotes(e.target.value)}
+            rows={2}
+            className="w-full mb-2 px-3 py-2 rounded-lg text-sm"
+            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+        </div>
+      )}
       {isAdmin && (
-        <div className="flex items-center justify-between mt-4 pt-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+        <div className="flex items-center justify-between mt-2 pt-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
           <button
-            onClick={() => onSetStatus(record.id, record.status === 'closed' ? 'open' : 'closed')}
+            onClick={() => onFollowUp(record.id, followUpNotes.trim(), record.status === 'closed' ? 'open' : 'closed')}
             className="text-xs font-semibold px-3 py-2 rounded-lg"
             style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
           >
@@ -10170,6 +10191,13 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
           >
             🗑️ Delete Record
           </button>
+        </div>
+      )}
+      {record.followUpNotes && (
+        <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+          <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Follow-up</p>
+          <p className="text-sm whitespace-pre-wrap">{record.followUpNotes}</p>
+          <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>{record.followUpBy}{record.followUpAt ? ` · ${new Date(record.followUpAt).toLocaleString()}` : ''}</p>
         </div>
       )}
     </div>
@@ -11286,6 +11314,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [fillingNearMissRequestId, setFillingNearMissRequestId] = useState(undefined); // undefined = not open; null = open but no specific request tied to it; else the request's id
   const [submittingNearMiss, setSubmittingNearMiss] = useState(false);
   const [newIncidentReportOpen, setNewIncidentReportOpen] = useState(false);
+  const [reportingQuickIncident, setReportingQuickIncident] = useState(false); // employee-facing "Report an Incident" quick form
+  const [submittingQuickIncident, setSubmittingQuickIncident] = useState(false);
   const [viewingIncidentReportId, setViewingIncidentReportId] = useState(null);
   const [submittingIncidentReport, setSubmittingIncidentReport] = useState(false);
   const [incidentReportActionBusy, setIncidentReportActionBusy] = useState(null);
@@ -13558,6 +13588,22 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     cacheSet('incidentReports', next);
     await queueWrite('incidentReports', { kind: 'save', entry: updated });
   };
+  // Closes out (or reopens) a report while recording who followed up and
+  // what was done — the lightweight path for a small incident that
+  // doesn't need the full investigation form filled in, just a note on
+  // what was actually done about it.
+  const followUpIncidentReport = async (recordId, notes, status) => {
+    const record = incidentReports.find((r) => r.id === recordId);
+    if (!record) return;
+    const updated = {
+      ...record, status,
+      ...(notes ? { followUpNotes: notes, followUpBy: currentMechanic, followUpAt: Date.now() } : {}),
+    };
+    const next = incidentReports.map((r) => (r.id === recordId ? updated : r));
+    setIncidentReports(next);
+    cacheSet('incidentReports', next);
+    await queueWrite('incidentReports', { kind: 'save', entry: updated });
+  };
   const deleteIncidentReport = async (recordId) => {
     const next = incidentReports.filter((r) => r.id !== recordId);
     setIncidentReports(next);
@@ -15715,6 +15761,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             <div>
               <p className="font-display text-xs uppercase mb-2" style={{ color: COLORS.accent, letterSpacing: '0.3em' }}>Harder Contracting</p>
               <h1 className="font-display text-3xl sm:text-4xl font-bold">{t('board')}</h1>
+              {(isAdmin || isForeman) && (
+                <button
+                  onClick={() => setScreen('admin')}
+                  className="font-display text-xs uppercase tracking-wider mt-2 focus:outline-none hover:opacity-70 transition-opacity"
+                  style={{ color: COLORS.inkDim }}
+                >
+                  Admin →
+                </button>
+              )}
             </div>
             <button
               onClick={() => setShowSidebar(true)}
@@ -17159,7 +17214,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </button>
           )}
 
-          {isAdmin && (
+          {(isAdmin || isSafety) && (
           <button
             onClick={() => setScreen('safety')}
             className="w-full flex items-center justify-between rounded-lg px-4 py-3.5 mb-3 font-display font-semibold text-sm uppercase tracking-wide"
@@ -19347,7 +19402,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             return null;
           })()}
 
-          {SAFETY_CATEGORIES.map((category) => {
+          {SAFETY_CATEGORIES.filter((category) => (isAdmin || isSafety) || !ADMIN_ONLY_SAFETY_CATEGORIES.includes(category)).map((category) => {
             const docs = safetyDocs.filter((d) => d.category === category);
             return (
               <AdminSection
@@ -19361,59 +19416,48 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>No documents yet.</p>
                 ) : (
                   <div className="space-y-2 mb-3">
-                    {docs.map((doc) => {
-                      const printOnly = PRINT_ONLY_SAFETY_CATEGORIES.includes(category);
-                      return (
-                        <div key={doc.id} className="flex items-center justify-between gap-3 rounded-lg px-3 py-3" style={{ background: COLORS.surfaceRaised }}>
-                          {printOnly ? (
-                            <span className="flex items-center gap-2 min-w-0 flex-1" style={{ color: COLORS.ink }}>
-                              <span style={{ fontSize: '1.1rem' }}>📄</span>
-                              <span className="text-sm font-semibold truncate">{doc.title}</span>
-                            </span>
-                          ) : (
-                            <button
-                              onClick={() => openSafetyDoc(doc)}
-                              disabled={openingSafetyDocId === doc.id}
-                              className="flex items-center gap-2 min-w-0 flex-1 text-left"
-                              style={{ color: COLORS.ink }}
-                            >
-                              <span style={{ fontSize: '1.1rem' }}>📄</span>
-                              <span className="text-sm font-semibold truncate">
-                                {openingSafetyDocId === doc.id ? 'Opening…' : doc.title}
-                              </span>
-                            </button>
-                          )}
+                    {docs.map((doc) => (
+                      <div key={doc.id} className="flex items-center justify-between gap-3 rounded-lg px-3 py-3" style={{ background: COLORS.surfaceRaised }}>
+                        <button
+                          onClick={() => openSafetyDoc(doc)}
+                          disabled={openingSafetyDocId === doc.id}
+                          className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                          style={{ color: COLORS.ink }}
+                        >
+                          <span style={{ fontSize: '1.1rem' }}>📄</span>
+                          <span className="text-sm font-semibold truncate">
+                            {openingSafetyDocId === doc.id ? 'Opening…' : doc.title}
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => handleSafetyDocAction(doc, 'print')}
+                          disabled={safetyDocActionBusy === doc.id}
+                          className="text-sm flex-shrink-0"
+                          style={{ color: COLORS.inkDim }}
+                          title="Print"
+                        >
+                          🖨️
+                        </button>
+                        <button
+                          onClick={() => handleSafetyDocAction(doc, 'send')}
+                          disabled={safetyDocActionBusy === doc.id}
+                          className="text-sm flex-shrink-0"
+                          style={{ color: COLORS.inkDim }}
+                          title="Send"
+                        >
+                          📤
+                        </button>
+                        {(isAdmin || isSafety) && (
                           <button
-                            onClick={() => handleSafetyDocAction(doc, 'print')}
-                            disabled={safetyDocActionBusy === doc.id}
-                            className="text-sm flex-shrink-0"
-                            style={{ color: COLORS.inkDim }}
-                            title="Print"
+                            onClick={() => { if (confirm(`Remove "${doc.title}"?`)) deleteSafetyDoc(doc.id); }}
+                            className="text-xs flex-shrink-0"
+                            style={{ color: '#E07A5F' }}
                           >
-                            🖨️
-                          </button>
-                          {!printOnly && (
-                            <button
-                              onClick={() => handleSafetyDocAction(doc, 'send')}
-                              disabled={safetyDocActionBusy === doc.id}
-                              className="text-sm flex-shrink-0"
-                              style={{ color: COLORS.inkDim }}
-                              title="Send"
-                            >
-                              📤
-                            </button>
-                          )}
-                          {(isAdmin || isSafety) && (
-                            <button
-                              onClick={() => { if (confirm(`Remove "${doc.title}"?`)) deleteSafetyDoc(doc.id); }}
-                              className="text-xs flex-shrink-0"
-                              style={{ color: '#E07A5F' }}
-                            >
                             🗑️
                           </button>
                         )}
                       </div>
-                    );})}
+                    ))}
                   </div>
                 )}
 
@@ -20620,120 +20664,172 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </AdminSection>
           )}
 
-          {(isAdmin || isSafety) && (
-            <AdminSection
-              icon="🚨"
-              title="Incident Reporting"
-              expanded={incidentReportingExpanded}
-              onToggle={() => setIncidentReportingExpanded((x) => !x)}
-            >
-              {viewingIncidentReportId ? (
-                <IncidentReportDetail
-                  record={incidentReports.find((r) => r.id === viewingIncidentReportId)}
-                  isAdmin={isAdmin || isSafety}
-                  actionBusy={incidentReportActionBusy}
-                  onBack={() => setViewingIncidentReportId(null)}
-                  onAddSignature={addIncidentReportSignature}
-                  onSetStatus={setIncidentReportStatus}
-                  onAction={handleIncidentReportAction}
-                  onCreateSignLink={createIncidentSignRequest}
-                  onDelete={async () => { await deleteIncidentReport(viewingIncidentReportId); setViewingIncidentReportId(null); }}
-                />
-              ) : newIncidentReportOpen ? (
-                <NewIncidentReportForm
+          <AdminSection
+            icon="🚨"
+            title="Incident Reporting"
+            expanded={incidentReportingExpanded}
+            onToggle={() => setIncidentReportingExpanded((x) => !x)}
+          >
+            {!(isAdmin || isSafety) ? (
+              // Regular employees: just a quick "what happened" form and a
+              // read-only list of their own past reports — no investigation
+              // fields, no other employees' reports, nothing to manage.
+              reportingQuickIncident ? (
+                <NewNearMissForm
+                  title="Report an Incident"
+                  subtitle="A quick report of what happened — the safety coordinator will follow up from here."
+                  submitLabel="Submit Report"
                   defaultReporter={currentMechanic}
-                  submitting={submittingIncidentReport}
-                  onCancel={() => setNewIncidentReportOpen(false)}
+                  submitting={submittingQuickIncident}
+                  onCancel={() => setReportingQuickIncident(false)}
                   onSubmit={async (record) => {
-                    setSubmittingIncidentReport(true);
-                    const saved = await submitIncidentReport(record);
-                    setSubmittingIncidentReport(false);
-                    setNewIncidentReportOpen(false);
-                    setViewingIncidentReportId(saved.id);
+                    setSubmittingQuickIncident(true);
+                    await submitIncidentReport({ formType: 'quick', ...record });
+                    setSubmittingQuickIncident(false);
+                    setReportingQuickIncident(false);
                   }}
                 />
               ) : (
                 <div>
-                  <div className="flex gap-2 mb-2">
-                    <button
-                      onClick={() => setNewIncidentReportOpen(true)}
-                      className="text-xs font-semibold px-3 py-2 rounded-lg"
-                      style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-                    >
-                      + New Report
-                    </button>
-                    <button
-                      onClick={() => setShowRequestNearMiss(true)}
-                      className="text-xs font-semibold px-3 py-2 rounded-lg"
-                      style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-                    >
-                      📨 Request Near Miss Report
-                    </button>
-                  </div>
-
-                  {showRequestNearMiss && (
-                    <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
-                      <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>They'll see a prompt to fill out a quick Near Miss report next time they open Safety — no need for them to have Incident Reporting access.</p>
-                      <select
-                        value={requestNearMissTarget}
-                        onChange={(e) => setRequestNearMissTarget(e.target.value)}
-                        className="w-full mb-2 px-3 py-2 rounded-lg text-sm"
-                        style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
-                      >
-                        <option value="">Select a person…</option>
-                        {mechanics.map((m) => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                      <div className="flex gap-2">
-                        <Btn
-                          disabled={!requestNearMissTarget || sendingNearMissRequest}
-                          onClick={async () => {
-                            setSendingNearMissRequest(true);
-                            await sendNearMissRequest(requestNearMissTarget);
-                            setSendingNearMissRequest(false);
-                            setShowRequestNearMiss(false);
-                            setRequestNearMissTarget('');
-                          }}
-                        >
-                          {sendingNearMissRequest ? 'Sending…' : 'Send Request'}
-                        </Btn>
-                        <Btn variant="ghost" disabled={sendingNearMissRequest} onClick={() => { setShowRequestNearMiss(false); setRequestNearMissTarget(''); }}>Cancel</Btn>
-                      </div>
-                    </div>
-                  )}
-
+                  <button
+                    onClick={() => setReportingQuickIncident(true)}
+                    className="text-xs font-semibold px-3 py-2 rounded-lg mb-4"
+                    style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                  >
+                    🚨 Report an Incident
+                  </button>
                   <div className="space-y-2">
                     {incidentReports
+                      .filter((r) => r.createdBy === currentMechanic)
                       .sort((a, b) => (b.dateOfOccurrence || '').localeCompare(a.dateOfOccurrence || ''))
-                      .map((r) => {
-                        const sig = incidentSignersStatus(r);
-                        return (
-                          <button
-                            key={r.id}
-                            onClick={() => setViewingIncidentReportId(r.id)}
-                            className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
-                            style={{ background: COLORS.surfaceRaised }}
-                          >
-                            <span className="text-sm">{r.dateOfOccurrence} · {r.exactLocation} · {(r.incidentTypes || []).join(', ')}</span>
-                            <span className="flex items-center gap-2 flex-shrink-0 ml-2">
-                              <span className="text-xs font-bold" style={{ color: sig.complete ? COLORS.accent : COLORS.inkDim }}>
-                                {sig.complete ? '✅' : `${sig.signedCount}/${sig.total} signed`}
-                              </span>
-                              <span className="text-xs font-bold" style={{ color: r.status === 'closed' ? COLORS.accent : '#E07A5F' }}>
-                                {r.status === 'closed' ? 'Closed' : 'Open'}
-                              </span>
-                            </span>
-                          </button>
-                        );
-                      })}
+                      .map((r) => (
+                        <div key={r.id} className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3" style={{ background: COLORS.surfaceRaised }}>
+                          <span className="text-sm">{r.dateOfOccurrence} · {r.exactLocation}</span>
+                          <span className="text-xs font-bold" style={{ color: r.status === 'closed' ? COLORS.accent : COLORS.inkDim }}>
+                            {r.status === 'closed' ? 'Followed up' : 'Submitted'}
+                          </span>
+                        </div>
+                      ))}
                   </div>
-
-                  {incidentReports.length === 0 && (
-                    <p className="text-sm" style={{ color: COLORS.inkDim }}>No reports on file yet.</p>
+                  {incidentReports.filter((r) => r.createdBy === currentMechanic).length === 0 && (
+                    <p className="text-sm" style={{ color: COLORS.inkDim }}>You haven't reported anything.</p>
                   )}
                 </div>
-              )}
-            </AdminSection>
-          )}
+              )
+            ) : viewingIncidentReportId ? (
+              <IncidentReportDetail
+                record={incidentReports.find((r) => r.id === viewingIncidentReportId)}
+                isAdmin={isAdmin || isSafety}
+                actionBusy={incidentReportActionBusy}
+                onBack={() => setViewingIncidentReportId(null)}
+                onAddSignature={addIncidentReportSignature}
+                onSetStatus={setIncidentReportStatus}
+                onFollowUp={followUpIncidentReport}
+                onAction={handleIncidentReportAction}
+                onCreateSignLink={createIncidentSignRequest}
+                onDelete={async () => { await deleteIncidentReport(viewingIncidentReportId); setViewingIncidentReportId(null); }}
+              />
+            ) : newIncidentReportOpen ? (
+              <NewIncidentReportForm
+                defaultReporter={currentMechanic}
+                submitting={submittingIncidentReport}
+                onCancel={() => setNewIncidentReportOpen(false)}
+                onSubmit={async (record) => {
+                  setSubmittingIncidentReport(true);
+                  const saved = await submitIncidentReport(record);
+                  setSubmittingIncidentReport(false);
+                  setNewIncidentReportOpen(false);
+                  setViewingIncidentReportId(saved.id);
+                }}
+              />
+            ) : (
+              <div>
+                <div className="flex gap-2 mb-2 flex-wrap">
+                  <button
+                    onClick={() => setNewIncidentReportOpen(true)}
+                    className="text-xs font-semibold px-3 py-2 rounded-lg"
+                    style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                  >
+                    + Full Investigation Report
+                  </button>
+                  <button
+                    onClick={() => setShowRequestNearMiss(true)}
+                    className="text-xs font-semibold px-3 py-2 rounded-lg"
+                    style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                  >
+                    📨 Request Near Miss Report
+                  </button>
+                </div>
+
+                {showRequestNearMiss && (
+                  <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+                    <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>They'll see a prompt to fill out a quick Near Miss report next time they open Safety — no need for them to have Incident Reporting access.</p>
+                    <select
+                      value={requestNearMissTarget}
+                      onChange={(e) => setRequestNearMissTarget(e.target.value)}
+                      className="w-full mb-2 px-3 py-2 rounded-lg text-sm"
+                      style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                    >
+                      <option value="">Select a person…</option>
+                      {mechanics.map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                    <div className="flex gap-2">
+                      <Btn
+                        disabled={!requestNearMissTarget || sendingNearMissRequest}
+                        onClick={async () => {
+                          setSendingNearMissRequest(true);
+                          await sendNearMissRequest(requestNearMissTarget);
+                          setSendingNearMissRequest(false);
+                          setShowRequestNearMiss(false);
+                          setRequestNearMissTarget('');
+                        }}
+                      >
+                        {sendingNearMissRequest ? 'Sending…' : 'Send Request'}
+                      </Btn>
+                      <Btn variant="ghost" disabled={sendingNearMissRequest} onClick={() => { setShowRequestNearMiss(false); setRequestNearMissTarget(''); }}>Cancel</Btn>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {incidentReports
+                    .sort((a, b) => (b.dateOfOccurrence || '').localeCompare(a.dateOfOccurrence || ''))
+                    .map((r) => {
+                      const sig = incidentSignersStatus(r);
+                      // Employee-submitted (quick or near-miss) and still open —
+                      // hasn't been triaged into a full investigation or closed
+                      // out yet, so it needs the safety coordinator's eyes on it.
+                      const needsAttention = (r.formType === 'quick' || r.formType === 'nearMiss') && r.status !== 'closed';
+                      return (
+                        <button
+                          key={r.id}
+                          onClick={() => setViewingIncidentReportId(r.id)}
+                          className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                          style={needsAttention ? { background: '#E07A5F22', border: '1px solid #E07A5F' } : { background: COLORS.surfaceRaised }}
+                        >
+                          <span className="text-sm">
+                            {needsAttention && <span style={{ marginRight: 6 }}>⚠️</span>}
+                            {r.dateOfOccurrence} · {r.exactLocation} · {(r.incidentTypes || []).join(', ')}
+                          </span>
+                          <span className="flex items-center gap-2 flex-shrink-0 ml-2">
+                            <span className="text-xs font-bold" style={{ color: sig.complete ? COLORS.accent : COLORS.inkDim }}>
+                              {sig.complete ? '✅' : `${sig.signedCount}/${sig.total} signed`}
+                            </span>
+                            <span className="text-xs font-bold" style={{ color: needsAttention ? '#E07A5F' : r.status === 'closed' ? COLORS.accent : COLORS.inkDim }}>
+                              {needsAttention ? '⚠️ Needs attention' : r.status === 'closed' ? 'Closed' : 'Open'}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                </div>
+
+                {incidentReports.length === 0 && (
+                  <p className="text-sm" style={{ color: COLORS.inkDim }}>No reports on file yet.</p>
+                )}
+              </div>
+            )}
+          </AdminSection>
         </div>
       </div>
     );
