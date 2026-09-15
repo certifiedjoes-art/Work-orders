@@ -823,11 +823,17 @@ const STATUSES = ['Open', 'In Progress', 'Done'];
 // included) can view every one of these — monthly equipment inspections
 // and incident/near-miss reports are handled elsewhere and are NOT part
 // of this open library.
-const SAFETY_CATEGORIES = ['Office Administration', 'Driver Orientation', 'Safety Manual', 'OHS Manual', 'SDS Sheets', 'Safety Meeting Minutes', 'Committee Meeting Minutes', 'SFI Booklet'];
+const SAFETY_CATEGORIES = ['Office Administration', 'Driver Orientation', 'Safety Manual', 'OHS Manual', 'SDS Sheets', 'Safety Meeting Minutes', 'Committee Meeting Minutes', 'SFI Training'];
 // These two are admin/safety-only in the document library — regular
 // employees don't need HR intake forms or the driver sign-off packet,
 // just the general safety references below.
 const ADMIN_ONLY_SAFETY_CATEGORIES = ['Office Administration', 'Driver Orientation'];
+// A category can also just point at an outside course instead of (or
+// alongside) uploaded documents — shown as a link-out button at the top
+// of that category's section.
+const EXTERNAL_SAFETY_LINKS = {
+  'SFI Training': { label: 'Open SFI Training Course', url: 'https://coolenforestry.floralms.com/content/421/info/VANDERWELL_WOODLANDS_ORIENTATION_%28Layout%29' },
+};
 
 // Digitized versions of Harder Contracting's two paper orientation
 // checklists (the third page of that same packet — the Office
@@ -19564,6 +19570,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 expanded={expandedSafetyCategory === category}
                 onToggle={() => setExpandedSafetyCategory((c) => (c === category ? null : category))}
               >
+                {EXTERNAL_SAFETY_LINKS[category] && (
+                  <a
+                    href={EXTERNAL_SAFETY_LINKS[category].url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 mb-3"
+                    style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}`, textDecoration: 'none' }}
+                  >
+                    <span className="text-sm font-semibold">🔗 {EXTERNAL_SAFETY_LINKS[category].label}</span>
+                    <span>→</span>
+                  </a>
+                )}
                 {docs.length === 0 ? (
                   <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>No documents yet.</p>
                 ) : (
