@@ -17061,13 +17061,53 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} />
+        <SidebarMenu
+          show={showSidebar}
+          onClose={() => setShowSidebar(false)}
+          mechanic={currentMechanic}
+          isAdmin={isAdmin}
+          isForeman={isForeman}
+          isProduction={jobTypeFor(currentMechanic) === 'production'}
+          onNavigate={(s) => setScreen(s)}
+          onCheckUpdates={async () => {
+            try {
+              const regs = await navigator.serviceWorker.getRegistrations();
+              await Promise.all(regs.map((r) => r.unregister()));
+              const keys = await caches.keys();
+              await Promise.all(keys.map((k) => caches.delete(k)));
+            } catch (e) {
+              // ignore — reload will still fetch fresh from network
+            }
+            window.location.reload(true);
+          }}
+          onLogout={async () => {
+            const keepSession = !!localStorage.getItem('webauthn_cred_' + currentMechanic);
+            if (!keepSession && !navigator.onLine) {
+              const proceed = confirm("You're offline right now. Logging out means you won't be able to sign back in until you have signal again. Log out anyway?");
+              if (!proceed) return;
+            }
+            if (!keepSession) { await firebase.auth().signOut().catch(() => {}); }
+            setCurrentMechanic(null);
+            setScreen('login');
+          }}
+          t={t}
+        />
         <div className="max-w-3xl mx-auto">
           {!isAdmin && (
             <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
               {t('backToBoard')}
             </button>
           )}
-          <h1 className="font-display text-3xl font-bold mb-2">Admin</h1>
+          <div className="flex items-center justify-between mb-2">
+            <h1 className="font-display text-3xl font-bold">Admin</h1>
+            <button
+              onClick={() => setShowSidebar(true)}
+              className="text-3xl leading-none px-3 py-2 rounded-lg transition-all hover:scale-105"
+              style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+            >
+              ☰
+            </button>
+          </div>
 
           {(isAdmin || isSafety) && (
             <TrainingMatrixAlertBanner
