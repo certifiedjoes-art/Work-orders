@@ -823,7 +823,11 @@ const STATUSES = ['Open', 'In Progress', 'Done'];
 // included) can view every one of these — monthly equipment inspections
 // and incident/near-miss reports are handled elsewhere and are NOT part
 // of this open library.
-const SAFETY_CATEGORIES = ['Safety Manual', 'OHS Manual', 'SDS Sheets', 'Safety Meeting Minutes', 'Committee Meeting Minutes', 'SFI Booklet'];
+const SAFETY_CATEGORIES = ['Employee Safety Orientation', 'Driver Orientation', 'Safety Manual', 'OHS Manual', 'SDS Sheets', 'Safety Meeting Minutes', 'Committee Meeting Minutes', 'SFI Booklet'];
+// Categories where a document is just something to hand a new hire a
+// paper copy of — the row only gets a Print button, no Open (view
+// in-app) or Send (share digitally), since that's not how it gets used.
+const PRINT_ONLY_SAFETY_CATEGORIES = ['Employee Safety Orientation', 'Driver Orientation'];
 
 // Job-specific hazard data digitized from Harder Contracting's Job Hazard
 // Analysis manual (task inventory + critical task flags per occupation).
@@ -18951,48 +18955,59 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>No documents yet.</p>
                 ) : (
                   <div className="space-y-2 mb-3">
-                    {docs.map((doc) => (
-                      <div key={doc.id} className="flex items-center justify-between gap-3 rounded-lg px-3 py-3" style={{ background: COLORS.surfaceRaised }}>
-                        <button
-                          onClick={() => openSafetyDoc(doc)}
-                          disabled={openingSafetyDocId === doc.id}
-                          className="flex items-center gap-2 min-w-0 flex-1 text-left"
-                          style={{ color: COLORS.ink }}
-                        >
-                          <span style={{ fontSize: '1.1rem' }}>📄</span>
-                          <span className="text-sm font-semibold truncate">
-                            {openingSafetyDocId === doc.id ? 'Opening…' : doc.title}
-                          </span>
-                        </button>
-                        <button
-                          onClick={() => handleSafetyDocAction(doc, 'print')}
-                          disabled={safetyDocActionBusy === doc.id}
-                          className="text-sm flex-shrink-0"
-                          style={{ color: COLORS.inkDim }}
-                          title="Print"
-                        >
-                          🖨️
-                        </button>
-                        <button
-                          onClick={() => handleSafetyDocAction(doc, 'send')}
-                          disabled={safetyDocActionBusy === doc.id}
-                          className="text-sm flex-shrink-0"
-                          style={{ color: COLORS.inkDim }}
-                          title="Send"
-                        >
-                          📤
-                        </button>
-                        {(isAdmin || isSafety) && (
+                    {docs.map((doc) => {
+                      const printOnly = PRINT_ONLY_SAFETY_CATEGORIES.includes(category);
+                      return (
+                        <div key={doc.id} className="flex items-center justify-between gap-3 rounded-lg px-3 py-3" style={{ background: COLORS.surfaceRaised }}>
+                          {printOnly ? (
+                            <span className="flex items-center gap-2 min-w-0 flex-1" style={{ color: COLORS.ink }}>
+                              <span style={{ fontSize: '1.1rem' }}>📄</span>
+                              <span className="text-sm font-semibold truncate">{doc.title}</span>
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => openSafetyDoc(doc)}
+                              disabled={openingSafetyDocId === doc.id}
+                              className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                              style={{ color: COLORS.ink }}
+                            >
+                              <span style={{ fontSize: '1.1rem' }}>📄</span>
+                              <span className="text-sm font-semibold truncate">
+                                {openingSafetyDocId === doc.id ? 'Opening…' : doc.title}
+                              </span>
+                            </button>
+                          )}
                           <button
-                            onClick={() => { if (confirm(`Remove "${doc.title}"?`)) deleteSafetyDoc(doc.id); }}
-                            className="text-xs flex-shrink-0"
-                            style={{ color: '#E07A5F' }}
+                            onClick={() => handleSafetyDocAction(doc, 'print')}
+                            disabled={safetyDocActionBusy === doc.id}
+                            className="text-sm flex-shrink-0"
+                            style={{ color: COLORS.inkDim }}
+                            title="Print"
                           >
+                            🖨️
+                          </button>
+                          {!printOnly && (
+                            <button
+                              onClick={() => handleSafetyDocAction(doc, 'send')}
+                              disabled={safetyDocActionBusy === doc.id}
+                              className="text-sm flex-shrink-0"
+                              style={{ color: COLORS.inkDim }}
+                              title="Send"
+                            >
+                              📤
+                            </button>
+                          )}
+                          {(isAdmin || isSafety) && (
+                            <button
+                              onClick={() => { if (confirm(`Remove "${doc.title}"?`)) deleteSafetyDoc(doc.id); }}
+                              className="text-xs flex-shrink-0"
+                              style={{ color: '#E07A5F' }}
+                            >
                             🗑️
                           </button>
                         )}
                       </div>
-                    ))}
+                    );})}
                   </div>
                 )}
 
