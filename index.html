@@ -5015,7 +5015,42 @@ const EQUIPMENT_INSPECTION_ITEMS = [
   'Observe machine is operating safely',
   'Check for spill kit/spill bag',
 ];
-// Safety document library — the safety manual, OHS manual, SDS sheets,
+// Custom display order for inspection checklists — lets the safety
+// coordinator long-press and drag items into whatever order makes sense
+// on the ground, without touching what each item actually IS. Only the
+// DISPLAY order changes; a reordered item keeps its original canonical
+// index (its position in VEHICLE_INSPECTION_ITEMS / EQUIPMENT_INSPECTION_
+// ITEMS / a YARD_INSPECTION_SECTIONS section) forever, and that canonical
+// index is what an inspection record's answer gets keyed by — so
+// reordering the checklist never breaks how an already-submitted
+// inspection reads back, and adding a brand new item later is safe too
+// (it just lands at the end of the display order until someone drags it
+// somewhere else).
+const identityOrder = (n) => Array.from({ length: n }, (_, i) => i);
+function effectiveItemOrder(savedOrder, itemCount) {
+  const valid = (savedOrder || []).filter((i) => Number.isInteger(i) && i >= 0 && i < itemCount);
+  const seen = new Set(valid);
+  const missing = identityOrder(itemCount).filter((i) => !seen.has(i));
+  return [...valid, ...missing];
+}
+// All three checklists' custom orders live under one Firebase node:
+// { vehicle: [canonical indices...], equipment: [...], yard: { 0: [...], 1: [...], ... } }
+// (yard is keyed by section index, since its items are grouped by section
+// and reordering only happens within a section, not across them).
+async function saveInspectionItemOrder(type, order) {
+  await firebase.database().ref('inspectionChecklistOrder/' + type).set(order);
+}
+async function saveYardInspectionItemOrder(sectionIdx, order) {
+  await firebase.database().ref('inspectionChecklistOrder/yard/' + sectionIdx).set(order);
+}
+// Whether a submitted inspection record has anything flagged Req. Att. /
+// Not OK — used to highlight that record, and the unit/site "folder" it
+// lives under, in orange so it's impossible to miss in the list.
+function inspectionRecordNeedsAttention(record) {
+  if (!record || !record.items) return false;
+  return Object.values(record.items).some((v) => v && (v.status === 'reqAtt' || v.status === 'notOk'));
+}
+
 // and safety/committee meeting minutes, organized by category. Visible to
 // everyone (crew included); adding or removing entries is gated to admins
 // in the UI. Files themselves live in Firebase Storage under safetyDocs/,
@@ -7971,7 +8006,10 @@ function ScanDocumentForm({ scanning, onCancel, onSubmit }) {
 // OK / Req. Att. columns as two toggle buttons. A note box only appears
 // once "Req. Att." is picked, same as how the paper form leaves that space
 // blank until something's actually flagged.
-function InspectionItemRow({ label, value, onChange, readOnly }) {
+// allowNA adds a third "N/A" button (used by Equipment inspections;
+// Yard keeps the original two-way OK / Req. Att. shape the paper form
+// used, so it stays false there).
+function InspectionItemRow({ label, value, onChange, readOnly, allowNA }) {
   const status = value && value.status;
   const note = (value && value.note) || '';
   if (readOnly) {
@@ -7983,9 +8021,11 @@ function InspectionItemRow({ label, value, onChange, readOnly }) {
             className="text-xs font-bold px-2 py-1 rounded flex-shrink-0"
             style={status === 'reqAtt'
               ? { background: '#E07A5F33', color: '#E07A5F' }
+              : status === 'na'
+              ? { background: COLORS.inkDim + '33', color: COLORS.inkDim }
               : { background: COLORS.accent + '33', color: COLORS.accent }}
           >
-            {status === 'reqAtt' ? 'Req. Att.' : status === 'ok' ? 'OK' : '—'}
+            {status === 'reqAtt' ? 'Req. Att.' : status === 'na' ? 'N/A' : status === 'ok' ? 'OK' : '—'}
           </span>
         </div>
         {status === 'reqAtt' && note && (
@@ -8007,6 +8047,16 @@ function InspectionItemRow({ label, value, onChange, readOnly }) {
           >
             OK
           </button>
+          {allowNA && (
+            <button
+              type="button"
+              onClick={() => onChange({ status: 'na', note: '' })}
+              className="text-xs font-bold px-2 py-1 rounded"
+              style={status === 'na' ? { background: COLORS.inkDim, color: COLORS.bg } : { background: COLORS.surface, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
+            >
+              N/A
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onChange({ status: 'reqAtt', note })}
@@ -8031,11 +8081,169 @@ function InspectionItemRow({ label, value, onChange, readOnly }) {
   );
 }
 
-// New Yard Inspection form — the digitized version of the paper "Work Site
+// Generic long-press-to-drag reorder list — used by the "Organize"
+// checklist screens below. Press and hold ~450ms on a row (without
+// moving, or it's read as the start of a scroll instead) to pick it up,
+// then drag up/down; the list reorders live underneath your finger, iOS-
+// Reminders-style. Lifts a finger/mouse-up to drop, which is also when
+// onReorder(newKeyOrder) fires — nothing is saved until you actually
+// drop it somewhere. Works with both touch (phone) and mouse (desktop),
+// since this runs on whatever device is signed in as admin/safety.
+function LongPressReorderList({ entries, onReorder, renderItem, disabled }) {
+  const [order, setOrder] = useState(() => entries.map((e) => e.key));
+  const [draggingKey, setDraggingKey] = useState(null);
+  const rowRefs = useRef({});
+  const longPressTimer = useRef(null);
+  const startY = useRef(0);
+  const movedBeforePress = useRef(false);
+
+  useEffect(() => {
+    if (!draggingKey) setOrder(entries.map((e) => e.key));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries]);
+
+  const entryMap = {};
+  entries.forEach((e) => { entryMap[e.key] = e; });
+  const orderedEntries = order.map((k) => entryMap[k]).filter(Boolean);
+
+  const clearTimer = () => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; } };
+
+  const handleDown = (key, clientY) => {
+    if (disabled) return;
+    movedBeforePress.current = false;
+    startY.current = clientY;
+    clearTimer();
+    longPressTimer.current = setTimeout(() => {
+      if (!movedBeforePress.current) setDraggingKey(key);
+    }, 450);
+  };
+  const handleMove = (clientY, evt) => {
+    if (disabled) return;
+    if (!draggingKey) {
+      if (Math.abs(clientY - startY.current) > 10) { movedBeforePress.current = true; clearTimer(); }
+      return;
+    }
+    if (evt && evt.cancelable) evt.preventDefault(); // stop page scroll while actively dragging
+    const currentIndex = order.indexOf(draggingKey);
+    let targetIndex = currentIndex;
+    order.forEach((k, i) => {
+      const el = rowRefs.current[k];
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (clientY > rect.top + rect.height / 2) targetIndex = i;
+    });
+    if (targetIndex !== currentIndex) {
+      setOrder((prev) => {
+        const next = [...prev];
+        const [moved] = next.splice(currentIndex, 1);
+        next.splice(targetIndex, 0, moved);
+        return next;
+      });
+    }
+  };
+  const handleUp = () => {
+    clearTimer();
+    if (draggingKey) { setDraggingKey(null); onReorder(order); }
+  };
+
+  return (
+    <div>
+      {orderedEntries.map((entry) => (
+        <div
+          key={entry.key}
+          ref={(el) => { rowRefs.current[entry.key] = el; }}
+          onTouchStart={(e) => handleDown(entry.key, e.touches[0].clientY)}
+          onTouchMove={(e) => handleMove(e.touches[0].clientY, e)}
+          onTouchEnd={handleUp}
+          onMouseDown={(e) => handleDown(entry.key, e.clientY)}
+          onMouseMove={(e) => draggingKey && handleMove(e.clientY, e)}
+          onMouseUp={handleUp}
+          onMouseLeave={() => draggingKey === entry.key && handleUp()}
+          style={{
+            touchAction: draggingKey ? 'none' : 'pan-y',
+            userSelect: 'none',
+            opacity: draggingKey === entry.key ? 0.6 : 1,
+            transform: draggingKey === entry.key ? 'scale(1.02)' : 'none',
+            boxShadow: draggingKey === entry.key ? '0 4px 14px #00000055' : 'none',
+            position: 'relative', zIndex: draggingKey === entry.key ? 10 : 'auto',
+            transition: draggingKey === entry.key ? 'none' : 'transform 0.15s ease',
+          }}
+        >
+          {renderItem(entry, draggingKey === entry.key)}
+        </div>
+      ))}
+    </div>
+  );
+}
+// One reorderable row for the "Organize Checklist" screens — a drag
+// handle plus the item's label, nothing else (no OK/Req.Att. buttons;
+// this screen is purely about display order, never about answering).
+function OrganizeChecklistRow({ label, dragging }) {
+  return (
+    <div
+      className="flex items-center gap-3 px-3 py-3 mb-1.5 rounded-lg"
+      style={{ background: dragging ? COLORS.surfaceRaised : COLORS.surface, border: `1px solid ${COLORS.line}` }}
+    >
+      <span style={{ color: COLORS.inkDim, fontSize: 18, lineHeight: 1 }}>☰</span>
+      <span className="text-sm flex-1">{label}</span>
+    </div>
+  );
+}
+// Flat "Organize Checklist" screen — used for Vehicle and Equipment,
+// whose items aren't grouped into sections. Saves to Firebase the moment
+// a drag is dropped (no separate Save button — one less step, and there's
+// nothing here that needs a confirm, since it only reorders, never
+// deletes or changes an item's meaning).
+function OrganizeChecklistScreen({ title, items, order, checklistType, onBack }) {
+  const effOrder = effectiveItemOrder(order, items.length);
+  const entries = effOrder.map((canonicalIdx) => ({ key: String(canonicalIdx), label: items[canonicalIdx], canonicalIdx }));
+  return (
+    <div>
+      <button onClick={onBack} className="text-xs uppercase tracking-wide mb-3" style={{ color: COLORS.inkDim }}>← Back to Inspections</button>
+      <p className="font-display text-lg font-bold mb-1">Organize {title} Checklist</p>
+      <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>Press and hold an item, then drag it up or down to reorder. Changes save automatically.</p>
+      <LongPressReorderList
+        entries={entries}
+        renderItem={(entry, dragging) => <OrganizeChecklistRow label={entry.label} dragging={dragging} />}
+        onReorder={(newKeyOrder) => saveInspectionItemOrder(checklistType, newKeyOrder.map((k) => parseInt(k, 10)))}
+      />
+    </div>
+  );
+}
+// Sectioned "Organize Checklist" screen — used for Yard, whose items are
+// grouped under section headers on the paper form. Items can be dragged
+// up/down within their own section (matching the paper form's layout);
+// moving an item to a different section isn't supported here, since the
+// sections themselves are meaningful groupings, not just visual ones.
+function OrganizeYardChecklistScreen({ yardOrder, onBack }) {
+  return (
+    <div>
+      <button onClick={onBack} className="text-xs uppercase tracking-wide mb-3" style={{ color: COLORS.inkDim }}>← Back to Inspections</button>
+      <p className="font-display text-lg font-bold mb-1">Organize Yard Checklist</p>
+      <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>Press and hold an item, then drag it up or down within its section to reorder. Changes save automatically.</p>
+      {YARD_INSPECTION_SECTIONS.map((section, sIdx) => {
+        const effOrder = effectiveItemOrder((yardOrder && yardOrder[sIdx]) || null, section.items.length);
+        const entries = effOrder.map((canonicalIdx) => ({ key: String(canonicalIdx), label: section.items[canonicalIdx], canonicalIdx }));
+        return (
+          <div key={section.name} className="mb-4">
+            <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>{section.name}</p>
+            <LongPressReorderList
+              entries={entries}
+              renderItem={(entry, dragging) => <OrganizeChecklistRow label={entry.label} dragging={dragging} />}
+              onReorder={(newKeyOrder) => saveYardInspectionItemOrder(sIdx, newKeyOrder.map((k) => parseInt(k, 10)))}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+
 // Inspection Form". A blank items object means every item defaults to
 // unanswered; submission is blocked until every item has a status, so an
 // inspection can't accidentally go in half-filled.
-function NewYardInspectionForm({ knownSites, defaultInspector, submitting, onCancel, onSubmit }) {
+function NewYardInspectionForm({ knownSites, defaultInspector, submitting, onCancel, onSubmit, sectionOrders }) {
   const [site, setSite] = useState(knownSites[0] || '');
   const [addingNewSite, setAddingNewSite] = useState(knownSites.length === 0);
   const [newSiteName, setNewSiteName] = useState('');
@@ -8122,12 +8330,12 @@ function NewYardInspectionForm({ knownSites, defaultInspector, submitting, onCan
       {YARD_INSPECTION_SECTIONS.map((section, sIdx) => (
         <div key={section.name} className="mb-4">
           <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>{section.name}</p>
-          {section.items.map((label, iIdx) => {
+          {effectiveItemOrder((sectionOrders && sectionOrders[sIdx]) || null, section.items.length).map((iIdx) => {
             const key = `${sIdx}-${iIdx}`;
             return (
               <InspectionItemRow
                 key={key}
-                label={label}
+                label={section.items[iIdx]}
                 value={items[key]}
                 onChange={(v) => setItems((prev) => ({ ...prev, [key]: v }))}
               />
@@ -8164,12 +8372,129 @@ function NewYardInspectionForm({ knownSites, defaultInspector, submitting, onCan
 // Read-only detail view of one past inspection — plus the Management Review
 // sign-off step from the bottom of the paper form, which happens later and
 // by someone other than whoever did the walk-through.
-function YardInspectionDetail({ record, isAdmin, onReview, onDelete, onBack }) {
+// Shared printable table of an inspection's answered items — same idea
+// across all three inspection types, just fed a different item list.
+// entries: [{ label, value: { status, note } }]
+function PrintableInspectionItemRows({ entries }) {
+  const statusLabel = (status) => status === 'reqAtt' ? 'Req. Att.' : status === 'notOk' ? 'Not OK' : status === 'na' ? 'N/A' : status === 'ok' ? 'OK' : '—';
+  return (
+    <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+      <thead>
+        <tr style={{ color: '#555', textAlign: 'left' }}>
+          <th style={{ padding: '4px 6px', borderBottom: '1px solid #ccc' }}>Item</th>
+          <th style={{ padding: '4px 6px', borderBottom: '1px solid #ccc' }}>Status</th>
+          <th style={{ padding: '4px 6px', borderBottom: '1px solid #ccc' }}>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {entries.map((e, i) => {
+          const status = e.value && e.value.status;
+          const flagged = status === 'reqAtt' || status === 'notOk';
+          return (
+            <tr key={i}>
+              <td style={{ padding: '4px 6px', borderBottom: '1px solid #eee' }}>{e.label}</td>
+              <td style={{ padding: '4px 6px', borderBottom: '1px solid #eee', fontWeight: flagged ? 700 : 400, color: flagged ? '#C0392B' : '#1B1F19' }}>{statusLabel(status)}</td>
+              <td style={{ padding: '4px 6px', borderBottom: '1px solid #eee' }}>{(e.value && e.value.note) || ''}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+function PrintableYardInspection({ record, sectionOrders }) {
+  const entries = [];
+  YARD_INSPECTION_SECTIONS.forEach((section, sIdx) => {
+    effectiveItemOrder((sectionOrders && sectionOrders[sIdx]) || null, section.items.length).forEach((iIdx) => {
+      entries.push({ label: `${section.name} — ${section.items[iIdx]}`, value: record.items && record.items[`${sIdx}-${iIdx}`] });
+    });
+  });
+  return (
+    <div style={{ background: '#fff', color: '#1B1F19', padding: 16 }}>
+      <p style={{ fontWeight: 700, fontSize: 16 }}>Yard Inspection — {record.site}</p>
+      <p style={{ fontSize: 12, color: '#555', marginBottom: 12 }}>{fmtDate(record.date)} · Inspected by {record.inspectedBy}</p>
+      <PrintableInspectionItemRows entries={entries} />
+      <div style={{ marginTop: 16, fontSize: 11, color: '#555' }}>
+        {record.reviewedBy ? `Reviewed by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}` : 'Not yet reviewed'}
+      </div>
+      {record.signature && (
+        <div style={{ marginTop: 12 }}>
+          <p style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>Signature:</p>
+          <img src={record.signature} alt="Signature" style={{ height: 50, background: '#fff' }} />
+        </div>
+      )}
+    </div>
+  );
+}
+function PrintableVehicleInspection({ record, itemOrder }) {
+  const entries = effectiveItemOrder(itemOrder, VEHICLE_INSPECTION_ITEMS.length).map((iIdx) => ({
+    label: VEHICLE_INSPECTION_ITEMS[iIdx], value: record.items && record.items[iIdx],
+  }));
+  return (
+    <div style={{ background: '#fff', color: '#1B1F19', padding: 16 }}>
+      <p style={{ fontWeight: 700, fontSize: 16 }}>Vehicle Inspection — Unit {record.unit}</p>
+      <p style={{ fontSize: 12, color: '#555', marginBottom: 12 }}>{fmtDate(record.date)}{record.km ? ` · ${record.km} km` : ''} · Inspected by {record.inspectedBy}</p>
+      <PrintableInspectionItemRows entries={entries} />
+      <div style={{ marginTop: 16, fontSize: 11, color: '#555' }}>
+        {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
+      </div>
+      {record.signature && (
+        <div style={{ marginTop: 12 }}>
+          <p style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>Signature:</p>
+          <img src={record.signature} alt="Signature" style={{ height: 50, background: '#fff' }} />
+        </div>
+      )}
+    </div>
+  );
+}
+function PrintableEquipmentInspection({ record, itemOrder }) {
+  const entries = effectiveItemOrder(itemOrder, EQUIPMENT_INSPECTION_ITEMS.length).map((iIdx) => ({
+    label: EQUIPMENT_INSPECTION_ITEMS[iIdx], value: record.items && record.items[iIdx],
+  }));
+  return (
+    <div style={{ background: '#fff', color: '#1B1F19', padding: 16 }}>
+      <p style={{ fontWeight: 700, fontSize: 16 }}>Equipment Inspection — Unit {record.unit}</p>
+      <p style={{ fontSize: 12, color: '#555', marginBottom: 12 }}>
+        {record.machine}{record.hourMeter ? ` · ${record.hourMeter} hrs` : ''} · {fmtDate(record.date)} · Inspected by {record.inspectedBy}
+      </p>
+      <PrintableInspectionItemRows entries={entries} />
+      {record.comments && (
+        <div style={{ marginTop: 12 }}>
+          <p style={{ fontSize: 11, color: '#555', marginBottom: 2 }}>Comments:</p>
+          <p style={{ fontSize: 12 }}>{record.comments}</p>
+        </div>
+      )}
+      <div style={{ marginTop: 16, fontSize: 11, color: '#555' }}>
+        {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
+      </div>
+      {record.signature && (
+        <div style={{ marginTop: 12 }}>
+          <p style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>Signature:</p>
+          <img src={record.signature} alt="Signature" style={{ height: 50, background: '#fff' }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function YardInspectionDetail({ record, isAdmin, onReview, onDelete, onBack, sectionOrders }) {
   const [reviewerName, setReviewerName] = useState('');
   const [reviewing, setReviewing] = useState(false);
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-      <button onClick={onBack} className="text-xs uppercase tracking-wide mb-3" style={{ color: COLORS.inkDim }}>← Back to list</button>
+      <div className="flex items-center justify-between mb-3 no-print">
+        <button onClick={onBack} className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>← Back to list</button>
+        <button
+          onClick={() => window.print()}
+          className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-1.5 rounded-lg"
+          style={{ color: COLORS.accent, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}
+        >
+          🖨️ Export
+        </button>
+      </div>
+      <PrintPortal>
+        <PrintableYardInspection record={record} sectionOrders={sectionOrders} />
+      </PrintPortal>
       <p className="font-display text-lg font-bold">{record.site}</p>
       <p className="text-sm mb-1" style={{ color: COLORS.inkDim }}>{record.date} · Inspected by {record.inspectedBy}</p>
       <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>
@@ -8179,9 +8504,9 @@ function YardInspectionDetail({ record, isAdmin, onReview, onDelete, onBack }) {
       {YARD_INSPECTION_SECTIONS.map((section, sIdx) => (
         <div key={section.name} className="mb-4">
           <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>{section.name}</p>
-          {section.items.map((label, iIdx) => {
+          {effectiveItemOrder((sectionOrders && sectionOrders[sIdx]) || null, section.items.length).map((iIdx) => {
             const key = `${sIdx}-${iIdx}`;
-            return <InspectionItemRow key={key} label={label} value={record.items && record.items[key]} readOnly />;
+            return <InspectionItemRow key={key} label={section.items[iIdx]} value={record.items && record.items[key]} readOnly />;
           })}
         </div>
       ))}
@@ -8280,7 +8605,7 @@ function VehicleInspectionItemRow({ label, value, onChange, readOnly }) {
 // New Vehicle Inspection form — digitized "Monthly Vehicle Inspection
 // Report". Same shape as the yard form (unit picker, date, checklist,
 // typed-name signature) plus the Km reading the paper form also tracks.
-function NewVehicleInspectionForm({ knownUnits, defaultInspector, submitting, onCancel, onSubmit }) {
+function NewVehicleInspectionForm({ knownUnits, defaultInspector, submitting, onCancel, onSubmit, itemOrder }) {
   const [unit, setUnit] = useState(knownUnits[0] || '');
   const [addingNewUnit, setAddingNewUnit] = useState(knownUnits.length === 0);
   const [newUnitName, setNewUnitName] = useState('');
@@ -8375,10 +8700,10 @@ function NewVehicleInspectionForm({ knownUnits, defaultInspector, submitting, on
         </div>
       </div>
 
-      {VEHICLE_INSPECTION_ITEMS.map((label, iIdx) => (
+      {effectiveItemOrder(itemOrder, VEHICLE_INSPECTION_ITEMS.length).map((iIdx) => (
         <VehicleInspectionItemRow
           key={iIdx}
-          label={label}
+          label={VEHICLE_INSPECTION_ITEMS[iIdx]}
           value={items[iIdx]}
           onChange={(v) => setItems((prev) => ({ ...prev, [iIdx]: v }))}
         />
@@ -8412,21 +8737,33 @@ function NewVehicleInspectionForm({ knownUnits, defaultInspector, submitting, on
 // Read-only detail view of one past vehicle inspection, plus the paper
 // form's "Follow up Action Dated" + Signature line — filled in later, once
 // anything flagged Not OK actually gets addressed.
-function VehicleInspectionDetail({ record, isAdmin, onReview, onDelete, onBack }) {
+function VehicleInspectionDetail({ record, isAdmin, onReview, onDelete, onBack, itemOrder }) {
   const [followUpDate, setFollowUpDate] = useState('');
   const [reviewerName, setReviewerName] = useState('');
   const [reviewing, setReviewing] = useState(false);
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-      <button onClick={onBack} className="text-xs uppercase tracking-wide mb-3" style={{ color: COLORS.inkDim }}>← Back to list</button>
+      <div className="flex items-center justify-between mb-3 no-print">
+        <button onClick={onBack} className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>← Back to list</button>
+        <button
+          onClick={() => window.print()}
+          className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-1.5 rounded-lg"
+          style={{ color: COLORS.accent, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}
+        >
+          🖨️ Export
+        </button>
+      </div>
+      <PrintPortal>
+        <PrintableVehicleInspection record={record} itemOrder={itemOrder} />
+      </PrintPortal>
       <p className="font-display text-lg font-bold">Unit {record.unit}</p>
       <p className="text-sm mb-1" style={{ color: COLORS.inkDim }}>{record.date} · {record.km ? `${record.km} km · ` : ''}Inspected by {record.inspectedBy}</p>
       <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>
         {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
       </p>
 
-      {VEHICLE_INSPECTION_ITEMS.map((label, iIdx) => (
-        <VehicleInspectionItemRow key={iIdx} label={label} value={record.items && record.items[iIdx]} readOnly />
+      {effectiveItemOrder(itemOrder, VEHICLE_INSPECTION_ITEMS.length).map((iIdx) => (
+        <VehicleInspectionItemRow key={iIdx} label={VEHICLE_INSPECTION_ITEMS[iIdx]} value={record.items && record.items[iIdx]} readOnly />
       ))}
 
       {isAdmin && !record.reviewedBy && (
@@ -8474,7 +8811,7 @@ function VehicleInspectionDetail({ record, isAdmin, onReview, onDelete, onBack }
 // New Equipment Inspection form — digitized "Machine Inspection Report".
 // OK / Action Required per item (reuses InspectionItemRow, same shape as
 // the yard form), plus Hour Meter in place of the vehicle form's Km.
-function NewEquipmentInspectionForm({ knownUnits, defaultInspector, submitting, onCancel, onSubmit }) {
+function NewEquipmentInspectionForm({ knownUnits, defaultInspector, submitting, onCancel, onSubmit, itemOrder }) {
   const [unit, setUnit] = useState(knownUnits[0] ? knownUnits[0].unit : '');
   const [addingNewUnit, setAddingNewUnit] = useState(knownUnits.length === 0);
   const [newUnitName, setNewUnitName] = useState('');
@@ -8585,12 +8922,13 @@ function NewEquipmentInspectionForm({ knownUnits, defaultInspector, submitting, 
         </div>
       </div>
 
-      {EQUIPMENT_INSPECTION_ITEMS.map((label, iIdx) => (
+      {effectiveItemOrder(itemOrder, EQUIPMENT_INSPECTION_ITEMS.length).map((iIdx) => (
         <InspectionItemRow
           key={iIdx}
-          label={label}
+          label={EQUIPMENT_INSPECTION_ITEMS[iIdx]}
           value={items[iIdx]}
           onChange={(v) => setItems((prev) => ({ ...prev, [iIdx]: v }))}
+          allowNA
         />
       ))}
 
@@ -8630,13 +8968,25 @@ function NewEquipmentInspectionForm({ knownUnits, defaultInspector, submitting, 
 
 // Read-only detail view of one past equipment inspection, plus the paper
 // form's "Follow up Dated" + Signature line.
-function EquipmentInspectionDetail({ record, isAdmin, onReview, onDelete, onBack }) {
+function EquipmentInspectionDetail({ record, isAdmin, onReview, onDelete, onBack, itemOrder }) {
   const [followUpDate, setFollowUpDate] = useState('');
   const [reviewerName, setReviewerName] = useState('');
   const [reviewing, setReviewing] = useState(false);
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-      <button onClick={onBack} className="text-xs uppercase tracking-wide mb-3" style={{ color: COLORS.inkDim }}>← Back to list</button>
+      <div className="flex items-center justify-between mb-3 no-print">
+        <button onClick={onBack} className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>← Back to list</button>
+        <button
+          onClick={() => window.print()}
+          className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-1.5 rounded-lg"
+          style={{ color: COLORS.accent, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}
+        >
+          🖨️ Export
+        </button>
+      </div>
+      <PrintPortal>
+        <PrintableEquipmentInspection record={record} itemOrder={itemOrder} />
+      </PrintPortal>
       <p className="font-display text-lg font-bold">Unit {record.unit}</p>
       <p className="text-sm mb-1" style={{ color: COLORS.inkDim }}>
         {record.machine}{record.hourMeter ? ` · ${record.hourMeter} hrs` : ''} · {record.date} · Inspected by {record.inspectedBy}
@@ -8645,8 +8995,8 @@ function EquipmentInspectionDetail({ record, isAdmin, onReview, onDelete, onBack
         {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
       </p>
 
-      {EQUIPMENT_INSPECTION_ITEMS.map((label, iIdx) => (
-        <InspectionItemRow key={iIdx} label={label} value={record.items && record.items[iIdx]} readOnly />
+      {effectiveItemOrder(itemOrder, EQUIPMENT_INSPECTION_ITEMS.length).map((iIdx) => (
+        <InspectionItemRow key={iIdx} label={EQUIPMENT_INSPECTION_ITEMS[iIdx]} value={record.items && record.items[iIdx]} readOnly />
       ))}
 
       {record.comments && (
@@ -10595,6 +10945,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [submittingIncidentReport, setSubmittingIncidentReport] = useState(false);
   const [incidentReportActionBusy, setIncidentReportActionBusy] = useState(null);
   const [safetyInspectionType, setSafetyInspectionType] = useState(null); // one of SAFETY_INSPECTION_TYPES.key, or null (showing the menu)
+  const [organizingChecklistType, setOrganizingChecklistType] = useState(null); // 'vehicle' | 'equipment' | 'yard' | null — shows the long-press "Organize" screen for that checklist instead of the normal list
+  const [inspectionChecklistOrder, setInspectionChecklistOrder] = useState(() => cacheGet('inspectionChecklistOrder', {}));
   const [safetyInspectionSite, setSafetyInspectionSite] = useState(null); // which site's list is expanded, for types that are bySite
   const [newYardInspectionOpen, setNewYardInspectionOpen] = useState(false);
   const [newVehicleInspectionOpen, setNewVehicleInspectionOpen] = useState(false);
@@ -10915,6 +11267,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = Object.values(snap.val() || {});
       setSafetyInspections(val);
       cacheSet('safetyInspections', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('inspectionChecklistOrder');
+    const on = ref.on('value', (snap) => {
+      const val = snap.val() || {};
+      setInspectionChecklistOrder(val);
+      cacheSet('inspectionChecklistOrder', val);
     });
     return () => ref.off('value', on);
   }, []);
@@ -19223,17 +19585,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     const count = safetyInspections.filter((r) => r.type === type.key).length;
                     const hasForm = type.key === 'yard' || type.key === 'vehicle' || type.key === 'fuelTank' || type.key === 'equipment';
                     const dueSoon = type.key === 'fuelTank' ? fuelTankDueSoonUnits.length : 0;
+                    const flaggedOpenCount = safetyInspections.filter((r) => r.type === type.key && !r.reviewedBy && inspectionRecordNeedsAttention(r)).length;
                     return (
                       <button
                         key={type.key}
                         onClick={() => hasForm && setSafetyInspectionType(type.key)}
                         disabled={!hasForm}
                         className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
-                        style={{ background: COLORS.surfaceRaised, opacity: hasForm ? 1 : 0.5 }}
+                        style={flaggedOpenCount > 0
+                          ? { background: '#E07A5F22', border: '1px solid #E07A5F', opacity: hasForm ? 1 : 0.5 }
+                          : { background: COLORS.surfaceRaised, opacity: hasForm ? 1 : 0.5 }}
                       >
-                        <span className="text-sm font-semibold">{type.label}</span>
-                        <span className="text-xs font-bold" style={{ color: dueSoon > 0 ? '#E07A5F' : COLORS.inkDim }}>
-                          {!hasForm ? 'Form coming soon' : dueSoon > 0 ? `${dueSoon} due soon` : `${count} on file`}
+                        <span className="text-sm font-semibold">
+                          {flaggedOpenCount > 0 && <span style={{ marginRight: 6 }}>⚠️</span>}
+                          {type.label}
+                        </span>
+                        <span className="text-xs font-bold" style={{ color: flaggedOpenCount > 0 || dueSoon > 0 ? '#E07A5F' : COLORS.inkDim }}>
+                          {!hasForm ? 'Form coming soon' : flaggedOpenCount > 0 ? `${flaggedOpenCount} need${flaggedOpenCount === 1 ? 's' : ''} attention` : dueSoon > 0 ? `${dueSoon} due soon` : `${count} on file`}
                         </span>
                       </button>
                     );
@@ -19242,20 +19610,26 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               ) : safetyInspectionType === 'yard' ? (
                 <div>
                   <button
-                    onClick={() => { setSafetyInspectionType(null); setSafetyInspectionSite(null); setNewYardInspectionOpen(false); setViewingSafetyInspectionId(null); }}
+                    onClick={() => { setSafetyInspectionType(null); setSafetyInspectionSite(null); setNewYardInspectionOpen(false); setViewingSafetyInspectionId(null); setOrganizingChecklistType(null); }}
                     className="text-xs uppercase tracking-wide mb-3"
                     style={{ color: COLORS.inkDim }}
                   >
                     ← Back to Inspections
                   </button>
 
-                  {viewingSafetyInspectionId ? (
+                  {organizingChecklistType === 'yard' ? (
+                    <OrganizeYardChecklistScreen
+                      yardOrder={inspectionChecklistOrder.yard}
+                      onBack={() => setOrganizingChecklistType(null)}
+                    />
+                  ) : viewingSafetyInspectionId ? (
                     <YardInspectionDetail
                       record={safetyInspections.find((r) => r.id === viewingSafetyInspectionId)}
                       isAdmin={isAdmin || isSafety}
                       onBack={() => setViewingSafetyInspectionId(null)}
                       onReview={(reviewerName) => reviewSafetyInspection(viewingSafetyInspectionId, { reviewedBy: reviewerName })}
                       onDelete={async () => { await deleteSafetyInspection(viewingSafetyInspectionId); setViewingSafetyInspectionId(null); }}
+                      sectionOrders={inspectionChecklistOrder.yard}
                     />
                   ) : newYardInspectionOpen ? (
                     <NewYardInspectionForm
@@ -19269,16 +19643,26 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         setSubmittingSafetyInspection(false);
                         setNewYardInspectionOpen(false);
                       }}
+                      sectionOrders={inspectionChecklistOrder.yard}
                     />
                   ) : (
                     <div>
-                      <button
-                        onClick={() => setNewYardInspectionOpen(true)}
-                        className="text-xs font-semibold px-3 py-2 rounded-lg mb-4"
-                        style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-                      >
-                        + New Inspection
-                      </button>
+                      <div className="flex gap-2 mb-4">
+                        <button
+                          onClick={() => setNewYardInspectionOpen(true)}
+                          className="text-xs font-semibold px-3 py-2 rounded-lg"
+                          style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                        >
+                          + New Inspection
+                        </button>
+                        <button
+                          onClick={() => setOrganizingChecklistType('yard')}
+                          className="text-xs font-semibold px-3 py-2 rounded-lg"
+                          style={{ background: COLORS.surface, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
+                        >
+                          ☰ Organize Checklist
+                        </button>
+                      </div>
 
                       {[...new Set(safetyInspections.filter((r) => r.type === 'yard').map((r) => r.site))]
                         .sort((a, b) => a.localeCompare(b))
@@ -19286,25 +19670,36 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           const records = safetyInspections
                             .filter((r) => r.type === 'yard' && r.site === siteName)
                             .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+                          const folderFlagged = records.some((r) => !r.reviewedBy && inspectionRecordNeedsAttention(r));
                           return (
                             <div key={siteName} className="mb-4">
-                              <p className="font-display text-sm font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>
-                                {siteName} ({records.length})
-                              </p>
+                              <div className="flex items-center gap-2 mb-2">
+                                <p className="font-display text-sm font-bold uppercase tracking-wide" style={{ color: folderFlagged ? '#E07A5F' : COLORS.accent }}>
+                                  {siteName} ({records.length})
+                                </p>
+                                {folderFlagged && (
+                                  <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: '#E07A5F', color: '#1B1F19' }}>
+                                    ⚠️ Needs attention
+                                  </span>
+                                )}
+                              </div>
                               <div className="space-y-2">
-                                {records.map((r) => (
-                                  <button
-                                    key={r.id}
-                                    onClick={() => setViewingSafetyInspectionId(r.id)}
-                                    className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
-                                    style={{ background: COLORS.surfaceRaised }}
-                                  >
-                                    <span className="text-sm">{r.date} · {r.inspectedBy}</span>
-                                    <span className="text-xs" style={{ color: r.reviewedBy ? COLORS.accent : COLORS.inkDim }}>
-                                      {r.reviewedBy ? 'Reviewed' : 'Needs review'}
-                                    </span>
-                                  </button>
-                                ))}
+                                {records.map((r) => {
+                                  const flagged = !r.reviewedBy && inspectionRecordNeedsAttention(r);
+                                  return (
+                                    <button
+                                      key={r.id}
+                                      onClick={() => setViewingSafetyInspectionId(r.id)}
+                                      className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                                      style={flagged ? { background: '#E07A5F22', border: '1px solid #E07A5F' } : { background: COLORS.surfaceRaised }}
+                                    >
+                                      <span className="text-sm">{r.date} · {r.inspectedBy}</span>
+                                      <span className="text-xs font-bold" style={{ color: flagged ? '#E07A5F' : r.reviewedBy ? COLORS.accent : COLORS.inkDim }}>
+                                        {flagged ? '⚠️ Needs attention' : r.reviewedBy ? 'Reviewed' : 'Needs review'}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
                               </div>
                             </div>
                           );
@@ -19319,20 +19714,29 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               ) : safetyInspectionType === 'vehicle' ? (
                 <div>
                   <button
-                    onClick={() => { setSafetyInspectionType(null); setNewVehicleInspectionOpen(false); setViewingSafetyInspectionId(null); }}
+                    onClick={() => { setSafetyInspectionType(null); setNewVehicleInspectionOpen(false); setViewingSafetyInspectionId(null); setOrganizingChecklistType(null); }}
                     className="text-xs uppercase tracking-wide mb-3"
                     style={{ color: COLORS.inkDim }}
                   >
                     ← Back to Inspections
                   </button>
 
-                  {viewingSafetyInspectionId ? (
+                  {organizingChecklistType === 'vehicle' ? (
+                    <OrganizeChecklistScreen
+                      title="Vehicle"
+                      items={VEHICLE_INSPECTION_ITEMS}
+                      order={inspectionChecklistOrder.vehicle}
+                      checklistType="vehicle"
+                      onBack={() => setOrganizingChecklistType(null)}
+                    />
+                  ) : viewingSafetyInspectionId ? (
                     <VehicleInspectionDetail
                       record={safetyInspections.find((r) => r.id === viewingSafetyInspectionId)}
                       isAdmin={isAdmin || isSafety}
                       onBack={() => setViewingSafetyInspectionId(null)}
                       onReview={(extra) => reviewSafetyInspection(viewingSafetyInspectionId, extra)}
                       onDelete={async () => { await deleteSafetyInspection(viewingSafetyInspectionId); setViewingSafetyInspectionId(null); }}
+                      itemOrder={inspectionChecklistOrder.vehicle}
                     />
                   ) : newVehicleInspectionOpen ? (
                     <NewVehicleInspectionForm
@@ -19346,16 +19750,26 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         setSubmittingSafetyInspection(false);
                         setNewVehicleInspectionOpen(false);
                       }}
+                      itemOrder={inspectionChecklistOrder.vehicle}
                     />
                   ) : (
                     <div>
-                      <button
-                        onClick={() => setNewVehicleInspectionOpen(true)}
-                        className="text-xs font-semibold px-3 py-2 rounded-lg mb-4"
-                        style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-                      >
-                        + New Inspection
-                      </button>
+                      <div className="flex gap-2 mb-4">
+                        <button
+                          onClick={() => setNewVehicleInspectionOpen(true)}
+                          className="text-xs font-semibold px-3 py-2 rounded-lg"
+                          style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                        >
+                          + New Inspection
+                        </button>
+                        <button
+                          onClick={() => setOrganizingChecklistType('vehicle')}
+                          className="text-xs font-semibold px-3 py-2 rounded-lg"
+                          style={{ background: COLORS.surface, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
+                        >
+                          ☰ Organize Checklist
+                        </button>
+                      </div>
 
                       {[...new Set(safetyInspections.filter((r) => r.type === 'vehicle').map((r) => r.unit))]
                         .sort((a, b) => a.localeCompare(b))
@@ -19363,25 +19777,36 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           const records = safetyInspections
                             .filter((r) => r.type === 'vehicle' && r.unit === unitName)
                             .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+                          const folderFlagged = records.some((r) => !r.reviewedBy && inspectionRecordNeedsAttention(r));
                           return (
                             <div key={unitName} className="mb-4">
-                              <p className="font-display text-sm font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>
-                                Unit {unitName} ({records.length})
-                              </p>
+                              <div className="flex items-center gap-2 mb-2">
+                                <p className="font-display text-sm font-bold uppercase tracking-wide" style={{ color: folderFlagged ? '#E07A5F' : COLORS.accent }}>
+                                  Unit {unitName} ({records.length})
+                                </p>
+                                {folderFlagged && (
+                                  <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: '#E07A5F', color: '#1B1F19' }}>
+                                    ⚠️ Needs attention
+                                  </span>
+                                )}
+                              </div>
                               <div className="space-y-2">
-                                {records.map((r) => (
-                                  <button
-                                    key={r.id}
-                                    onClick={() => setViewingSafetyInspectionId(r.id)}
-                                    className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
-                                    style={{ background: COLORS.surfaceRaised }}
-                                  >
-                                    <span className="text-sm">{r.date} · {r.inspectedBy}</span>
-                                    <span className="text-xs" style={{ color: r.reviewedBy ? COLORS.accent : COLORS.inkDim }}>
-                                      {r.reviewedBy ? 'Followed up' : 'Open'}
-                                    </span>
-                                  </button>
-                                ))}
+                                {records.map((r) => {
+                                  const flagged = !r.reviewedBy && inspectionRecordNeedsAttention(r);
+                                  return (
+                                    <button
+                                      key={r.id}
+                                      onClick={() => setViewingSafetyInspectionId(r.id)}
+                                      className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                                      style={flagged ? { background: '#E07A5F22', border: '1px solid #E07A5F' } : { background: COLORS.surfaceRaised }}
+                                    >
+                                      <span className="text-sm">{r.date} · {r.inspectedBy}</span>
+                                      <span className="text-xs font-bold" style={{ color: flagged ? '#E07A5F' : r.reviewedBy ? COLORS.accent : COLORS.inkDim }}>
+                                        {flagged ? '⚠️ Needs attention' : r.reviewedBy ? 'Followed up' : 'Open'}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
                               </div>
                             </div>
                           );
@@ -19396,20 +19821,29 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               ) : safetyInspectionType === 'equipment' ? (
                 <div>
                   <button
-                    onClick={() => { setSafetyInspectionType(null); setNewEquipmentInspectionOpen(false); setViewingSafetyInspectionId(null); }}
+                    onClick={() => { setSafetyInspectionType(null); setNewEquipmentInspectionOpen(false); setViewingSafetyInspectionId(null); setOrganizingChecklistType(null); }}
                     className="text-xs uppercase tracking-wide mb-3"
                     style={{ color: COLORS.inkDim }}
                   >
                     ← Back to Inspections
                   </button>
 
-                  {viewingSafetyInspectionId ? (
+                  {organizingChecklistType === 'equipment' ? (
+                    <OrganizeChecklistScreen
+                      title="Equipment"
+                      items={EQUIPMENT_INSPECTION_ITEMS}
+                      order={inspectionChecklistOrder.equipment}
+                      checklistType="equipment"
+                      onBack={() => setOrganizingChecklistType(null)}
+                    />
+                  ) : viewingSafetyInspectionId ? (
                     <EquipmentInspectionDetail
                       record={safetyInspections.find((r) => r.id === viewingSafetyInspectionId)}
                       isAdmin={isAdmin || isSafety}
                       onBack={() => setViewingSafetyInspectionId(null)}
                       onReview={(extra) => reviewSafetyInspection(viewingSafetyInspectionId, extra)}
                       onDelete={async () => { await deleteSafetyInspection(viewingSafetyInspectionId); setViewingSafetyInspectionId(null); }}
+                      itemOrder={inspectionChecklistOrder.equipment}
                     />
                   ) : newEquipmentInspectionOpen ? (
                     <NewEquipmentInspectionForm
@@ -19430,16 +19864,26 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         setSubmittingSafetyInspection(false);
                         setNewEquipmentInspectionOpen(false);
                       }}
+                      itemOrder={inspectionChecklistOrder.equipment}
                     />
                   ) : (
                     <div>
-                      <button
-                        onClick={() => setNewEquipmentInspectionOpen(true)}
-                        className="text-xs font-semibold px-3 py-2 rounded-lg mb-4"
-                        style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-                      >
-                        + New Inspection
-                      </button>
+                      <div className="flex gap-2 mb-4">
+                        <button
+                          onClick={() => setNewEquipmentInspectionOpen(true)}
+                          className="text-xs font-semibold px-3 py-2 rounded-lg"
+                          style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                        >
+                          + New Inspection
+                        </button>
+                        <button
+                          onClick={() => setOrganizingChecklistType('equipment')}
+                          className="text-xs font-semibold px-3 py-2 rounded-lg"
+                          style={{ background: COLORS.surface, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
+                        >
+                          ☰ Organize Checklist
+                        </button>
+                      </div>
 
                       {[...new Set(safetyInspections.filter((r) => r.type === 'equipment').map((r) => r.unit))]
                         .sort((a, b) => a.localeCompare(b))
@@ -19447,25 +19891,36 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           const records = safetyInspections
                             .filter((r) => r.type === 'equipment' && r.unit === unitName)
                             .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+                          const folderFlagged = records.some((r) => !r.reviewedBy && inspectionRecordNeedsAttention(r));
                           return (
                             <div key={unitName} className="mb-4">
-                              <p className="font-display text-sm font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>
-                                Unit {unitName} ({records.length})
-                              </p>
+                              <div className="flex items-center gap-2 mb-2">
+                                <p className="font-display text-sm font-bold uppercase tracking-wide" style={{ color: folderFlagged ? '#E07A5F' : COLORS.accent }}>
+                                  Unit {unitName} ({records.length})
+                                </p>
+                                {folderFlagged && (
+                                  <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: '#E07A5F', color: '#1B1F19' }}>
+                                    ⚠️ Needs attention
+                                  </span>
+                                )}
+                              </div>
                               <div className="space-y-2">
-                                {records.map((r) => (
-                                  <button
-                                    key={r.id}
-                                    onClick={() => setViewingSafetyInspectionId(r.id)}
-                                    className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
-                                    style={{ background: COLORS.surfaceRaised }}
-                                  >
-                                    <span className="text-sm">{r.date} · {r.machine} · {r.inspectedBy}</span>
-                                    <span className="text-xs" style={{ color: r.reviewedBy ? COLORS.accent : COLORS.inkDim }}>
-                                      {r.reviewedBy ? 'Followed up' : 'Open'}
-                                    </span>
-                                  </button>
-                                ))}
+                                {records.map((r) => {
+                                  const flagged = !r.reviewedBy && inspectionRecordNeedsAttention(r);
+                                  return (
+                                    <button
+                                      key={r.id}
+                                      onClick={() => setViewingSafetyInspectionId(r.id)}
+                                      className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                                      style={flagged ? { background: '#E07A5F22', border: '1px solid #E07A5F' } : { background: COLORS.surfaceRaised }}
+                                    >
+                                      <span className="text-sm">{r.date} · {r.machine} · {r.inspectedBy}</span>
+                                      <span className="text-xs font-bold" style={{ color: flagged ? '#E07A5F' : r.reviewedBy ? COLORS.accent : COLORS.inkDim }}>
+                                        {flagged ? '⚠️ Needs attention' : r.reviewedBy ? 'Followed up' : 'Open'}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
                               </div>
                             </div>
                           );
