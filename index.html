@@ -1097,7 +1097,6 @@ const JOB_HAZARDS = {
 // phrasing (picked by task position, critical tasks get their own pool)
 // so consecutive tasks in the same course don't all read identically.
 // Regenerates automatically if JOB_HAZARDS content ever changes.
-function jhLowerFirst(s) { return s.charAt(0).toLowerCase() + s.slice(1); }
 // JOB_HAZARDS' hazard phrases have inconsistent capitalization in the
 // source manual (e.g. "Exposure to Cold", "Trips, slips, Falls") — fine
 // as short labels in the Job Hazards list, but reads oddly mid-sentence
@@ -1118,14 +1117,14 @@ function jhHazardListText(hazards) {
 }
 const JH_INTRO_TEMPLATES = [
   (t) => `${t} comes with hazards worth knowing before you start.`,
-  (t) => `Here's what to watch for during ${jhLowerFirst(t)}.`,
+  (t) => `Here's what to watch for during ${jhSentenceCase(t)}.`,
   (t) => `${t} is routine, but that's exactly when it pays to stay sharp.`,
-  (t) => `Before you dive into ${jhLowerFirst(t)}, take a second to run through the hazards.`,
+  (t) => `Before you dive into ${jhSentenceCase(t)}, take a second to run through the hazards.`,
   (t) => `${t} — like most jobs on this machine — has its own set of things that can go wrong.`,
 ];
 const JH_CRITICAL_INTRO_TEMPLATES = [
   (t) => `${t} is flagged as a critical task, with a full Safe Work Procedure on file — here's why.`,
-  (t) => `This one's critical: ${jhLowerFirst(t)} has a Safe Work Procedure for a reason.`,
+  (t) => `This one's critical: ${jhSentenceCase(t)} has a Safe Work Procedure for a reason.`,
   (t) => `${t} carries enough risk that it's a critical task on the job hazard analysis — worth extra attention.`,
 ];
 const JH_OUTRO_TEMPLATES = [
@@ -1135,13 +1134,55 @@ const JH_OUTRO_TEMPLATES = [
   'Take it seriously every time — even on the hundredth repetition.',
   'Speak up if conditions make the job harder than usual that day.',
 ];
+// Several hazards (slipping/falling, exposure to cold, and the like)
+// show up on nearly every task for a given role — narrating the full
+// list on every single slide got repetitive fast and didn't add
+// anything new task to task. So: any hazard that recurs across a good
+// chunk of a role's tasks gets pulled out into one shared "hazards that
+// come up again and again" module at the start, and every per-task
+// slide after that only calls out what's DIFFERENT about that
+// particular task — its distinctive hazards — rather than repeating the
+// common ones. A task whose hazards turn out to be nothing but common
+// ones (nothing left to add) is skipped entirely unless it's flagged
+// critical, in which case it still gets a short slide pointing at its
+// Safe Work Procedure without re-listing hazards already covered.
+function jhCommonHazards(tasks) {
+  const freq = {};
+  tasks.forEach((t) => t.hazards.forEach((h) => { freq[h] = (freq[h] || 0) + 1; }));
+  const threshold = Math.max(3, Math.ceil(tasks.length * 0.4));
+  return Object.keys(freq).filter((h) => freq[h] >= threshold);
+}
 function buildJobHazardModules(jobKey) {
-  return JOB_HAZARDS[jobKey].tasks.map((t, i) => {
+  const tasks = JOB_HAZARDS[jobKey].tasks;
+  const commonHazards = jhCommonHazards(tasks);
+  const commonSet = new Set(commonHazards);
+  const modules = [];
+  if (commonHazards.length) {
+    modules.push({
+      title: 'Hazards That Come Up Again and Again',
+      content: [
+        `A few hazards show up across almost everything you do on this job: ${jhHazardListText(commonHazards)}.`,
+        "These aren't tied to one task in particular — treat them as a constant background risk and stay alert to them all shift long. The tasks ahead call out what's different or more serious on top of these.",
+      ],
+    });
+  }
+  tasks.forEach((t, i) => {
+    const distinctive = t.hazards.filter((h) => !commonSet.has(h));
+    if (!distinctive.length && !t.critical) return; // nothing new to add on top of the common hazards — skip
+    if (!distinctive.length && t.critical) {
+      modules.push({
+        title: t.task,
+        content: [`${t.task} is flagged as a critical task with a full Safe Work Procedure on file, even though its hazards are the same ones already covered — that's how seriously it's treated.`],
+      });
+      return;
+    }
     const introPool = t.critical ? JH_CRITICAL_INTRO_TEMPLATES : JH_INTRO_TEMPLATES;
     const intro = introPool[i % introPool.length](t.task);
     const outro = JH_OUTRO_TEMPLATES[i % JH_OUTRO_TEMPLATES.length];
-    return { title: t.task, content: [intro, `Keep an eye out for ${jhHazardListText(t.hazards)}. ${outro}`] };
+    const lead = commonHazards.length ? 'On top of the common hazards, keep an eye out for' : 'Keep an eye out for';
+    modules.push({ title: t.task, content: [intro, `${lead} ${jhHazardListText(distinctive)}. ${outro}`] });
   });
+  return modules;
 }
 // Every JOB_HAZARDS role besides buncherOperator — each maps to its own
 // icon key in JOB_ROLE_GLYPHS (same key as the JOB_HAZARDS/role name
@@ -7775,6 +7816,8 @@ const JOB_HAZARD_MODULE_BACKGROUND = [
   { color: '#C2185B', colorDark: '#870E42' },
   { color: '#8A6A3A', colorDark: '#5C4526' },
   { color: '#33404D', colorDark: '#1F262E' },
+  { color: '#607D8B', colorDark: '#37474F' },
+  { color: '#D9822B', colorDark: '#A35F17' },
 ];
 const MODULE_BACKGROUND_BY_COURSE = {
   whmis: MODULE_BACKGROUND,
