@@ -823,7 +823,7 @@ const STATUSES = ['Open', 'In Progress', 'Done'];
 // included) can view every one of these — monthly equipment inspections
 // and incident/near-miss reports are handled elsewhere and are NOT part
 // of this open library.
-const SAFETY_CATEGORIES = ['Office Administration', 'Driver Orientation', 'Safety Manual', 'OHS Manual', 'SDS Sheets', 'Safety Meeting Minutes', 'Committee Meeting Minutes', 'SFI Training'];
+const SAFETY_CATEGORIES = ['Office Administration', 'Driver Orientation', 'Safety Manual', 'OHS Manual', 'SDS Sheets', 'Safety Meeting Minutes', 'Committee Meeting Minutes', 'Woodlands Training'];
 // These two are admin/safety-only in the document library — regular
 // employees don't need HR intake forms or the driver sign-off packet,
 // just the general safety references below.
@@ -832,8 +832,18 @@ const ADMIN_ONLY_SAFETY_CATEGORIES = ['Office Administration', 'Driver Orientati
 // alongside) uploaded documents — shown as a link-out button at the top
 // of that category's section.
 const EXTERNAL_SAFETY_LINKS = {
-  'SFI Training': { label: 'Open SFI Training Course', url: 'https://coolenforestry.floralms.com/content/421/info/VANDERWELL_WOODLANDS_ORIENTATION_%28Layout%29' },
+  'Woodlands Training': { label: 'Open Woodlands Training Course', url: 'https://coolenforestry.floralms.com/content/421/info/VANDERWELL_WOODLANDS_ORIENTATION_%28Layout%29' },
 };
+// Everything except Woodlands Training gets grouped under one "📁
+// Documents" folder in the Safety page, rather than each being its own
+// top-level accordion item — Woodlands stays outside the folder, on its
+// own, since it's the one crews actually need to get to quickly (the
+// training course link), not just a reference doc to dig for.
+const FOLDERED_SAFETY_CATEGORIES = SAFETY_CATEGORIES.filter((c) => c !== 'Woodlands Training');
+// Per-category icon in the document library — everything defaults to a
+// plain document page, Woodlands Training gets a tree to stand out from
+// the rest and reflect what it actually is.
+const safetyCategoryIcon = (category) => (category === 'Woodlands Training' ? '🌲' : '📄');
 
 // Digitized versions of Harder Contracting's two paper orientation
 // checklists (the third page of that same packet — the Office
@@ -5085,6 +5095,20 @@ async function saveInspectionItemOrder(type, order) {
 async function saveYardInspectionItemOrder(sectionIdx, order) {
   await firebase.database().ref('inspectionChecklistOrder/yard/' + sectionIdx).set(order);
 }
+// Custom display order for the Documents folder's categories — long-
+// press and drag directly on the collapsed list, same mechanism as the
+// checklist reordering above, just keyed by category name instead of a
+// numeric index since there's no fixed canonical position to preserve
+// here (nothing else reads these by position).
+async function saveSafetyCategoryOrder(order) {
+  await firebase.database().ref('safetyCategoryOrder').set(order);
+}
+function effectiveCategoryOrder(saved, allCategories) {
+  const valid = (saved || []).filter((c) => allCategories.includes(c));
+  const seen = new Set(valid);
+  const missing = allCategories.filter((c) => !seen.has(c));
+  return [...valid, ...missing];
+}
 // Whether a submitted inspection record has anything flagged Req. Att. /
 // Not OK — used to highlight that record, and the unit/site "folder" it
 // lives under, in orange so it's impossible to miss in the list.
@@ -8232,7 +8256,7 @@ function LongPressReorderList({ entries, onReorder, renderItem, disabled }) {
           onMouseUp={handleUp}
           onMouseLeave={() => draggingKey === entry.key && handleUp()}
           style={{
-            touchAction: draggingKey ? 'none' : 'pan-y',
+            touchAction: disabled ? 'auto' : 'none', // must be set from the start, not switched on once dragging begins — iOS Safari decides how to handle the gesture (scroll vs. custom) right at touchstart, and won't retroactively hand control back once it's picked scrolling. Only forced off while this list is actually reorderable (disabled=false), so scrolling still works normally inside an expanded row when dragging isn't active.
             userSelect: 'none',
             WebkitUserSelect: 'none', // iOS Safari needs its own prefixed property, or the long-press still pops up the text-selection bubbles/magnifier before our drag timer fires
             WebkitTouchCallout: 'none', // suppresses iOS's press-and-hold callout menu (Copy/Look Up/etc.) on the row too
@@ -8266,19 +8290,17 @@ function OrganizeChecklistRow({ label, dragging }) {
     </div>
   );
 }
-// Flat "Organize Checklist" screen — used for Vehicle and Equipment,
-// whose items aren't grouped into sections. Saves to Firebase the moment
-// a drag is dropped (no separate Save button — one less step, and there's
-// nothing here that needs a confirm, since it only reorders, never
-// deletes or changes an item's meaning).
-function OrganizeChecklistScreen({ title, items, order, checklistType, onBack }) {
+// Collapsible "Checklist Items" panel — used inline for Vehicle and
+// Equipment, whose items aren't grouped into sections. Sits right in the
+// normal Inspections view (no separate screen, no button to leave and
+// come back from); press and hold an item to drag it, saves to Firebase
+// the moment it's dropped, no separate Save step.
+function ChecklistItemsPanel({ title, items, order, checklistType }) {
   const effOrder = effectiveItemOrder(order, items.length);
   const entries = effOrder.map((canonicalIdx) => ({ key: String(canonicalIdx), label: items[canonicalIdx], canonicalIdx }));
   return (
-    <div>
-      <button onClick={onBack} className="text-xs uppercase tracking-wide mb-3" style={{ color: COLORS.inkDim }}>← Back to Inspections</button>
-      <p className="font-display text-lg font-bold mb-1">Organize {title} Checklist</p>
-      <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>Press and hold an item, then drag it up or down to reorder. Changes save automatically.</p>
+    <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+      <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Press and hold an item, then drag it up or down to reorder.</p>
       <LongPressReorderList
         entries={entries}
         renderItem={(entry, dragging) => <OrganizeChecklistRow label={entry.label} dragging={dragging} />}
@@ -8287,23 +8309,21 @@ function OrganizeChecklistScreen({ title, items, order, checklistType, onBack })
     </div>
   );
 }
-// Sectioned "Organize Checklist" screen — used for Yard, whose items are
-// grouped under section headers on the paper form. Items can be dragged
-// up/down within their own section (matching the paper form's layout);
-// moving an item to a different section isn't supported here, since the
-// sections themselves are meaningful groupings, not just visual ones.
-function OrganizeYardChecklistScreen({ yardOrder, onBack }) {
+// Sectioned version — used inline for Yard, whose items are grouped
+// under section headers on the paper form. Items can be dragged up/down
+// within their own section (matching the paper form's layout); moving an
+// item to a different section isn't supported here, since the sections
+// themselves are meaningful groupings, not just visual ones.
+function YardChecklistItemsPanel({ yardOrder }) {
   return (
-    <div>
-      <button onClick={onBack} className="text-xs uppercase tracking-wide mb-3" style={{ color: COLORS.inkDim }}>← Back to Inspections</button>
-      <p className="font-display text-lg font-bold mb-1">Organize Yard Checklist</p>
-      <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>Press and hold an item, then drag it up or down within its section to reorder. Changes save automatically.</p>
+    <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+      <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>Press and hold an item, then drag it up or down within its section to reorder.</p>
       {YARD_INSPECTION_SECTIONS.map((section, sIdx) => {
         const effOrder = effectiveItemOrder((yardOrder && yardOrder[sIdx]) || null, section.items.length);
         const entries = effOrder.map((canonicalIdx) => ({ key: String(canonicalIdx), label: section.items[canonicalIdx], canonicalIdx }));
         return (
-          <div key={section.name} className="mb-4">
-            <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>{section.name}</p>
+          <div key={section.name} className="mb-3">
+            <p className="font-display text-xs font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>{section.name}</p>
             <LongPressReorderList
               entries={entries}
               renderItem={(entry, dragging) => <OrganizeChecklistRow label={entry.label} dragging={dragging} />}
@@ -11284,6 +11304,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [driverDocuments, setDriverDocuments] = useState(() => cacheGet('driverDocuments', []));
   const [uploadingDriverDoc, setUploadingDriverDoc] = useState(false);
   const [expandedSafetyCategory, setExpandedSafetyCategory] = useState(null);
+  const [documentsFolderExpanded, setDocumentsFolderExpanded] = useState(false);
+  const [safetyCategoryOrder, setSafetyCategoryOrder] = useState(() => cacheGet('safetyCategoryOrder', []));
   const [jobHazardsExpanded, setJobHazardsExpanded] = useState(false);
   const [selectedJobHazard, setSelectedJobHazard] = useState(null); // JOB_HAZARDS key, or null (showing the job picker)
   const [trainingExpanded, setTrainingExpanded] = useState(false);
@@ -11358,7 +11380,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [submittingIncidentReport, setSubmittingIncidentReport] = useState(false);
   const [incidentReportActionBusy, setIncidentReportActionBusy] = useState(null);
   const [safetyInspectionType, setSafetyInspectionType] = useState(null); // one of SAFETY_INSPECTION_TYPES.key, or null (showing the menu)
-  const [organizingChecklistType, setOrganizingChecklistType] = useState(null); // 'vehicle' | 'equipment' | 'yard' | null — shows the long-press "Organize" screen for that checklist instead of the normal list
+  const [checklistItemsExpanded, setChecklistItemsExpanded] = useState(false); // toggles the inline reorderable checklist panel on Vehicle/Equipment/Yard inspections
   const [workerOrientations, setWorkerOrientations] = useState(() => cacheGet('workerOrientations', []));
   const [workerOrientationType, setWorkerOrientationType] = useState(null); // 'employeeOrientation' | 'operatorTraining' | null
   const [newWorkerOrientationOpen, setNewWorkerOrientationOpen] = useState(false);
@@ -11696,6 +11718,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = snap.val() || {};
       setInspectionChecklistOrder(val);
       cacheSet('inspectionChecklistOrder', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('safetyCategoryOrder');
+    const on = ref.on('value', (snap) => {
+      const val = Array.isArray(snap.val()) ? snap.val() : (snap.val() ? Object.values(snap.val()) : []);
+      setSafetyCategoryOrder(val);
+      cacheSet('safetyCategoryOrder', val);
     });
     return () => ref.off('value', on);
   }, []);
@@ -19560,114 +19592,142 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             return null;
           })()}
 
-          {SAFETY_CATEGORIES.filter((category) => (isAdmin || isSafety) || !ADMIN_ONLY_SAFETY_CATEGORIES.includes(category)).map((category) => {
-            const docs = safetyDocs.filter((d) => d.category === category);
-            return (
-              <AdminSection
-                key={category}
-                icon="📄"
-                title={`${category} (${docs.length})`}
-                expanded={expandedSafetyCategory === category}
-                onToggle={() => setExpandedSafetyCategory((c) => (c === category ? null : category))}
-              >
-                {EXTERNAL_SAFETY_LINKS[category] && (
-                  <a
-                    href={EXTERNAL_SAFETY_LINKS[category].url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 mb-3"
-                    style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}`, textDecoration: 'none' }}
-                  >
-                    <span className="text-sm font-semibold">🔗 {EXTERNAL_SAFETY_LINKS[category].label}</span>
-                    <span>→</span>
-                  </a>
-                )}
-                {docs.length === 0 ? (
-                  <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>No documents yet.</p>
-                ) : (
-                  <div className="space-y-2 mb-3">
-                    {docs.map((doc) => (
-                      <div key={doc.id} className="flex items-center justify-between gap-3 rounded-lg px-3 py-3" style={{ background: COLORS.surfaceRaised }}>
-                        <button
-                          onClick={() => openSafetyDoc(doc)}
-                          disabled={openingSafetyDocId === doc.id}
-                          className="flex items-center gap-2 min-w-0 flex-1 text-left"
-                          style={{ color: COLORS.ink }}
-                        >
-                          <span style={{ fontSize: '1.1rem' }}>📄</span>
-                          <span className="text-sm font-semibold truncate">
-                            {openingSafetyDocId === doc.id ? 'Opening…' : doc.title}
-                          </span>
-                        </button>
-                        <button
-                          onClick={() => handleSafetyDocAction(doc, 'print')}
-                          disabled={safetyDocActionBusy === doc.id}
-                          className="text-sm flex-shrink-0"
-                          style={{ color: COLORS.inkDim }}
-                          title="Print"
-                        >
-                          🖨️
-                        </button>
-                        <button
-                          onClick={() => handleSafetyDocAction(doc, 'send')}
-                          disabled={safetyDocActionBusy === doc.id}
-                          className="text-sm flex-shrink-0"
-                          style={{ color: COLORS.inkDim }}
-                          title="Send"
-                        >
-                          📤
-                        </button>
-                        {(isAdmin || isSafety) && (
-                          <button
-                            onClick={() => { if (confirm(`Remove "${doc.title}"?`)) deleteSafetyDoc(doc.id); }}
-                            className="text-xs flex-shrink-0"
-                            style={{ color: '#E07A5F' }}
-                          >
-                            🗑️
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {(isAdmin || isSafety) && (
-                  showAddSafetyDoc === category ? (
-                    <SafetyDocUploadForm
-                      uploading={uploadingSafetyDoc}
-                      onCancel={() => setShowAddSafetyDoc(null)}
-                      onSubmit={(title, file) => addSafetyDoc(category, title, file)}
-                    />
-                  ) : showScanSafetyDoc === category ? (
-                    <ScanDocumentForm
-                      scanning={uploadingSafetyDoc}
-                      onCancel={() => setShowScanSafetyDoc(null)}
-                      onSubmit={async (title, file) => { await addSafetyDoc(category, title, file); setShowScanSafetyDoc(null); }}
-                    />
+          {(() => {
+            const visibleCategories = SAFETY_CATEGORIES.filter((category) => (isAdmin || isSafety) || !ADMIN_ONLY_SAFETY_CATEGORIES.includes(category));
+            const foldered = FOLDERED_SAFETY_CATEGORIES.filter((c) => visibleCategories.includes(c));
+            const standalone = visibleCategories.filter((c) => !FOLDERED_SAFETY_CATEGORIES.includes(c));
+            const renderCategory = (category) => {
+              const docs = safetyDocs.filter((d) => d.category === category);
+              return (
+                <AdminSection
+                  key={category}
+                  icon={safetyCategoryIcon(category)}
+                  title={`${category} (${docs.length})`}
+                  expanded={expandedSafetyCategory === category}
+                  onToggle={() => setExpandedSafetyCategory((c) => (c === category ? null : category))}
+                >
+                  {EXTERNAL_SAFETY_LINKS[category] && (
+                    <a
+                      href={EXTERNAL_SAFETY_LINKS[category].url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 mb-3"
+                      style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}`, textDecoration: 'none' }}
+                    >
+                      <span className="text-sm font-semibold">🔗 {EXTERNAL_SAFETY_LINKS[category].label}</span>
+                      <span>→</span>
+                    </a>
+                  )}
+                  {docs.length === 0 ? (
+                    <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>No documents yet.</p>
                   ) : (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setShowAddSafetyDoc(category)}
-                        className="text-xs font-semibold px-3 py-2 rounded-lg"
-                        style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
-                      >
-                        + Add Document
-                      </button>
-                      {category === 'Safety Manual' && (
+                    <div className="space-y-2 mb-3">
+                      {docs.map((doc) => (
+                        <div key={doc.id} className="flex items-center justify-between gap-3 rounded-lg px-3 py-3" style={{ background: COLORS.surfaceRaised }}>
+                          <button
+                            onClick={() => openSafetyDoc(doc)}
+                            disabled={openingSafetyDocId === doc.id}
+                            className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                            style={{ color: COLORS.ink }}
+                          >
+                            <span style={{ fontSize: '1.1rem' }}>{safetyCategoryIcon(category)}</span>
+                            <span className="text-sm font-semibold truncate">
+                              {openingSafetyDocId === doc.id ? 'Opening…' : doc.title}
+                            </span>
+                          </button>
+                          <button
+                            onClick={() => handleSafetyDocAction(doc, 'print')}
+                            disabled={safetyDocActionBusy === doc.id}
+                            className="text-sm flex-shrink-0"
+                            style={{ color: COLORS.inkDim }}
+                            title="Print"
+                          >
+                            🖨️
+                          </button>
+                          <button
+                            onClick={() => handleSafetyDocAction(doc, 'send')}
+                            disabled={safetyDocActionBusy === doc.id}
+                            className="text-sm flex-shrink-0"
+                            style={{ color: COLORS.inkDim }}
+                            title="Send"
+                          >
+                            📤
+                          </button>
+                          {(isAdmin || isSafety) && (
+                            <button
+                              onClick={() => { if (confirm(`Remove "${doc.title}"?`)) deleteSafetyDoc(doc.id); }}
+                              className="text-xs flex-shrink-0"
+                              style={{ color: '#E07A5F' }}
+                            >
+                              🗑️
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {(isAdmin || isSafety) && (
+                    showAddSafetyDoc === category ? (
+                      <SafetyDocUploadForm
+                        uploading={uploadingSafetyDoc}
+                        onCancel={() => setShowAddSafetyDoc(null)}
+                        onSubmit={(title, file) => addSafetyDoc(category, title, file)}
+                      />
+                    ) : showScanSafetyDoc === category ? (
+                      <ScanDocumentForm
+                        scanning={uploadingSafetyDoc}
+                        onCancel={() => setShowScanSafetyDoc(null)}
+                        onSubmit={async (title, file) => { await addSafetyDoc(category, title, file); setShowScanSafetyDoc(null); }}
+                      />
+                    ) : (
+                      <div className="flex gap-2">
                         <button
-                          onClick={() => setShowScanSafetyDoc(category)}
+                          onClick={() => setShowAddSafetyDoc(category)}
                           className="text-xs font-semibold px-3 py-2 rounded-lg"
                           style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
                         >
-                          📷 Scan Pages
+                          + Add Document
                         </button>
-                      )}
-                    </div>
-                  )
-                )}
-              </AdminSection>
+                        {category === 'Safety Manual' && (
+                          <button
+                            onClick={() => setShowScanSafetyDoc(category)}
+                            className="text-xs font-semibold px-3 py-2 rounded-lg"
+                            style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                          >
+                            📷 Scan Pages
+                          </button>
+                        )}
+                      </div>
+                    )
+                  )}
+                </AdminSection>
+              );
+            };
+            const folderedDocCount = foldered.reduce((n, c) => n + safetyDocs.filter((d) => d.category === c).length, 0);
+            const orderedFoldered = effectiveCategoryOrder(safetyCategoryOrder, foldered);
+            return (
+              <>
+                <AdminSection
+                  icon="📁"
+                  title={`Documents (${folderedDocCount})`}
+                  expanded={documentsFolderExpanded}
+                  onToggle={() => setDocumentsFolderExpanded((x) => !x)}
+                >
+                  {documentsFolderExpanded && (
+                    <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Press and hold a category, then drag to reorder.</p>
+                  )}
+                  <LongPressReorderList
+                    entries={orderedFoldered.map((c) => ({ key: c }))}
+                    disabled={!!expandedSafetyCategory}
+                    onReorder={(newOrder) => saveSafetyCategoryOrder(newOrder)}
+                    renderItem={(entry) => renderCategory(entry.key)}
+                  />
+                </AdminSection>
+                {standalone.map(renderCategory)}
+              </>
             );
-          })}
+          })()}
 
           <AdminSection
             icon="⚠️"
@@ -20250,19 +20310,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               ) : safetyInspectionType === 'yard' ? (
                 <div>
                   <button
-                    onClick={() => { setSafetyInspectionType(null); setSafetyInspectionSite(null); setNewYardInspectionOpen(false); setViewingSafetyInspectionId(null); setOrganizingChecklistType(null); }}
+                    onClick={() => { setSafetyInspectionType(null); setSafetyInspectionSite(null); setNewYardInspectionOpen(false); setViewingSafetyInspectionId(null); }}
                     className="text-xs uppercase tracking-wide mb-3"
                     style={{ color: COLORS.inkDim }}
                   >
                     ← Back to Inspections
                   </button>
 
-                  {organizingChecklistType === 'yard' ? (
-                    <OrganizeYardChecklistScreen
-                      yardOrder={inspectionChecklistOrder.yard}
-                      onBack={() => setOrganizingChecklistType(null)}
-                    />
-                  ) : viewingSafetyInspectionId ? (
+                  {viewingSafetyInspectionId ? (
                     <YardInspectionDetail
                       record={safetyInspections.find((r) => r.id === viewingSafetyInspectionId)}
                       isAdmin={isAdmin || isSafety}
@@ -20296,13 +20351,17 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           + New Inspection
                         </button>
                         <button
-                          onClick={() => setOrganizingChecklistType('yard')}
+                          onClick={() => setChecklistItemsExpanded((x) => !x)}
                           className="text-xs font-semibold px-3 py-2 rounded-lg"
                           style={{ background: COLORS.surface, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
                         >
-                          ☰ Organize Checklist
+                          📋 Checklist Items {checklistItemsExpanded ? '▲' : '▼'}
                         </button>
                       </div>
+
+                      {checklistItemsExpanded && (
+                        <YardChecklistItemsPanel yardOrder={inspectionChecklistOrder.yard} />
+                      )}
 
                       {[...new Set(safetyInspections.filter((r) => r.type === 'yard').map((r) => r.site))]
                         .sort((a, b) => a.localeCompare(b))
@@ -20354,22 +20413,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               ) : safetyInspectionType === 'vehicle' ? (
                 <div>
                   <button
-                    onClick={() => { setSafetyInspectionType(null); setNewVehicleInspectionOpen(false); setViewingSafetyInspectionId(null); setOrganizingChecklistType(null); }}
+                    onClick={() => { setSafetyInspectionType(null); setNewVehicleInspectionOpen(false); setViewingSafetyInspectionId(null); }}
                     className="text-xs uppercase tracking-wide mb-3"
                     style={{ color: COLORS.inkDim }}
                   >
                     ← Back to Inspections
                   </button>
 
-                  {organizingChecklistType === 'vehicle' ? (
-                    <OrganizeChecklistScreen
-                      title="Vehicle"
-                      items={VEHICLE_INSPECTION_ITEMS}
-                      order={inspectionChecklistOrder.vehicle}
-                      checklistType="vehicle"
-                      onBack={() => setOrganizingChecklistType(null)}
-                    />
-                  ) : viewingSafetyInspectionId ? (
+                  {viewingSafetyInspectionId ? (
                     <VehicleInspectionDetail
                       record={safetyInspections.find((r) => r.id === viewingSafetyInspectionId)}
                       isAdmin={isAdmin || isSafety}
@@ -20403,13 +20454,17 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           + New Inspection
                         </button>
                         <button
-                          onClick={() => setOrganizingChecklistType('vehicle')}
+                          onClick={() => setChecklistItemsExpanded((x) => !x)}
                           className="text-xs font-semibold px-3 py-2 rounded-lg"
                           style={{ background: COLORS.surface, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
                         >
-                          ☰ Organize Checklist
+                          📋 Checklist Items {checklistItemsExpanded ? '▲' : '▼'}
                         </button>
                       </div>
+
+                      {checklistItemsExpanded && (
+                        <ChecklistItemsPanel title="Vehicle" items={VEHICLE_INSPECTION_ITEMS} order={inspectionChecklistOrder.vehicle} checklistType="vehicle" />
+                      )}
 
                       {[...new Set(safetyInspections.filter((r) => r.type === 'vehicle').map((r) => r.unit))]
                         .sort((a, b) => a.localeCompare(b))
@@ -20461,22 +20516,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               ) : safetyInspectionType === 'equipment' ? (
                 <div>
                   <button
-                    onClick={() => { setSafetyInspectionType(null); setNewEquipmentInspectionOpen(false); setViewingSafetyInspectionId(null); setOrganizingChecklistType(null); }}
+                    onClick={() => { setSafetyInspectionType(null); setNewEquipmentInspectionOpen(false); setViewingSafetyInspectionId(null); }}
                     className="text-xs uppercase tracking-wide mb-3"
                     style={{ color: COLORS.inkDim }}
                   >
                     ← Back to Inspections
                   </button>
 
-                  {organizingChecklistType === 'equipment' ? (
-                    <OrganizeChecklistScreen
-                      title="Equipment"
-                      items={EQUIPMENT_INSPECTION_ITEMS}
-                      order={inspectionChecklistOrder.equipment}
-                      checklistType="equipment"
-                      onBack={() => setOrganizingChecklistType(null)}
-                    />
-                  ) : viewingSafetyInspectionId ? (
+                  {viewingSafetyInspectionId ? (
                     <EquipmentInspectionDetail
                       record={safetyInspections.find((r) => r.id === viewingSafetyInspectionId)}
                       isAdmin={isAdmin || isSafety}
@@ -20517,13 +20564,17 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           + New Inspection
                         </button>
                         <button
-                          onClick={() => setOrganizingChecklistType('equipment')}
+                          onClick={() => setChecklistItemsExpanded((x) => !x)}
                           className="text-xs font-semibold px-3 py-2 rounded-lg"
                           style={{ background: COLORS.surface, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
                         >
-                          ☰ Organize Checklist
+                          📋 Checklist Items {checklistItemsExpanded ? '▲' : '▼'}
                         </button>
                       </div>
+
+                      {checklistItemsExpanded && (
+                        <ChecklistItemsPanel title="Equipment" items={EQUIPMENT_INSPECTION_ITEMS} order={inspectionChecklistOrder.equipment} checklistType="equipment" />
+                      )}
 
                       {[...new Set(safetyInspections.filter((r) => r.type === 'equipment').map((r) => r.unit))]
                         .sort((a, b) => a.localeCompare(b))
