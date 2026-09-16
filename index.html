@@ -1368,6 +1368,20 @@ const JOB_HAZARD_COURSE_KEY = { buncherOperator: 'jhBuncherOperator' };
 JOB_HAZARD_AUTO_ROLE_KEYS.forEach((jobKey) => {
   JOB_HAZARD_COURSE_KEY[jobKey] = 'jh' + jobKey.charAt(0).toUpperCase() + jobKey.slice(1);
 });
+// Woodlands Training isn't a TRAINING_COURSES entry — it's an outside
+// LMS course (see EXTERNAL_SAFETY_LINKS), so there's no in-app video or
+// quiz to track. It still belongs on the training checklist (invite
+// form / assign-to-existing-employee) alongside everything else;
+// completion is just self-reported once someone's actually finished it
+// on the external site, using the same videoWatched record any other
+// watch-only course uses (see isTrainingCourseComplete).
+const EXTERNAL_TRAINING_COURSES = {
+  woodlandsTraining: {
+    label: 'Woodlands Training',
+    description: "Completed on Vanderwell's outside training site — open it, finish the course there, then come back and mark it done here.",
+    url: EXTERNAL_SAFETY_LINKS['Woodlands Training'].url,
+  },
+};
 
 // Employer info required on every Certificate of Training (TDG Regulations
 // Section 6.3(1)(a) — name and address of the employer's place of business).
@@ -7443,6 +7457,44 @@ function EmployeeEmailEditor({ name, currentEmail, onSave }) {
   );
 }
 
+// Shared checkbox list used both in the invite form ("required before
+// app access") and the assign-to-existing-employee panel ("assigned,
+// non-blocking") — same three groups either way: quiz courses, watch-
+// only job-hazard videos, and self-reported external courses (Woodlands
+// Training). Which list it's editing and what selecting does with it is
+// entirely up to the caller via `selected`/`onToggle`.
+function TrainingChecklist({ selected, onToggle }) {
+  return (
+    <>
+      <p className="text-xs font-semibold uppercase tracking-wide mt-1 mb-1" style={{ color: COLORS.inkDim }}>Safety courses (quiz)</p>
+      {['whmis', 'tdg'].map((key) => (
+        <label key={key} className="flex items-center gap-2 text-sm py-1 cursor-pointer">
+          <input type="checkbox" checked={selected.includes(key)} onChange={() => onToggle(key)} />
+          <span>{TRAINING_COURSES[key].label}</span>
+        </label>
+      ))}
+      <p className="text-xs font-semibold uppercase tracking-wide mt-2 mb-1" style={{ color: COLORS.inkDim }}>Job hazard videos (watch-only)</p>
+      {Object.keys(JOB_HAZARD_COURSE_KEY).map((jobKey) => {
+        const key = JOB_HAZARD_COURSE_KEY[jobKey];
+        return (
+          <label key={key} className="flex items-center gap-2 text-sm py-1 cursor-pointer">
+            <input type="checkbox" checked={selected.includes(key)} onChange={() => onToggle(key)} />
+            <span>{JOB_HAZARDS[jobKey].label}</span>
+          </label>
+        );
+      })}
+      <p className="text-xs font-semibold uppercase tracking-wide mt-2 mb-1" style={{ color: COLORS.inkDim }}>External training</p>
+      {Object.keys(EXTERNAL_TRAINING_COURSES).map((key) => (
+        <label key={key} className="flex items-center gap-2 text-sm py-1 cursor-pointer">
+          <input type="checkbox" checked={selected.includes(key)} onChange={() => onToggle(key)} />
+          <span>{EXTERNAL_TRAINING_COURSES[key].label}</span>
+        </label>
+      ))}
+    </>
+  );
+}
+
+
 // One collection's migration control — its own description, its own
 // result, its own run button, independent of any others shown alongside
 // it. Kept simple and self-contained so adding another collection to the
@@ -11663,6 +11715,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [mechanicSchedules, setMechanicSchedules] = useState({});
   const [pushMessages, setPushMessages] = useState({});
   const [editingScheduleFor, setEditingScheduleFor] = useState(null);
+  const [editingTrainingFor, setEditingTrainingFor] = useState(null);
   const [inviteNameDraft, setInviteNameDraft] = useState('');
   const [inviteEmailDraft, setInviteEmailDraft] = useState('');
   const [generatedInviteLink, setGeneratedInviteLink] = useState(null);
@@ -11715,6 +11768,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [roles, setRoles] = useState(() => cacheGet('roles', {})); // { [slug]: 'employee'|'foreman'|'admin' }
   const [unitAssignments, setUnitAssignments] = useState(() => cacheGet('unitAssignments', {})); // { [slug]: unitName } — a service truck or a production machine. Which one it is determines mechanic vs. production automatically.
   const [altUnitAssignments, setAltUnitAssignments] = useState(() => cacheGet('altUnitAssignments', {})); // { [slug]: (unitName | '__mechanic__')[] } — any additional jobs someone regularly switches into, beyond their primary. Missing/empty = no alternates, behaves exactly as before.
+  // Training required before someone gets into the app — set per employee
+  // at invite time (see the invite form's checklist). { [slug]: courseKey[] }.
+  // Empty/missing = nothing required, same as every existing employee today.
+  const [requiredTraining, setRequiredTrainingState] = useState(() => cacheGet('requiredTraining', {}));
+  // Training assigned to an existing employee by admin/safety (see
+  // toggleAssignedTraining) — same shape as requiredTraining but never
+  // blocks access; just follows them as a reminder until each item is
+  // done (see the Safety page banner).
+  const [assignedTraining, setAssignedTraining] = useState(() => cacheGet('assignedTraining', {}));
+  // Completion record for watch-only (noQuiz) job-hazard courses, which
+  // don't produce a trainingRecords quiz entry — { [slug]: { [courseKey]: timestamp } }.
+  const [videoWatched, setVideoWatched] = useState(() => cacheGet('videoWatched', {}));
   const [blocks, setBlocks] = useState([]);
   const [productionShifts, setProductionShifts] = useState([]);
   const [driverLogs, setDriverLogs] = useState(() => cacheGet('driverLogs', [])); // hours-of-service log book — winch truck driver only, separate from paid clock-in
@@ -11868,6 +11933,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [mapPins, setMapPins] = useState(() => cacheGet('mapPins', [])); // [{id, mapId, x, y, type, note, addedBy, isPublic, time}]
   const [inviteRoleDraft, setInviteRoleDraft] = useState('employee');
   const [inviteUnitDraft, setInviteUnitDraft] = useState('');
+  // Which TRAINING_COURSES keys are required before this new hire gets
+  // into the app — picked by whoever's sending the invite (see the
+  // checklist in the invite form). Cleared after each successful invite.
+  const [inviteTrainingDraft, setInviteTrainingDraft] = useState([]);
   const [addingUnitAtInvite, setAddingUnitAtInvite] = useState(false);
   const [newInviteUnitName, setNewInviteUnitName] = useState('');
   const [newInviteUnitType, setNewInviteUnitType] = useState('');
@@ -12443,7 +12512,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         if (!data || Date.now() > data.expiresAt) {
           setInviteTokenState('invalid');
         } else {
-          setInviteTokenState({ token, name: data.name, role: data.role || 'employee', unit: data.unit || null });
+          setInviteTokenState({ token, name: data.name, role: data.role || 'employee', unit: data.unit || null, requiredTraining: data.requiredTraining || null });
         }
       } catch (e) {
         setInviteTokenState('invalid');
@@ -12635,6 +12704,36 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = snap.val() || {};
       setUnitAssignments(val);
       cacheSet('unitAssignments', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('requiredTraining');
+    const on = ref.on('value', (snap) => {
+      const val = snap.val() || {};
+      setRequiredTrainingState(val);
+      cacheSet('requiredTraining', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('assignedTraining');
+    const on = ref.on('value', (snap) => {
+      const val = snap.val() || {};
+      setAssignedTraining(val);
+      cacheSet('assignedTraining', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('videoWatched');
+    const on = ref.on('value', (snap) => {
+      const val = snap.val() || {};
+      setVideoWatched(val);
+      cacheSet('videoWatched', val);
     });
     return () => ref.off('value', on);
   }, []);
@@ -12840,7 +12939,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // Generates a one-time invite link for a brand-new employee — this is
   // now the only way a new account can be created, closing the open door
   // where anyone with the app's address could sign themselves up.
-  const generateInvite = async (name, unit) => {
+  const generateInvite = async (name, unit, requiredTrainingKeys) => {
     const trimmed = name.trim();
     if (!trimmed) return null;
     const token = Array.from(crypto.getRandomValues(new Uint8Array(24))).map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -12848,6 +12947,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       name: trimmed,
       role: inviteRoleDraft,
       unit: unit || null,
+      requiredTraining: (requiredTrainingKeys && requiredTrainingKeys.length) ? requiredTrainingKeys : null,
       createdAt: Date.now(),
       expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000, // a week — plenty of time to actually send and use it
     });
@@ -13023,6 +13123,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             if (inviteTokenState.unit) {
               await setAssignedUnit(mechanic, inviteTokenState.unit);
               effectiveJobType = machineType(inviteTokenState.unit, unitTypes) ? 'production' : 'mechanic';
+            }
+            if (inviteTokenState.requiredTraining && inviteTokenState.requiredTraining.length) {
+              await setRequiredTraining(mechanic, inviteTokenState.requiredTraining);
             }
             firebase.database().ref('inviteTokens/' + inviteTokenState.token).remove().catch(() => {});
             setInviteTokenState(null);
@@ -13411,6 +13514,129 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const assignedUnitFor = (name) => unitAssignments[slugForMechanic(name)] || '';
   const setAssignedUnit = async (name, unit) => {
     await firebase.database().ref('unitAssignments/' + slugForMechanic(name)).set(unit).catch(() => alert("Couldn't save that assignment — check your signal and try again."));
+  };
+  // Training required before someone gets into the app — set once at
+  // invite time (see the invite form's checklist) and copied onto their
+  // own record when they finish PIN setup (see the invite-consumption
+  // block). Completion itself isn't stored here — it's computed live by
+  // checking trainingRecords (quiz courses) or videoWatched (noQuiz
+  // courses) against this list, so nothing gets out of sync if a course
+  // is retaken.
+  const setRequiredTraining = async (name, courseKeys) => {
+    const slug = slugForMechanic(name);
+    const ref = firebase.database().ref('requiredTraining/' + slug);
+    await (courseKeys && courseKeys.length ? ref.set(courseKeys) : ref.remove()).catch(() => alert("Couldn't save required training — check your signal and try again."));
+  };
+  // Training assigned to someone already on the app (admin/safety, from
+  // the Employees panel) — same course list shape as requiredTraining,
+  // but never blocks access; it's just a reminder that follows them
+  // around (see the Safety page banner) until each item is done.
+  const toggleAssignedTraining = async (name, courseKey) => {
+    const slug = slugForMechanic(name);
+    const current = assignedTraining[slug] || [];
+    const next = current.includes(courseKey) ? current.filter((k) => k !== courseKey) : [...current, courseKey];
+    const ref = firebase.database().ref('assignedTraining/' + slug);
+    await (next.length ? ref.set(next) : ref.remove()).catch(() => alert("Couldn't save that — check your signal and try again."));
+  };
+  // Marks a watch-only (noQuiz) job-hazard course — or a self-reported
+  // external course like Woodlands Training — as done for the CURRENT
+  // mechanic. Quiz courses (WHMIS/TDG) don't need this, they already
+  // get a trainingRecords entry from submitTrainingQuiz.
+  const markVideoWatched = async (courseKey) => {
+    const slug = slugForMechanic(currentMechanic);
+    await firebase.database().ref(`videoWatched/${slug}/${courseKey}`).set(Date.now()).catch(() => {});
+  };
+  // Whether `mechanic` has finished `courseKey` — passed for a quiz
+  // course, watched for a noQuiz one, self-reported for an external
+  // course like Woodlands Training (see EXTERNAL_TRAINING_COURSES). An
+  // unknown courseKey (renamed or removed) is treated as complete so it
+  // can never permanently block someone's access.
+  const isTrainingCourseComplete = (courseKey, mechanic) => {
+    const course = TRAINING_COURSES[courseKey];
+    const slug = slugForMechanic(mechanic);
+    if (!course) {
+      if (EXTERNAL_TRAINING_COURSES[courseKey]) return !!(videoWatched[slug] && videoWatched[slug][courseKey]);
+      return true;
+    }
+    if (course.noQuiz) return !!(videoWatched[slug] && videoWatched[slug][courseKey]);
+    return trainingRecords.some((r) => r.courseKey === courseKey && r.mechanic === mechanic && r.passed);
+  };
+  const pendingRequiredTrainingFor = (mechanic) => {
+    if (!mechanic) return [];
+    const list = requiredTraining[slugForMechanic(mechanic)] || [];
+    return list.filter((ck) => !isTrainingCourseComplete(ck, mechanic));
+  };
+  const pendingAssignedTrainingFor = (mechanic) => {
+    if (!mechanic) return [];
+    const list = assignedTraining[slugForMechanic(mechanic)] || [];
+    return list.filter((ck) => !isTrainingCourseComplete(ck, mechanic));
+  };
+  // One row for a required/assigned training item — shared by the
+  // blocking onboarding gate and the non-blocking Safety-page reminder
+  // banner, so both look and behave identically. A TRAINING_COURSES
+  // entry drops the person straight into that course's real video/quiz
+  // player; an EXTERNAL_TRAINING_COURSES entry (Woodlands Training)
+  // instead opens the outside course in a new tab and offers a
+  // self-report "Mark Complete" button, since there's nothing in-app to
+  // track its progress.
+  const renderTrainingListItem = (key) => {
+    const course = TRAINING_COURSES[key];
+    const external = EXTERNAL_TRAINING_COURSES[key];
+    if (!course && !external) return null;
+    if (external) {
+      return (
+        <div key={key} className="rounded-lg px-4 py-3" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+          <p className="text-sm font-semibold mb-1">{external.label}</p>
+          <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>{external.description}</p>
+          <div className="flex gap-2 flex-wrap">
+            <a
+              href={external.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-display uppercase tracking-wider font-semibold px-3 py-2 rounded-lg"
+              style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}`, textDecoration: 'none' }}
+            >
+              Open Course ↗
+            </a>
+            <button
+              onClick={() => markVideoWatched(key)}
+              className="text-xs font-display uppercase tracking-wider font-semibold px-3 py-2 rounded-lg"
+              style={{ color: '#1B1F19', background: COLORS.accent }}
+            >
+              ✓ Mark Complete
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <button
+        key={key}
+        onClick={() => {
+          setScreen('safety');
+          setTrainingExpanded(true);
+          setSelectedCourse(key);
+          setQuizAnswers({});
+          setQuizResult(null);
+          setVideoSlideIndex(0);
+          startQuizSession(key);
+          if (COURSE_VIDEO_CHECKPOINTS[key]) {
+            setCourseStage('video');
+            playTrainingSlide(key, 0);
+          } else {
+            setCourseStage('modules');
+          }
+        }}
+        className="w-full flex items-center justify-between gap-3 rounded-lg px-4 py-3 text-left"
+        style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}
+      >
+        <span>
+          <span className="text-sm font-semibold block">{course.label}</span>
+          <span className="text-xs" style={{ color: COLORS.inkDim }}>{course.noQuiz ? 'Watch the video' : 'Watch and pass the quiz'}</span>
+        </span>
+        <span className="text-xs font-bold flex-shrink-0" style={{ color: COLORS.progress }}>Start →</span>
+      </button>
+    );
   };
   // Toggles one unit in or out of someone's list of alternate jobs — admin
   // can check as many as apply. An empty resulting list removes the field
@@ -16126,6 +16352,45 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     );
   }
 
+  // ---------- ONBOARDING TRAINING GATE ----------
+  // Blocks every other screen until whatever training an admin assigned
+  // at invite time (see requiredTraining / the invite form's checklist)
+  // is done — passed for a quiz course (WHMIS/TDG), watched for a
+  // noQuiz job-hazard video. Sits after the login gate and before every
+  // `screen === '...'` check below, so it applies no matter what screen
+  // is set. The one exception is being mid-course on something that's
+  // actually still pending — that needs the real 'safety' screen to
+  // render underneath so the video/quiz player itself can show; this
+  // gate reappears automatically once they finish or back out of it.
+  const onboardingPending = pendingRequiredTrainingFor(currentMechanic);
+  const inOnboardingCourse = selectedCourse && onboardingPending.includes(selectedCourse);
+  if (onboardingPending.length > 0 && !inOnboardingCourse) {
+    return (
+      <div style={{ color: COLORS.ink, minHeight: '100vh' }} className="font-body p-6">
+        {FONT_STYLE}
+        <div className="max-w-md mx-auto pt-8">
+          <p className="font-display text-xl font-bold mb-1">Welcome, {currentMechanic}</p>
+          <p className="text-sm mb-6" style={{ color: COLORS.inkDim }}>Before you can get into the app, finish the training below — it only takes a few minutes.</p>
+          <div className="space-y-2 mb-8">
+            {onboardingPending.map(renderTrainingListItem)}
+          </div>
+          <button
+            onClick={async () => {
+              const keepSession = !!localStorage.getItem('webauthn_cred_' + currentMechanic);
+              if (!keepSession) { await firebase.auth().signOut().catch(() => {}); }
+              setCurrentMechanic(null);
+              setScreen('login');
+            }}
+            className="text-xs uppercase tracking-wide"
+            style={{ color: COLORS.inkDim }}
+          >
+            Log out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ---------- DASHBOARD ----------
   if (screen === 'dashboard') {
     const q = searchQuery.trim().toLowerCase();
@@ -17829,6 +18094,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>Picking their unit is what makes them a mechanic or an operator — a Service Truck means mechanic, any machine means operator. Reassignable anytime below.</p>
               )}
             </div>
+            <div className="mb-3">
+              <p className="font-display text-xs uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>Required training before app access</p>
+              <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Check anything this person must complete before they can use the app — they'll be walked through these right after setting their PIN, and locked out of everything else until they're done.</p>
+              <div className="rounded-lg p-2 max-h-64 overflow-y-auto" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+                <TrainingChecklist
+                  selected={inviteTrainingDraft}
+                  onToggle={(key) => setInviteTrainingDraft((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))}
+                />
+              </div>
+            </div>
             <Btn
               onClick={async () => {
                 setGeneratingInvite(true);
@@ -17844,8 +18119,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   setNewInviteUnitType('');
                 }
                 if (inviteEmailDraft.trim()) await saveMechanicEmail(inviteNameDraft, inviteEmailDraft);
-                const link = await generateInvite(inviteNameDraft, unitToUse);
+                const link = await generateInvite(inviteNameDraft, unitToUse, inviteTrainingDraft);
                 setGeneratedInviteLink(link);
+                setInviteTrainingDraft([]);
                 setGeneratingInvite(false);
               }}
               disabled={!inviteNameDraft.trim() || generatingInvite}
@@ -18024,6 +18300,27 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     currentEmail={mechanicEmails[slugForMechanic(m)] || ''}
                     onSave={(email) => saveMechanicEmail(m, email)}
                   />
+                )}
+
+                {(isAdmin || isSafety) && (
+                  <div className="mb-3">
+                    <button
+                      onClick={() => setEditingTrainingFor(editingTrainingFor === m ? null : m)}
+                      className="text-xs font-display uppercase tracking-wider underline"
+                      style={{ color: COLORS.inkDim }}
+                    >
+                      🎓 Assigned training: {(assignedTraining[slugForMechanic(m)] || []).length || 'None'}
+                    </button>
+                    {editingTrainingFor === m && (
+                      <div className="rounded-lg p-2 mt-2 max-h-64 overflow-y-auto" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+                        <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Doesn't lock them out of the app — just adds a reminder on their Safety page until each item is done.</p>
+                        <TrainingChecklist
+                          selected={assignedTraining[slugForMechanic(m)] || []}
+                          onToggle={(key) => toggleAssignedTraining(m, key)}
+                        />
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {isAdmin && (showRemoveConfirm === m ? (
@@ -20037,6 +20334,21 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           })()}
 
           {(() => {
+            const myAssignedPending = pendingAssignedTrainingFor(currentMechanic);
+            if (!myAssignedPending.length) return null;
+            return (
+              <div className="rounded-lg p-4 mb-8" style={{ background: COLORS.progress + '22', border: `1px solid ${COLORS.progress}` }}>
+                <p className="text-sm font-semibold mb-3" style={{ color: COLORS.progress }}>
+                  🎓 You have {myAssignedPending.length} training item{myAssignedPending.length > 1 ? 's' : ''} assigned — no rush, but please complete {myAssignedPending.length > 1 ? 'them' : 'it'} when you can.
+                </p>
+                <div className="space-y-2">
+                  {myAssignedPending.map(renderTrainingListItem)}
+                </div>
+              </div>
+            );
+          })()}
+
+          {(() => {
             const sections = {};
 
             (() => {
@@ -20297,7 +20609,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         <span className="text-xs" style={{ color: COLORS.inkDim }}>{course.subtitle}</span>
                       </span>
                       <span className="text-xs font-bold flex-shrink-0" style={{ color: course.noQuiz ? COLORS.accent : passed ? '#6B9080' : myAttempts.length ? '#E07A5F' : COLORS.inkDim }}>
-                        {course.noQuiz ? '🎬 Watch' : passed ? '✓ Passed' : myAttempts.length ? 'Not passed yet' : 'Not started'}
+                        {course.noQuiz ? (isTrainingCourseComplete(key, currentMechanic) ? '✓ Watched' : '🎬 Watch') : passed ? '✓ Passed' : myAttempts.length ? 'Not passed yet' : 'Not started'}
                       </span>
                     </button>
                   );
@@ -20370,11 +20682,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   const goNext = async () => {
                     stopTrainingSpeech();
                     if (isLastSlide) {
-                      // Watch-only course (see the `noQuiz` flag) — there's
-                      // no quiz to score and nothing to record, so just
-                      // head back to the course list instead of routing
-                      // through the result screen.
+                      // Watch-only course (see the `noQuiz` flag) — no
+                      // quiz to score, but still record that it was
+                      // watched (see markVideoWatched) so it can satisfy
+                      // required training and show as watched in the
+                      // course list, then head back to the course list
+                      // instead of routing through the result screen.
                       if (course.noQuiz) {
+                        await markVideoWatched(selectedCourse);
                         setSelectedCourse(null);
                         setCourseStage('modules');
                         return;
