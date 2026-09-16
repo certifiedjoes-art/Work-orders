@@ -1168,6 +1168,85 @@ const TRAINING_COURSES = {
               // same as WHMIS — kept as an empty array (not removed) for
               // the same defensive-fallback reason as WHMIS's above.
   },
+  // Job-hazard courses — the video version of the task-by-task hazard
+  // lists in JOB_HAZARDS, one module per task, narrated the same
+  // WHMIS/TDG-style way but watch-only: no quiz, no checkpoint, no
+  // certificate (see the `noQuiz` flag, read by the course list badge
+  // and the video player's Finish button/goNext logic). Buncher Operator
+  // is the first one built as the style sample; the rest of JOB_HAZARDS'
+  // 14 roles follow the same pattern once this one's approved.
+  jhBuncherOperator: {
+    label: 'Job Hazards — Buncher Operator',
+    subtitle: 'Task-by-task hazard awareness, narrated video (no quiz)',
+    noQuiz: true,
+    modules: [
+      {
+        title: 'Mounting and Dismounting the Machine',
+        content: [
+          'Every shift starts and ends the same way: climbing up into the cab and climbing back down. It sounds routine, but slipping or falling off the machine is one of the most common ways buncher operators get hurt — especially with mud, snow, or ice built up on the steps and grab handles.',
+          'Keep three points of contact at all times — two hands and a foot, or two feet and a hand — and always face the machine as you climb. Never jump down, even for a quick check on the ground; a rolled ankle out in the bush is a long walk back.',
+        ],
+      },
+      {
+        title: 'Doing Your Shift Inspection',
+        content: [
+          'Your walk-around before start-up means moving around and under a machine that isn\'t always predictable — slips, trips, and falls are the main risk, and cold weather makes footing worse right when you need to be careful.',
+          'Stay clear of the saw blade area until you\'ve confirmed it\'s fully stopped — a blade that\'s still coasting down can still cut. Dress for the cold during your walk-around; a rushed inspection to get back in the warm cab is how things get missed.',
+        ],
+      },
+      {
+        title: 'Greasing and Daily Maintenance',
+        content: [
+          'Greasing puts you right up against pinch points and hot components, plus the same blade hazard as your inspection and the physical strain of climbing around the machine with the grease gun.',
+          'Let hot components cool before you touch them, and keep your hands clear of anywhere two surfaces come together under pressure. Cold weather makes fittings harder to reach and your grip weaker, so take the extra minute instead of rushing.',
+        ],
+      },
+      {
+        title: 'Operating the Buncher',
+        content: [
+          'Hours in the cab bring their own risks — excessive noise, fatigue, and the repetitive strain of running the same controls shift after shift, especially on night shifts or when production pressure has you pushing the pace.',
+          'Know where your fire extinguisher is and check it regularly — hydraulic fluid and hot components mean machine fires are a real risk. Wear hearing protection, take your breaks, and if fatigue is setting in, say something before it becomes a bigger problem.',
+        ],
+      },
+      {
+        title: 'Walking the Machine Over Distance',
+        content: [
+          'Moving the buncher any real distance means watching the ground ahead for soft or swampy terrain that could sink or tip you, and staying alert for other trucks and equipment moving through the same area.',
+          'Keep your boom tucked in and watch overhead for trees and branches that could snag it as you travel. Take it slow on uneven ground — a tipped machine is a much bigger problem than a few extra minutes of travel time.',
+        ],
+      },
+      {
+        title: 'Cutting Trees',
+        content: [
+          'This is the core of the job, and where the most serious hazards live: flying debris, trees falling toward the cab, a broken saw blade, or a tree jabbing into the side panels. Soft ground can also sink or tip the machine mid-cut.',
+          'Read the lean and the surrounding stand before every cut, and never assume a tree will fall exactly where you expect. Keep the cab closed up and stay alert to what\'s happening around you, not just the tree in front of the head.',
+        ],
+      },
+      {
+        title: 'Fueling the Machine',
+        content: [
+          'Fueling combines the same slip-and-fall risk as any time you\'re on the ground near the machine with the added hazards of a fuel spill and skin contact with diesel, on top of standing out in the cold while you do it.',
+          'Have a spill kit within reach and know where it is before you start. Diesel on bare skin causes irritation with repeated contact, so wipe up spills right away and wash off any fuel that gets on your hands or clothing.',
+        ],
+      },
+      {
+        title: 'Radio Communications',
+        content: [
+          'Good radio communication keeps everyone on the block safe — the real hazards here aren\'t physical, they\'re getting lost, misunderstanding directions, or drifting into a no-go zone because a message didn\'t get through clearly.',
+          'Confirm you\'ve heard and understood any instruction before you act on it, and speak up the moment you\'re unsure of your position. A radio call that seems like overkill is a lot cheaper than an incident report.',
+        ],
+      },
+    ],
+    quiz: [], // watch-only course — see noQuiz above.
+  },
+};
+// Maps a JOB_HAZARDS key to its video course's key in TRAINING_COURSES,
+// for the "Watch the video version" cross-link on that role's Job
+// Hazards detail screen. Only roles with a finished video appear here —
+// checked with `JOB_HAZARD_COURSE_KEY[key]` rather than assuming every
+// JOB_HAZARDS entry has one, since most of the 14 roles don't yet.
+const JOB_HAZARD_COURSE_KEY = {
+  buncherOperator: 'jhBuncherOperator',
 };
 
 // Employer info required on every Certificate of Training (TDG Regulations
@@ -1279,6 +1358,11 @@ const TDG_QUESTION_POOLS = {
 const COURSE_VIDEO_CHECKPOINTS = {
   whmis: { 0: [0], 1: [0], 2: [0, 1], 3: [0, 1, 2], 4: [0, 1], 5: [0], 6: [0] },
   tdg: { 0: [0], 1: [0, 1], 2: [0], 3: [0, 1], 4: [0], 5: [0, 1], 6: [0] },
+  // Job-hazard courses (see JOB_HAZARD_COURSE_KEYS) are watch-only — no
+  // quiz checkpoints — but still need a (empty) entry here so the course
+  // list's click handler routes straight into the video player instead
+  // of the read-then-quiz screen (see the click handler's comment).
+  jhBuncherOperator: {},
 };
 // Which courses draw checkpoint questions from a per-module pool (see
 // startQuizSession) — keyed by course, so a future course's pools plug
@@ -7589,9 +7673,28 @@ const TDG_MODULE_BACKGROUND = [
   { color: '#E4002B', colorDark: '#A3001F' }, // 5: Emergency response — safety red/danger
   { color: '#00A651', colorDark: '#00642F' }, // 6: Training & certification — a second safety green
 ];
+// Job-hazard course module colors — one per task, in task order. Same
+// safety-signage palette family as WHMIS/TDG above (kept visually
+// consistent across all three course types) but its own 8-color
+// sequence: blue for straightforward procedure, red reserved for the
+// task with the most serious hazards (cutting trees), etc. Shared by
+// every job-hazard course rather than one array per role, since they're
+// all the same task-count-varies-by-role shape and don't need bespoke
+// per-role coloring the way WHMIS/TDG's fixed 7-module structure does.
+const JOB_HAZARD_MODULE_BACKGROUND = [
+  { color: '#0072CE', colorDark: '#003E7E' }, // 0: routine/procedural task — safety blue
+  { color: '#F2A900', colorDark: '#B37D00' }, // 1: inspection — safety amber
+  { color: '#009688', colorDark: '#00695C' }, // 2: maintenance — teal
+  { color: '#FF6A13', colorDark: '#CC540F' }, // 3: operating — safety orange
+  { color: '#0057B8', colorDark: '#00305F' }, // 4: travel/repositioning — deeper blue
+  { color: '#E4002B', colorDark: '#A3001F' }, // 5: highest-hazard task — safety red
+  { color: '#8A6AB0', colorDark: '#5C4680' }, // 6: fueling — purple
+  { color: '#4CAF50', colorDark: '#2E7D32' }, // 7: communication — safety green
+];
 const MODULE_BACKGROUND_BY_COURSE = {
   whmis: MODULE_BACKGROUND,
   tdg: TDG_MODULE_BACKGROUND,
+  jhBuncherOperator: JOB_HAZARD_MODULE_BACKGROUND,
 };
 
 // Small full-color prop icons — what the cartoon worker below is shown
@@ -7722,6 +7825,30 @@ const WORKER_PROPS = {
       <rect x="-2" y="-16" width="4" height="10" rx="1.5" fill="#8A97A6" />
       <circle cx="0" cy="2" r="2.4" fill="#E8703A" stroke="none" />
       <rect x="-5" y="8" width="10" height="6" rx="1" fill="#8A97A6" stroke="none" />
+    </g>
+  ),
+  // Job-hazard-course-specific props, added alongside the WHMIS/TDG sets
+  // above so a forestry/heavy-equipment course can carry icons that
+  // don't come up in a chemical-handling or road-transport context.
+  machine: (
+    <g stroke="#1B1F19" strokeWidth="1.6" strokeLinejoin="round">
+      <rect x="-14" y="-6" width="16" height="14" rx="2" fill="#F2C230" />
+      <path d="M2 -2l14 -10 4 2 -10 12z" fill="#8A97A6" />
+      <rect x="-16" y="8" width="24" height="6" rx="2" fill="#1B1F19" opacity="0.55" stroke="none" />
+      <circle cx="-11" cy="14" r="3" fill="#1B1F19" stroke="none" />
+      <circle cx="3" cy="14" r="3" fill="#1B1F19" stroke="none" />
+    </g>
+  ),
+  flame: (
+    <g strokeLinejoin="round">
+      <path d="M0 -18c6 8 10 14 6 22a8 8 0 01-16 0c-2-5 0-8 3-11 0 4 2 6 4 6-1-6 1-12 3-17z" fill="#E8703A" stroke="#1B1F19" strokeWidth="1.6" />
+      <path d="M0 -4c2 3 3 6 1 9a3 3 0 01-6 0c-1-2 0-4 1-5 0 2 1 3 2 3-.5-3 .5-5 2-7z" fill="#F2C230" stroke="none" />
+    </g>
+  ),
+  snowflake: (
+    <g stroke="#3E7CB1" strokeWidth="2" strokeLinecap="round">
+      <path d="M0 -16v32M-14 -8l28 16M14 -8l-28 16" />
+      <path d="M0 -16l-4 4M0 -16l4 4M0 16l-4-4M0 16l4-4M-14 -8l5 1M-14 -8l1 5M14 -8l-5 1M14 -8l-1 5M-14 8l5-1M-14 8l1-5M14 8l-5-1M14 8l-1-5" strokeWidth="1.6" />
     </g>
   ),
 };
@@ -7914,9 +8041,26 @@ const TDG_SLIDE_ILLUSTRATION = {
 // video slide-builders (buildCourseSlides and the inline copy in the
 // video render) pull the right illustration map for whichever course is
 // actually playing instead of hardcoding WHMIS's constant.
+// Buncher Operator's job-hazard course — same "title-N" / "moduleIndex-
+// paragraphIndex" keying as WHMIS/TDG's illustration maps above, one
+// module per task (see JOB_HAZARDS.buncherOperator, and the matching
+// content in TRAINING_COURSES.jhBuncherOperator below). Leans on the new
+// machine/flame/snowflake props for forestry-specific content, mixed
+// with the existing shared set wherever it already fits.
+const JH_BUNCHER_SLIDE_ILLUSTRATION = {
+  'title-0': 'machine', '0-0': 'ppe', '0-1': 'thumbsup',
+  'title-1': 'clipboard', '1-0': 'toolbox', '1-1': 'snowflake',
+  'title-2': 'toolbox', '2-0': 'ppe', '2-1': 'snowflake',
+  'title-3': 'machine', '3-0': 'ppe', '3-1': 'flame',
+  'title-4': 'machine', '4-0': 'truck', '4-1': 'question',
+  'title-5': 'machine', '5-0': 'question', '5-1': 'ppe',
+  'title-6': 'spill', '6-0': 'spill', '6-1': 'firstaid',
+  'title-7': 'radio', '7-0': 'radio', '7-1': 'handshake',
+};
 const SLIDE_ILLUSTRATION_BY_COURSE = {
   whmis: WHMIS_SLIDE_ILLUSTRATION,
   tdg: TDG_SLIDE_ILLUSTRATION,
+  jhBuncherOperator: JH_BUNCHER_SLIDE_ILLUSTRATION,
 };
 
 function CertificateOfTraining({ record, course }) {
@@ -19823,6 +19967,27 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 {JOB_HAZARDS[selectedJobHazard].note && (
                   <p className="text-xs mb-3 italic" style={{ color: COLORS.inkDim }}>{JOB_HAZARDS[selectedJobHazard].note}</p>
                 )}
+                {JOB_HAZARD_COURSE_KEY[selectedJobHazard] && (
+                  <button
+                    onClick={() => {
+                      const courseKey = JOB_HAZARD_COURSE_KEY[selectedJobHazard];
+                      setSelectedJobHazard(null);
+                      setJobHazardsExpanded(false);
+                      setTrainingExpanded(true);
+                      setSelectedCourse(courseKey);
+                      setQuizAnswers({});
+                      setQuizResult(null);
+                      setVideoSlideIndex(0);
+                      startQuizSession(courseKey);
+                      setCourseStage('video');
+                      playTrainingSlide(courseKey, 0);
+                    }}
+                    className="w-full text-left rounded-lg px-3 py-3 mb-3 font-display text-sm font-bold uppercase tracking-wide"
+                    style={{ background: COLORS.accent, color: '#1B1F19' }}
+                  >
+                    ▶ Watch the Video Version
+                  </button>
+                )}
                 <div className="space-y-3">
                   {JOB_HAZARDS[selectedJobHazard].tasks.map((t, i) => (
                     <div key={i} className="rounded-lg px-3 py-3" style={{ background: COLORS.surfaceRaised }}>
@@ -19849,7 +20014,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           >
             {!selectedCourse ? (
               <div className="space-y-2">
-                <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Read through each course, then pass the quiz ({Object.values(TRAINING_COURSES)[0].passScore}%+) to record your completion.</p>
+                <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Read through each course, then pass the quiz ({Object.values(TRAINING_COURSES)[0].passScore}%+) to record your completion. Job hazard videos are watch-only — no quiz.</p>
                 {Object.keys(TRAINING_COURSES).map((key) => {
                   const course = TRAINING_COURSES[key];
                   const myAttempts = trainingRecords.filter((r) => r.courseKey === key && r.mechanic === currentMechanic).sort((a, b) => b.completedAt - a.completedAt);
@@ -19886,8 +20051,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         <span className="text-sm font-semibold block">{course.label}</span>
                         <span className="text-xs" style={{ color: COLORS.inkDim }}>{course.subtitle}</span>
                       </span>
-                      <span className="text-xs font-bold flex-shrink-0" style={{ color: passed ? '#6B9080' : myAttempts.length ? '#E07A5F' : COLORS.inkDim }}>
-                        {passed ? '✓ Passed' : myAttempts.length ? 'Not passed yet' : 'Not started'}
+                      <span className="text-xs font-bold flex-shrink-0" style={{ color: course.noQuiz ? COLORS.accent : passed ? '#6B9080' : myAttempts.length ? '#E07A5F' : COLORS.inkDim }}>
+                        {course.noQuiz ? '🎬 Watch' : passed ? '✓ Passed' : myAttempts.length ? 'Not passed yet' : 'Not started'}
                       </span>
                     </button>
                   );
@@ -19960,6 +20125,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   const goNext = async () => {
                     stopTrainingSpeech();
                     if (isLastSlide) {
+                      // Watch-only course (see the `noQuiz` flag) — there's
+                      // no quiz to score and nothing to record, so just
+                      // head back to the course list instead of routing
+                      // through the result screen.
+                      if (course.noQuiz) {
+                        setSelectedCourse(null);
+                        setCourseStage('modules');
+                        return;
+                      }
                       // Flatten every module's drawn questions into one
                       // list, scored against the same moduleIndex-slot
                       // answer keys used on screen.
@@ -20103,7 +20277,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                             {videoSpeaking ? '⏸ Pause' : videoPaused ? '▶ Resume' : '🔁 Replay'}
                           </button>
                         )}
-                        <Btn onClick={goNext} disabled={!canAdvance}>{isLastSlide ? 'Finish & See Results' : 'Next →'}</Btn>
+                        <Btn onClick={goNext} disabled={!canAdvance}>{isLastSlide ? (course.noQuiz ? 'Finish' : 'Finish & See Results') : 'Next →'}</Btn>
                       </div>
                     </div>
                   );
