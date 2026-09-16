@@ -19629,7 +19629,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           {(() => {
             const sections = {};
 
-            sections.documents = (() => {
+            (() => {
             const visibleCategories = SAFETY_CATEGORIES.filter((category) => (isAdmin || isSafety) || !ADMIN_ONLY_SAFETY_CATEGORIES.includes(category));
             const foldered = FOLDERED_SAFETY_CATEGORIES.filter((c) => visibleCategories.includes(c));
             const standalone = visibleCategories.filter((c) => !FOLDERED_SAFETY_CATEGORIES.includes(c));
@@ -19743,27 +19743,29 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             };
             const folderedDocCount = foldered.reduce((n, c) => n + safetyDocs.filter((d) => d.category === c).length, 0);
             const orderedFoldered = effectiveCategoryOrder(safetyCategoryOrder, foldered);
-            return (
-              <>
-                <AdminSection
-                  icon="📁"
-                  title={`Documents (${folderedDocCount})`}
-                  expanded={documentsFolderExpanded}
-                  onToggle={() => setDocumentsFolderExpanded((x) => !x)}
-                >
-                  {documentsFolderExpanded && (
-                    <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Press and hold a category, then drag to reorder.</p>
-                  )}
-                  <LongPressReorderList
-                    entries={orderedFoldered.map((c) => ({ key: c }))}
-                    disabled={!!expandedSafetyCategory}
-                    onReorder={(newOrder) => saveSafetyCategoryOrder(newOrder)}
-                    renderItem={(entry) => renderCategory(entry.key)}
-                  />
-                </AdminSection>
-                {standalone.map(renderCategory)}
-              </>
+            sections.documents = (
+              <AdminSection
+                icon="📁"
+                title={`Documents (${folderedDocCount})`}
+                expanded={documentsFolderExpanded}
+                onToggle={() => setDocumentsFolderExpanded((x) => !x)}
+              >
+                {documentsFolderExpanded && (
+                  <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Press and hold a category, then drag to reorder.</p>
+                )}
+                <LongPressReorderList
+                  entries={orderedFoldered.map((c) => ({ key: c }))}
+                  disabled={!!expandedSafetyCategory}
+                  onReorder={(newOrder) => saveSafetyCategoryOrder(newOrder)}
+                  renderItem={(entry) => renderCategory(entry.key)}
+                />
+              </AdminSection>
             );
+            // Each standalone category (outside the Documents folder —
+            // currently just Woodlands Training) gets its own top-level
+            // entry too, so it reorders independently instead of being
+            // stuck moving together with the Documents folder.
+            standalone.forEach((category) => { sections['standalone:' + category] = renderCategory(category); });
           })();
 
           sections.jobHazards = (
@@ -21095,8 +21097,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </AdminSection>
           );
 
-          const orderKeys = ['documents', 'jobHazards', 'training', 'trainingMatrix', 'inspections', 'workerOrientation', 'incidentReporting']
-            .filter((k) => sections[k] !== null && sections[k] !== undefined);
+          const orderKeys = Object.keys(sections).filter((k) => sections[k] !== null && sections[k] !== undefined);
           const orderedKeys = effectiveCategoryOrder(safetyAccordionOrder, orderKeys);
           const anyExpanded = documentsFolderExpanded || jobHazardsExpanded || trainingExpanded || trainingMatrixExpanded
             || inspectionsExpanded || workerOrientationExpanded || incidentReportingExpanded
