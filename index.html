@@ -1819,14 +1819,30 @@ const YARD_INSPECTION_SECTIONS = [
   ]},
 ];
 
-function OfflineBanner({ isOnline }) {
-  if (isOnline) return null;
+function OfflineBanner({ isOnline, pendingCount }) {
+  if (isOnline && !pendingCount) return null;
+  if (!isOnline) {
+    return (
+      <div
+        className="font-display font-bold text-sm uppercase tracking-wide text-center py-2.5 px-4 mb-4 rounded-lg"
+        style={{ background: '#E3A23C', color: '#1B1F19' }}
+      >
+        📴 Offline — your changes are saved and will sync once you're back online
+      </div>
+    );
+  }
+  // Online, but something from earlier (saved while offline or on weak
+  // signal) hasn't actually reached the server yet — it's sitting queued
+  // on this device only. Shown so it's never silently invisible: a queue
+  // item that never gets the chance to send (app closed, phone storage
+  // cleared) is genuinely lost, so this is the cue to keep the app open
+  // with signal for a moment rather than assuming it's already saved.
   return (
     <div
       className="font-display font-bold text-sm uppercase tracking-wide text-center py-2.5 px-4 mb-4 rounded-lg"
-      style={{ background: '#E3A23C', color: '#1B1F19' }}
+      style={{ background: '#3E7CB1', color: '#fff' }}
     >
-      📴 Offline — your changes are saved and will sync once you're back online
+      ⏳ Syncing {pendingCount} change{pendingCount === 1 ? '' : 's'} — keep this open a moment
     </div>
   );
 }
@@ -11301,6 +11317,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [confirmDeleteTemplate, setConfirmDeleteTemplate] = useState(null);
   const [attachTemplateId, setAttachTemplateId] = useState('');
   const [isOnline, setIsOnline] = useState(true);
+  const [pendingWriteCount, setPendingWriteCount] = useState(() => loadPendingWrites().length);
   const [pins, setPins] = useState({});
   const [authMigrated, setAuthMigrated] = useState(() => cacheGet('authMigrated', {}));
   const [firebaseUser, setFirebaseUser] = useState(undefined); // undefined = still checking, null = signed out
@@ -11969,7 +11986,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const connectedRef = firebase.database().ref('.info/connected');
     const onConnected = connectedRef.on('value', (snap) => {
       setIsOnline(snap.val() === true);
-      if (snap.val() === true) flushPendingWrites();
+      if (snap.val() === true) flushPendingWrites().then(() => setPendingWriteCount(loadPendingWrites().length));
     });
     return () => connectedRef.off('value', onConnected);
   }, []);
@@ -11979,10 +11996,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // moment the app opens, and check again periodically in case a
   // connectivity change is ever missed (e.g. the phone reports "online"
   // technically but the connection is too weak for the write to actually
-  // land the first time).
+  // land the first time). Also keeps pendingWriteCount current for the
+  // "still syncing" banner — a queue item that's saved locally but never
+  // gets the chance to actually send (app closed, phone storage cleared
+  // by the OS) is genuinely lost, so surfacing this matters.
   useEffect(() => {
-    flushPendingWrites();
-    const interval = setInterval(flushPendingWrites, 60000);
+    const tick = () => flushPendingWrites().then(() => setPendingWriteCount(loadPendingWrites().length));
+    tick();
+    const interval = setInterval(tick, 15000);
     return () => clearInterval(interval);
   }, []);
 
@@ -15423,7 +15444,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="flex items-center justify-center font-display">
         {FONT_STYLE}
-        <OfflineBanner isOnline={isOnline} />
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -15547,7 +15568,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           <path d="M250 200 L250 130 L228 130 L255 75 L238 75 L265 25 L292 75 L275 75 L302 130 L280 130 L280 200 Z" fill={COLORS.accent} />
           <path d="M345 200 L345 145 L327 145 L350 100 L335 100 L358 55 L381 100 L366 100 L389 145 L371 145 L371 200 Z" fill={COLORS.accent} />
         </svg>
-        <OfflineBanner isOnline={isOnline} />
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -15804,7 +15825,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
         <FireworksOverlay show={showFireworks} />
-        <OfflineBanner isOnline={isOnline} />
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -16109,7 +16130,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
         <FireworksOverlay show={showFireworks} />
-        <OfflineBanner isOnline={isOnline} />
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -16562,7 +16583,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
-        <OfflineBanner isOnline={isOnline} />
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <div className="max-w-2xl mx-auto">
           <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
             {t('backToBoard')}
@@ -16802,7 +16823,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
-        <OfflineBanner isOnline={isOnline} />
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <div className="max-w-3xl mx-auto">
           <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
             {t('backToBoard')}
@@ -17219,7 +17240,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
-        <OfflineBanner isOnline={isOnline} />
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <SidebarMenu
           show={showSidebar}
           onClose={() => setShowSidebar(false)}
@@ -18274,7 +18295,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
-        <OfflineBanner isOnline={isOnline} />
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <SidebarMenu
           show={showSidebar}
           onClose={() => setShowSidebar(false)}
@@ -18465,7 +18486,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
-        <OfflineBanner isOnline={isOnline} />
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <SidebarMenu
           show={showSidebar}
           onClose={() => setShowSidebar(false)}
@@ -18590,7 +18611,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
-        <OfflineBanner isOnline={isOnline} />
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <div className="max-w-2xl mx-auto">
           <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
             {t('backToBoard')}
@@ -19586,7 +19607,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
-        <OfflineBanner isOnline={isOnline} />
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <div className="max-w-3xl mx-auto">
           <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
             {t('backToBoard')}
@@ -21126,7 +21147,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
         <FireworksOverlay show={showFireworks} />
-        <OfflineBanner isOnline={isOnline} />
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -21275,7 +21296,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
         <FireworksOverlay show={showFireworks} />
-        <OfflineBanner isOnline={isOnline} />
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -21390,7 +21411,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
         {FONT_STYLE}
         <FireworksOverlay show={showFireworks} />
-        <OfflineBanner isOnline={isOnline} />
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
