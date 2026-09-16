@@ -1088,6 +1088,82 @@ const JOB_HAZARDS = {
   },
 };
 
+// Auto-builds a watch-only job-hazard video course (see TRAINING_COURSES
+// below) from JOB_HAZARDS data, for every role except buncherOperator
+// (hand-written there as the approved style sample). Narration text is
+// template-generated from each task's hazard list rather than bespoke
+// prose per task — 126 tasks across 13 roles would be a lot to
+// hand-author individually — with a rotating pool of intro/outro
+// phrasing (picked by task position, critical tasks get their own pool)
+// so consecutive tasks in the same course don't all read identically.
+// Regenerates automatically if JOB_HAZARDS content ever changes.
+function jhLowerFirst(s) { return s.charAt(0).toLowerCase() + s.slice(1); }
+// JOB_HAZARDS' hazard phrases have inconsistent capitalization in the
+// source manual (e.g. "Exposure to Cold", "Trips, slips, Falls") — fine
+// as short labels in the Job Hazards list, but reads oddly mid-sentence
+// in narration. Lowercases the first letter of every word so they read
+// as normal prose, except words that are ALL CAPS (acronyms like RSI)
+// which are left alone.
+function jhSentenceCase(s) {
+  return s.replace(/\S+/g, (word) => {
+    const letters = word.replace(/[^A-Za-z]/g, '');
+    if (letters.length >= 2 && letters === letters.toUpperCase()) return word;
+    return word.charAt(0).toLowerCase() + word.slice(1);
+  });
+}
+function jhHazardListText(hazards) {
+  const list = hazards.map(jhSentenceCase);
+  if (list.length === 1) return list[0];
+  return list.slice(0, -1).join(', ') + ', and ' + list[list.length - 1];
+}
+const JH_INTRO_TEMPLATES = [
+  (t) => `${t} comes with hazards worth knowing before you start.`,
+  (t) => `Here's what to watch for during ${jhLowerFirst(t)}.`,
+  (t) => `${t} is routine, but that's exactly when it pays to stay sharp.`,
+  (t) => `Before you dive into ${jhLowerFirst(t)}, take a second to run through the hazards.`,
+  (t) => `${t} — like most jobs on this machine — has its own set of things that can go wrong.`,
+];
+const JH_CRITICAL_INTRO_TEMPLATES = [
+  (t) => `${t} is flagged as a critical task, with a full Safe Work Procedure on file — here's why.`,
+  (t) => `This one's critical: ${jhLowerFirst(t)} has a Safe Work Procedure for a reason.`,
+  (t) => `${t} carries enough risk that it's a critical task on the job hazard analysis — worth extra attention.`,
+];
+const JH_OUTRO_TEMPLATES = [
+  "Stay alert, and don't let the routine nature of this task make you complacent.",
+  'A few extra seconds of caution here goes a long way.',
+  'If anything about the setup looks off, stop and sort it out before continuing.',
+  'Take it seriously every time — even on the hundredth repetition.',
+  'Speak up if conditions make the job harder than usual that day.',
+];
+function buildJobHazardModules(jobKey) {
+  return JOB_HAZARDS[jobKey].tasks.map((t, i) => {
+    const introPool = t.critical ? JH_CRITICAL_INTRO_TEMPLATES : JH_INTRO_TEMPLATES;
+    const intro = introPool[i % introPool.length](t.task);
+    const outro = JH_OUTRO_TEMPLATES[i % JH_OUTRO_TEMPLATES.length];
+    return { title: t.task, content: [intro, `Keep an eye out for ${jhHazardListText(t.hazards)}. ${outro}`] };
+  });
+}
+// Every JOB_HAZARDS role besides buncherOperator — each maps to its own
+// icon key in JOB_ROLE_GLYPHS (same key as the JOB_HAZARDS/role name
+// here, kept 1:1 on purpose so there's nothing extra to keep in sync).
+const JOB_HAZARD_AUTO_ROLE_KEYS = [
+  'campAttendantChainsawOperator', 'cook', 'crawlerOperator', 'processorOperator',
+  'excavatorOperator', 'graderOperator', 'logLoaderOperator', 'logTruckDriver',
+  'lowBedding', 'mechanic', 'managerSupervisor', 'safetyAdmin', 'skidderOperator',
+];
+const JOB_HAZARD_AUTO_COURSES = {};
+JOB_HAZARD_AUTO_ROLE_KEYS.forEach((jobKey) => {
+  const courseKey = 'jh' + jobKey.charAt(0).toUpperCase() + jobKey.slice(1);
+  JOB_HAZARD_AUTO_COURSES[courseKey] = {
+    label: `Job Hazards — ${JOB_HAZARDS[jobKey].label}`,
+    subtitle: 'Task-by-task hazard awareness, narrated video (no quiz)',
+    noQuiz: true,
+    icon: jobKey,
+    modules: buildJobHazardModules(jobKey),
+    quiz: [],
+  };
+});
+
 // WHMIS and TDG training course content + quizzes, shown on the Safety
 // page under Training. Quiz results are saved per worker to Firebase
 // (trainingRecords/{mechanic}/{courseKey}) so admins can see who's passed.
@@ -1179,6 +1255,7 @@ const TRAINING_COURSES = {
     label: 'Job Hazards — Buncher Operator',
     subtitle: 'Task-by-task hazard awareness, narrated video (no quiz)',
     noQuiz: true,
+    icon: 'buncherOperator',
     modules: [
       {
         title: 'Mounting and Dismounting the Machine',
@@ -1239,15 +1316,17 @@ const TRAINING_COURSES = {
     ],
     quiz: [], // watch-only course — see noQuiz above.
   },
+  ...JOB_HAZARD_AUTO_COURSES,
 };
 // Maps a JOB_HAZARDS key to its video course's key in TRAINING_COURSES,
 // for the "Watch the video version" cross-link on that role's Job
-// Hazards detail screen. Only roles with a finished video appear here —
-// checked with `JOB_HAZARD_COURSE_KEY[key]` rather than assuming every
-// JOB_HAZARDS entry has one, since most of the 14 roles don't yet.
-const JOB_HAZARD_COURSE_KEY = {
-  buncherOperator: 'jhBuncherOperator',
-};
+// Hazards detail screen. Built the same way for every role: buncherOperator
+// is hand-written above; the rest come from JOB_HAZARD_AUTO_ROLE_KEYS,
+// following the same 'jh' + Role naming the auto-builder above uses.
+const JOB_HAZARD_COURSE_KEY = { buncherOperator: 'jhBuncherOperator' };
+JOB_HAZARD_AUTO_ROLE_KEYS.forEach((jobKey) => {
+  JOB_HAZARD_COURSE_KEY[jobKey] = 'jh' + jobKey.charAt(0).toUpperCase() + jobKey.slice(1);
+});
 
 // Employer info required on every Certificate of Training (TDG Regulations
 // Section 6.3(1)(a) — name and address of the employer's place of business).
@@ -1358,11 +1437,13 @@ const TDG_QUESTION_POOLS = {
 const COURSE_VIDEO_CHECKPOINTS = {
   whmis: { 0: [0], 1: [0], 2: [0, 1], 3: [0, 1, 2], 4: [0, 1], 5: [0], 6: [0] },
   tdg: { 0: [0], 1: [0, 1], 2: [0], 3: [0, 1], 4: [0], 5: [0, 1], 6: [0] },
-  // Job-hazard courses (see JOB_HAZARD_COURSE_KEYS) are watch-only — no
-  // quiz checkpoints — but still need a (empty) entry here so the course
-  // list's click handler routes straight into the video player instead
-  // of the read-then-quiz screen (see the click handler's comment).
-  jhBuncherOperator: {},
+  // Job-hazard courses (every value in JOB_HAZARD_COURSE_KEY) are
+  // watch-only — no quiz checkpoints — but still need a (empty) entry
+  // here so the course list's click handler routes straight into the
+  // video player instead of the read-then-quiz screen (see the click
+  // handler's comment). Built for all 14 roles at once rather than
+  // listed by hand.
+  ...Object.values(JOB_HAZARD_COURSE_KEY).reduce((acc, k) => { acc[k] = {}; return acc; }, {}),
 };
 // Which courses draw checkpoint questions from a per-module pool (see
 // startQuizSession) — keyed by course, so a future course's pools plug
@@ -7673,28 +7754,33 @@ const TDG_MODULE_BACKGROUND = [
   { color: '#E4002B', colorDark: '#A3001F' }, // 5: Emergency response — safety red/danger
   { color: '#00A651', colorDark: '#00642F' }, // 6: Training & certification — a second safety green
 ];
-// Job-hazard course module colors — one per task, in task order. Same
+// Job-hazard course module colors, cycled task-by-task. Same
 // safety-signage palette family as WHMIS/TDG above (kept visually
-// consistent across all three course types) but its own 8-color
-// sequence: blue for straightforward procedure, red reserved for the
-// task with the most serious hazards (cutting trees), etc. Shared by
+// consistent across all three course types), extended to 13 colors —
+// the most tasks any single role has (Crawler Operator) — and shared by
 // every job-hazard course rather than one array per role, since they're
 // all the same task-count-varies-by-role shape and don't need bespoke
 // per-role coloring the way WHMIS/TDG's fixed 7-module structure does.
 const JOB_HAZARD_MODULE_BACKGROUND = [
-  { color: '#0072CE', colorDark: '#003E7E' }, // 0: routine/procedural task — safety blue
-  { color: '#F2A900', colorDark: '#B37D00' }, // 1: inspection — safety amber
-  { color: '#009688', colorDark: '#00695C' }, // 2: maintenance — teal
-  { color: '#FF6A13', colorDark: '#CC540F' }, // 3: operating — safety orange
-  { color: '#0057B8', colorDark: '#00305F' }, // 4: travel/repositioning — deeper blue
-  { color: '#E4002B', colorDark: '#A3001F' }, // 5: highest-hazard task — safety red
-  { color: '#8A6AB0', colorDark: '#5C4680' }, // 6: fueling — purple
-  { color: '#4CAF50', colorDark: '#2E7D32' }, // 7: communication — safety green
+  { color: '#0072CE', colorDark: '#003E7E' },
+  { color: '#F2A900', colorDark: '#B37D00' },
+  { color: '#009688', colorDark: '#00695C' },
+  { color: '#FF6A13', colorDark: '#CC540F' },
+  { color: '#0057B8', colorDark: '#00305F' },
+  { color: '#E4002B', colorDark: '#A3001F' },
+  { color: '#8A6AB0', colorDark: '#5C4680' },
+  { color: '#4CAF50', colorDark: '#2E7D32' },
+  { color: '#00A651', colorDark: '#00642F' },
+  { color: '#3E7CB1', colorDark: '#26516F' },
+  { color: '#C2185B', colorDark: '#870E42' },
+  { color: '#8A6A3A', colorDark: '#5C4526' },
+  { color: '#33404D', colorDark: '#1F262E' },
 ];
 const MODULE_BACKGROUND_BY_COURSE = {
   whmis: MODULE_BACKGROUND,
   tdg: TDG_MODULE_BACKGROUND,
-  jhBuncherOperator: JOB_HAZARD_MODULE_BACKGROUND,
+  // Every job-hazard course shares the same palette above.
+  ...Object.values(JOB_HAZARD_COURSE_KEY).reduce((acc, k) => { acc[k] = JOB_HAZARD_MODULE_BACKGROUND; return acc; }, {}),
 };
 
 // Small full-color prop icons — what the cartoon worker below is shown
@@ -7880,6 +7966,136 @@ function WorkerFigure({ propKey, vestColor = '#E8703A', size = 260 }) {
     </svg>
   );
 }
+// One consistent equipment/role icon per job-hazard course (see
+// `course.icon` in TRAINING_COURSES), shown in the same spot the cartoon
+// WorkerFigure occupies on WHMIS/TDG slides — a white badge circle with
+// a bold line-art glyph, same visual family as a road/safety sign icon
+// rather than a full illustrated scene. One glyph per JOB_HAZARDS role
+// key; `default` covers any role that doesn't have one yet.
+const JOB_ROLE_GLYPHS = {
+  buncherOperator: (
+    <>
+      <rect x="-30" y="-6" width="34" height="26" rx="4" />
+      <path d="M4 -6l24 -18" />
+      <circle cx="30" cy="-26" r="10" />
+      <path d="M22 -26h16M30 -34v16M24.3 -31.7l11.4 11.4M35.7 -31.7l-11.4 11.4" />
+      <circle cx="-18" cy="26" r="7" /><circle cx="4" cy="26" r="7" />
+    </>
+  ),
+  crawlerOperator: (
+    <>
+      <rect x="-22" y="-10" width="30" height="22" rx="4" />
+      <rect x="-40" y="-6" width="14" height="26" rx="2" />
+      <rect x="-40" y="22" width="72" height="8" rx="4" />
+    </>
+  ),
+  processorOperator: (
+    <>
+      <rect x="-30" y="-6" width="30" height="24" rx="4" />
+      <path d="M0 -6l22 -14" />
+      <rect x="18" y="-30" width="22" height="14" rx="3" />
+      <path d="M22 -23h14" />
+      <circle cx="-18" cy="26" r="7" /><circle cx="2" cy="26" r="7" />
+    </>
+  ),
+  excavatorOperator: (
+    <>
+      <rect x="-30" y="-8" width="30" height="22" rx="4" />
+      <path d="M-4 -8l20 -20 14 6 -14 20z" />
+      <path d="M14 -2c4 4 4 10 0 14l-10 4 2-12z" />
+      <circle cx="-18" cy="20" r="7" /><circle cx="2" cy="20" r="7" />
+    </>
+  ),
+  graderOperator: (
+    <>
+      <rect x="-24" y="-14" width="30" height="18" rx="3" />
+      <path d="M-40 18h68" />
+      <path d="M-30 18v-6M28 18v-6" />
+      <circle cx="-30" cy="26" r="6" /><circle cx="28" cy="26" r="6" />
+    </>
+  ),
+  logLoaderOperator: (
+    <>
+      <rect x="-30" y="-6" width="30" height="24" rx="4" />
+      <path d="M0 -6l22 -16" />
+      <path d="M18 -26c-6 2-8 8-6 14M26 -26c6 2 8 8 6 14" />
+      <ellipse cx="22" cy="-8" rx="12" ry="5" />
+      <circle cx="-18" cy="26" r="7" /><circle cx="2" cy="26" r="7" />
+    </>
+  ),
+  skidderOperator: (
+    <>
+      <rect x="-32" y="-10" width="28" height="20" rx="4" />
+      <path d="M-4 10c6 6 6 14 0 18" />
+      <ellipse cx="14" cy="30" rx="16" ry="5" />
+      <circle cx="-24" cy="18" r="7" /><circle cx="-4" cy="18" r="7" />
+    </>
+  ),
+  logTruckDriver: (
+    <>
+      <rect x="-38" y="-4" width="16" height="18" rx="2" />
+      <path d="M-22 -4h6l6 8v10h-12z" />
+      <rect x="-6" y="-10" width="42" height="14" rx="2" />
+      <circle cx="4" cy="-3" r="4" /><circle cx="16" cy="-3" r="4" /><circle cx="28" cy="-3" r="4" />
+      <circle cx="-30" cy="18" r="6" /><circle cx="20" cy="18" r="6" />
+    </>
+  ),
+  lowBedding: (
+    <>
+      <rect x="-38" y="-4" width="16" height="18" rx="2" />
+      <path d="M-22 -4h6l6 8v10h-12z" />
+      <rect x="-6" y="10" width="46" height="6" rx="2" />
+      <rect x="4" y="-2" width="22" height="12" rx="2" />
+      <circle cx="-30" cy="18" r="6" /><circle cx="30" cy="18" r="6" />
+    </>
+  ),
+  cook: (
+    <>
+      <path d="M-16 10h32v10a4 4 0 01-4 4h-24a4 4 0 01-4-4z" />
+      <path d="M-14 10c-6 -4 -6 -14 2 -16 1 -6 8 -8 12 -3 4 -5 12 -2 11 5 8 1 8 12 1 14z" />
+    </>
+  ),
+  campAttendantChainsawOperator: (
+    <>
+      <rect x="-8" y="-6" width="20" height="16" rx="4" />
+      <path d="M12 -2h26" />
+      <path d="M12 -10h26v4h-26z" />
+      <path d="M14 -10v-4M20 -10v-4M26 -10v-4M32 -10v-4" />
+      <path d="M-8 2c-8 2 -12 8 -12 14" />
+    </>
+  ),
+  mechanic: (
+    <path d="M-22 -6a10 10 0 0114-9l-7 7 4 4 7-7a10 10 0 01-9 14L-22 22l-9-9z" />
+  ),
+  managerSupervisor: (
+    <>
+      <rect x="-18" y="-22" width="36" height="46" rx="4" />
+      <rect x="-8" y="-26" width="16" height="8" rx="2" />
+      <path d="M-10 -4l6 6 14-14" />
+    </>
+  ),
+  safetyAdmin: (
+    <>
+      <path d="M0 -26l22 8v14c0 14-10 24-22 30-12-6-22-16-22-30v-14z" />
+      <path d="M-10 0l7 7 15-15" />
+    </>
+  ),
+  default: (
+    <path d="M0 -22a22 22 0 100 44 22 22 0 000-44zM0 -8v10M0 10v2" />
+  ),
+};
+function JobRoleIcon({ roleKey, size = 168, color = '#1B1F19' }) {
+  const glyph = JOB_ROLE_GLYPHS[roleKey] || JOB_ROLE_GLYPHS.default;
+  return (
+    <div style={{ width: size, height: size, borderRadius: '50%', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 18px #00000033', flexShrink: 0 }}>
+      <svg viewBox="-50 -50 100 100" width={size * 0.62} height={size * 0.62} style={{ overflow: 'visible' }}>
+        <g fill="none" stroke={color} strokeWidth="5" strokeLinecap="round" strokeLinejoin="round">
+          {glyph}
+        </g>
+      </svg>
+    </div>
+  );
+}
 // A small looping animated scene — a stick figure pouring one chemical
 // A small looping animated scene — a stick figure pouring two chemicals
 // together right in his own hands, then a jagged comic-style burst
@@ -8040,27 +8256,13 @@ const TDG_SLIDE_ILLUSTRATION = {
 // Course-keyed lookup mirroring SLIDE_PICTOGRAMS_BY_COURSE above, so the
 // video slide-builders (buildCourseSlides and the inline copy in the
 // video render) pull the right illustration map for whichever course is
-// actually playing instead of hardcoding WHMIS's constant.
-// Buncher Operator's job-hazard course — same "title-N" / "moduleIndex-
-// paragraphIndex" keying as WHMIS/TDG's illustration maps above, one
-// module per task (see JOB_HAZARDS.buncherOperator, and the matching
-// content in TRAINING_COURSES.jhBuncherOperator below). Leans on the new
-// machine/flame/snowflake props for forestry-specific content, mixed
-// with the existing shared set wherever it already fits.
-const JH_BUNCHER_SLIDE_ILLUSTRATION = {
-  'title-0': 'machine', '0-0': 'ppe', '0-1': 'thumbsup',
-  'title-1': 'clipboard', '1-0': 'toolbox', '1-1': 'snowflake',
-  'title-2': 'toolbox', '2-0': 'ppe', '2-1': 'snowflake',
-  'title-3': 'machine', '3-0': 'ppe', '3-1': 'flame',
-  'title-4': 'machine', '4-0': 'truck', '4-1': 'question',
-  'title-5': 'machine', '5-0': 'question', '5-1': 'ppe',
-  'title-6': 'spill', '6-0': 'spill', '6-1': 'firstaid',
-  'title-7': 'radio', '7-0': 'radio', '7-1': 'handshake',
-};
+// actually playing instead of hardcoding WHMIS's constant. Job-hazard
+// courses don't use this — they show one consistent JobRoleIcon per
+// course instead (see `course.icon` and the video render block) rather
+// than a per-slide prop.
 const SLIDE_ILLUSTRATION_BY_COURSE = {
   whmis: WHMIS_SLIDE_ILLUSTRATION,
   tdg: TDG_SLIDE_ILLUSTRATION,
-  jhBuncherOperator: JH_BUNCHER_SLIDE_ILLUSTRATION,
 };
 
 function CertificateOfTraining({ record, course }) {
@@ -20170,9 +20372,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     >
                       {/* Cartoon worker, full color — a different prop per
                           slide (see WHMIS_SLIDE_ILLUSTRATION) rather than
-                          one faint icon shared across a whole module. */}
+                          one faint icon shared across a whole module — for
+                          WHMIS/TDG. Job-hazard courses (see `course.icon`)
+                          instead show one consistent equipment/role icon
+                          throughout, badge-style, in the same spot. */}
                       <div className="flex justify-center pt-2" style={{ position: 'relative' }}>
-                        {slide.illustration === 'mixExplosion' ? (
+                        {course.icon ? (
+                          <JobRoleIcon roleKey={course.icon} size={168} color={bg.color} />
+                        ) : slide.illustration === 'mixExplosion' ? (
                           <MixExplosionScene size={168} />
                         ) : slide.illustration === 'placardMismatch' ? (
                           <PlacardMismatchScene size={168} />
