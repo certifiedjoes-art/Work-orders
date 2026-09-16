@@ -5103,6 +5103,13 @@ async function saveYardInspectionItemOrder(sectionIdx, order) {
 async function saveSafetyCategoryOrder(order) {
   await firebase.database().ref('safetyCategoryOrder').set(order);
 }
+// Same idea, one level up — the order of the Safety page's top-level
+// accordion sections themselves (Documents, Job Hazards, Training
+// Courses, etc.), reusing effectiveCategoryOrder below since it's the
+// same "ordered list of string keys" shape.
+async function saveSafetyAccordionOrder(order) {
+  await firebase.database().ref('safetyAccordionOrder').set(order);
+}
 function effectiveCategoryOrder(saved, allCategories) {
   const valid = (saved || []).filter((c) => allCategories.includes(c));
   const seen = new Set(valid);
@@ -11322,6 +11329,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [expandedSafetyCategory, setExpandedSafetyCategory] = useState(null);
   const [documentsFolderExpanded, setDocumentsFolderExpanded] = useState(false);
   const [safetyCategoryOrder, setSafetyCategoryOrder] = useState(() => cacheGet('safetyCategoryOrder', []));
+  const [safetyAccordionOrder, setSafetyAccordionOrder] = useState(() => cacheGet('safetyAccordionOrder', []));
   const [jobHazardsExpanded, setJobHazardsExpanded] = useState(false);
   const [selectedJobHazard, setSelectedJobHazard] = useState(null); // JOB_HAZARDS key, or null (showing the job picker)
   const [trainingExpanded, setTrainingExpanded] = useState(false);
@@ -11744,6 +11752,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = Array.isArray(snap.val()) ? snap.val() : (snap.val() ? Object.values(snap.val()) : []);
       setSafetyCategoryOrder(val);
       cacheSet('safetyCategoryOrder', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('safetyAccordionOrder');
+    const on = ref.on('value', (snap) => {
+      const val = Array.isArray(snap.val()) ? snap.val() : (snap.val() ? Object.values(snap.val()) : []);
+      setSafetyAccordionOrder(val);
+      cacheSet('safetyAccordionOrder', val);
     });
     return () => ref.off('value', on);
   }, []);
@@ -19609,6 +19627,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           })()}
 
           {(() => {
+            const sections = {};
+
+            sections.documents = (() => {
             const visibleCategories = SAFETY_CATEGORIES.filter((category) => (isAdmin || isSafety) || !ADMIN_ONLY_SAFETY_CATEGORIES.includes(category));
             const foldered = FOLDERED_SAFETY_CATEGORIES.filter((c) => visibleCategories.includes(c));
             const standalone = visibleCategories.filter((c) => !FOLDERED_SAFETY_CATEGORIES.includes(c));
@@ -19743,8 +19764,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 {standalone.map(renderCategory)}
               </>
             );
-          })()}
+          })();
 
+          sections.jobHazards = (
           <AdminSection
             icon="⚠️"
             title={`Job Hazards${selectedJobHazard ? ' — ' + JOB_HAZARDS[selectedJobHazard].label : ''}`}
@@ -19793,7 +19815,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               </div>
             )}
           </AdminSection>
+          );
 
+          sections.training = (
           <AdminSection
             icon="🎓"
             title={`Training Courses${selectedCourse ? ' — ' + TRAINING_COURSES[selectedCourse].label : ''}`}
@@ -20199,8 +20223,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
             )}
           </AdminSection>
+          );
 
-          {(isAdmin || isSafety) && (
+          sections.trainingMatrix = (isAdmin || isSafety) ? (
             <AdminSection
               icon="🎓"
               title="Training Matrix"
@@ -20286,9 +20311,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 </div>
               )}
             </AdminSection>
-          )}
+          ) : null;
 
-          {(isAdmin || isSafety) && (
+          sections.inspections = (isAdmin || isSafety) ? (
             <AdminSection
               icon="🧰"
               title={`Inspections${safetyInspectionType ? ' — ' + SAFETY_INSPECTION_TYPES.find((t) => t.key === safetyInspectionType).label : ''}`}
@@ -20768,9 +20793,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 </div>
               ) : null}
             </AdminSection>
-          )}
+          ) : null;
 
-          {(isAdmin || isSafety) && (
+          sections.workerOrientation = (isAdmin || isSafety) ? (
             <AdminSection
               icon="🪪"
               title={`Worker Orientation${workerOrientationType ? ' — ' + (workerOrientationType === 'employeeOrientation' ? 'Employee Orientation' : 'Operator Training') : ''}`}
@@ -20899,8 +20924,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 </div>
               )}
             </AdminSection>
-          )}
+          ) : null;
 
+          sections.incidentReporting = (
           <AdminSection
             icon="🚨"
             title="Incident Reporting"
@@ -21067,6 +21093,28 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               </div>
             )}
           </AdminSection>
+          );
+
+          const orderKeys = ['documents', 'jobHazards', 'training', 'trainingMatrix', 'inspections', 'workerOrientation', 'incidentReporting']
+            .filter((k) => sections[k] !== null && sections[k] !== undefined);
+          const orderedKeys = effectiveCategoryOrder(safetyAccordionOrder, orderKeys);
+          const anyExpanded = documentsFolderExpanded || jobHazardsExpanded || trainingExpanded || trainingMatrixExpanded
+            || inspectionsExpanded || workerOrientationExpanded || incidentReportingExpanded
+            || !!expandedSafetyCategory || !!selectedJobHazard || !!selectedCourse;
+          return (
+            <div className="mb-2">
+              {!anyExpanded && (
+                <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Press and hold a section, then drag to reorder.</p>
+              )}
+              <LongPressReorderList
+                entries={orderedKeys.map((k) => ({ key: k }))}
+                disabled={anyExpanded}
+                onReorder={(newOrder) => saveSafetyAccordionOrder(newOrder)}
+                renderItem={(entry) => sections[entry.key]}
+              />
+            </div>
+          );
+        })()}
         </div>
       </div>
     );
