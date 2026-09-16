@@ -20449,16 +20449,17 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                               <div className="space-y-2">
                                 {records.map((r) => {
                                   const flagged = !r.reviewedBy && inspectionRecordNeedsAttention(r);
+                                  const followedUp = r.reviewedBy && inspectionRecordNeedsAttention(r);
                                   return (
                                     <button
                                       key={r.id}
                                       onClick={() => setViewingSafetyInspectionId(r.id)}
                                       className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
-                                      style={flagged ? { background: '#E07A5F22', border: '1px solid #E07A5F' } : { background: COLORS.surfaceRaised }}
+                                      style={flagged ? { background: '#E07A5F22', border: '1px solid #E07A5F' } : followedUp ? { background: '#6FAE7222', border: '1px solid #6FAE72' } : { background: COLORS.surfaceRaised }}
                                     >
                                       <span className="text-sm">{r.date} · {r.inspectedBy}</span>
-                                      <span className="text-xs font-bold" style={{ color: flagged ? '#E07A5F' : r.reviewedBy ? COLORS.accent : COLORS.inkDim }}>
-                                        {flagged ? '⚠️ Needs attention' : r.reviewedBy ? 'Reviewed' : 'Needs review'}
+                                      <span className="text-xs font-bold" style={{ color: flagged ? '#E07A5F' : followedUp ? COLORS.done : r.reviewedBy ? COLORS.accent : COLORS.inkDim }}>
+                                        {flagged ? '⚠️ Needs attention' : followedUp ? '✅ Followed up' : r.reviewedBy ? 'Reviewed' : 'Needs review'}
                                       </span>
                                     </button>
                                   );
@@ -20552,16 +20553,17 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                               <div className="space-y-2">
                                 {records.map((r) => {
                                   const flagged = !r.reviewedBy && inspectionRecordNeedsAttention(r);
+                                  const followedUp = r.reviewedBy && inspectionRecordNeedsAttention(r);
                                   return (
                                     <button
                                       key={r.id}
                                       onClick={() => setViewingSafetyInspectionId(r.id)}
                                       className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
-                                      style={flagged ? { background: '#E07A5F22', border: '1px solid #E07A5F' } : { background: COLORS.surfaceRaised }}
+                                      style={flagged ? { background: '#E07A5F22', border: '1px solid #E07A5F' } : followedUp ? { background: '#6FAE7222', border: '1px solid #6FAE72' } : { background: COLORS.surfaceRaised }}
                                     >
                                       <span className="text-sm">{r.date} · {r.inspectedBy}</span>
-                                      <span className="text-xs font-bold" style={{ color: flagged ? '#E07A5F' : r.reviewedBy ? COLORS.accent : COLORS.inkDim }}>
-                                        {flagged ? '⚠️ Needs attention' : r.reviewedBy ? 'Followed up' : 'Open'}
+                                      <span className="text-xs font-bold" style={{ color: flagged ? '#E07A5F' : followedUp ? COLORS.done : r.reviewedBy ? COLORS.accent : COLORS.inkDim }}>
+                                        {flagged ? '⚠️ Needs attention' : followedUp ? '✅ Followed up' : r.reviewedBy ? 'Followed up' : 'Open'}
                                       </span>
                                     </button>
                                   );
@@ -20662,16 +20664,17 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                               <div className="space-y-2">
                                 {records.map((r) => {
                                   const flagged = !r.reviewedBy && inspectionRecordNeedsAttention(r);
+                                  const followedUp = r.reviewedBy && inspectionRecordNeedsAttention(r);
                                   return (
                                     <button
                                       key={r.id}
                                       onClick={() => setViewingSafetyInspectionId(r.id)}
                                       className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
-                                      style={flagged ? { background: '#E07A5F22', border: '1px solid #E07A5F' } : { background: COLORS.surfaceRaised }}
+                                      style={flagged ? { background: '#E07A5F22', border: '1px solid #E07A5F' } : followedUp ? { background: '#6FAE7222', border: '1px solid #6FAE72' } : { background: COLORS.surfaceRaised }}
                                     >
                                       <span className="text-sm">{r.date} · {r.machine} · {r.inspectedBy}</span>
-                                      <span className="text-xs font-bold" style={{ color: flagged ? '#E07A5F' : r.reviewedBy ? COLORS.accent : COLORS.inkDim }}>
-                                        {flagged ? '⚠️ Needs attention' : r.reviewedBy ? 'Followed up' : 'Open'}
+                                      <span className="text-xs font-bold" style={{ color: flagged ? '#E07A5F' : followedUp ? COLORS.done : r.reviewedBy ? COLORS.accent : COLORS.inkDim }}>
+                                        {flagged ? '⚠️ Needs attention' : followedUp ? '✅ Followed up' : r.reviewedBy ? 'Followed up' : 'Open'}
                                       </span>
                                     </button>
                                   );
