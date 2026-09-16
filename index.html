@@ -8192,6 +8192,15 @@ function LongPressReorderList({ entries, onReorder, renderItem, disabled }) {
   const longPressTimer = useRef(null);
   const startY = useRef(0);
   const movedBeforePress = useRef(false);
+  // Set the instant a long-press actually fires (drag mode entered),
+  // regardless of whether the finger then moves. A row here can be a
+  // whole clickable element (an accordion header, say) — without this,
+  // releasing after a long-press still fires a native "click" on
+  // whatever's underneath, which would immediately re-trigger that
+  // element's own onClick (e.g. re-collapsing/expanding it) right after
+  // the drag, undoing or masking the reorder. Consumed and reset by the
+  // capture-phase onClick below, so it never leaks into an unrelated tap.
+  const longPressFiredRef = useRef(false);
 
   useEffect(() => {
     if (!draggingKey) setOrder(entries.map((e) => e.key));
@@ -8210,7 +8219,7 @@ function LongPressReorderList({ entries, onReorder, renderItem, disabled }) {
     startY.current = clientY;
     clearTimer();
     longPressTimer.current = setTimeout(() => {
-      if (!movedBeforePress.current) setDraggingKey(key);
+      if (!movedBeforePress.current) { setDraggingKey(key); longPressFiredRef.current = true; }
     }, 450);
   };
   const handleMove = (clientY, evt) => {
@@ -8255,6 +8264,13 @@ function LongPressReorderList({ entries, onReorder, renderItem, disabled }) {
           onMouseMove={(e) => draggingKey && handleMove(e.clientY, e)}
           onMouseUp={handleUp}
           onMouseLeave={() => draggingKey === entry.key && handleUp()}
+          onClickCapture={(e) => {
+            if (longPressFiredRef.current) {
+              longPressFiredRef.current = false;
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }}
           style={{
             touchAction: disabled ? 'auto' : 'none', // must be set from the start, not switched on once dragging begins — iOS Safari decides how to handle the gesture (scroll vs. custom) right at touchstart, and won't retroactively hand control back once it's picked scrolling. Only forced off while this list is actually reorderable (disabled=false), so scrolling still works normally inside an expanded row when dragging isn't active.
             userSelect: 'none',
