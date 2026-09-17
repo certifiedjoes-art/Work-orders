@@ -1137,50 +1137,177 @@ function jhDedupeHazards(hazards) {
     return !list.some((other) => other !== h && norm(other).length > n.length && norm(other).includes(n));
   });
 }
-function buildJobHazardModules(jobKey) {
-  const tasks = JOB_HAZARDS[jobKey].tasks;
-  const seen = new Set();
-  const rawHazards = [];
-  tasks.forEach((t) => t.hazards.forEach((h) => { if (!seen.has(h)) { seen.add(h); rawHazards.push(h); } }));
-  const allHazards = jhDedupeHazards(rawHazards);
-
-  const modules = [];
-  if (allHazards.length) {
-    const content = allHazards.length > 14
-      ? [
-          `Across this whole job, keep an eye out for: ${jhHazardListText(allHazards.slice(0, Math.ceil(allHazards.length / 2)))}.`,
-          `And also: ${jhHazardListText(allHazards.slice(Math.ceil(allHazards.length / 2)))}. Treat all of these as a constant background risk through the day — the tasks ahead just add quick notes on top.`,
-        ]
-      : [`Across this whole job, keep an eye out for: ${jhHazardListText(allHazards)}. Treat these as a constant background risk through the day — the tasks ahead just add quick notes on top.`];
-    modules.push({ title: 'Hazards to Watch For', content });
-  }
-
-  tasks.forEach((t) => {
-    const top = t.hazards.slice(0, 2).map(jhSentenceCase);
-    const topText = top.length > 1 ? `${top[0]} and ${top[1]}` : (top[0] || '');
-    const critTag = t.critical ? " This one's flagged critical, with a full Safe Work Procedure on file." : '';
-    const body = (topText ? `Main things to watch for: ${topText}.` : 'Nothing beyond the hazards already covered.') + critTag;
-    modules.push({ title: t.task, content: [body] });
-  });
-  return modules;
-}
 // Every JOB_HAZARDS role besides buncherOperator — each maps to its own
 // icon key in JOB_ROLE_GLYPHS (same key as the JOB_HAZARDS/role name
 // here, kept 1:1 on purpose so there's nothing extra to keep in sync).
+// Also used below just to enumerate every role for the orientation
+// videos, now that the standalone Job Hazards videos this list used to
+// build have been retired in favor of folding hazards into orientation.
 const JOB_HAZARD_AUTO_ROLE_KEYS = [
   'campAttendantChainsawOperator', 'cook', 'crawlerOperator', 'processorOperator',
   'excavatorOperator', 'graderOperator', 'logLoaderOperator', 'logTruckDriver',
   'lowBedding', 'mechanic', 'managerSupervisor', 'safetyAdmin', 'skidderOperator',
 ];
-const JOB_HAZARD_AUTO_COURSES = {};
-JOB_HAZARD_AUTO_ROLE_KEYS.forEach((jobKey) => {
-  const courseKey = 'jh' + jobKey.charAt(0).toUpperCase() + jobKey.slice(1);
-  JOB_HAZARD_AUTO_COURSES[courseKey] = {
-    label: `Job Hazards — ${JOB_HAZARDS[jobKey].label}`,
-    subtitle: 'Task-by-task hazard awareness, narrated video (no quiz)',
+
+// Every JOB_HAZARDS role, buncherOperator included this time.
+const ALL_JOB_HAZARD_ROLE_KEYS = ['buncherOperator', ...JOB_HAZARD_AUTO_ROLE_KEYS];
+
+// The company Employee Safety Orientation, paraphrased from the written
+// manual into narrated video slides — identical for every role except
+// one module (see buildOrientationModules below), which slots in that
+// role's own hazard summary right above Worker Rights, the same spot it
+// sits in the written manual. Kept as short, plain-spoken paragraphs
+// rather than reading the policy text verbatim, same voice as the other
+// narrated courses.
+const ORIENTATION_MODULES_BASE = [
+  {
+    title: 'Welcome and Our Safety Commitment',
+    content: [
+      "Harder Contracting is committed to the safety of our people, our equipment, the environment, and the public. That's not just a policy line — management is accountable for building and maintaining our Health and Safety program across every part of the operation, built to meet or exceed the legal minimum, not just scrape by.",
+      "Safety here is a team effort. Workers and anyone working on our sites, including subcontractors, are expected to follow company, municipal, provincial, and federal rules. If something's unsafe, the goal is to fix it, not push through it.",
+    ],
+  },
+  {
+    title: 'Job-Specific Training and Hazard Assessments',
+    content: [
+      "Before non-routine work, a change in site conditions, or work at a temporary or mobile site, a field-level hazard assessment gets done. Work only continues once the hazards it identifies have been eliminated or controlled.",
+      "You have the right to refuse dangerous work — more on that next — and the hazards specific to your own job are covered right after this.",
+    ],
+  },
+  // <<HAZARDS>> — buildOrientationModules inserts this role's hazard
+  // summary here, right above Worker Rights.
+  {
+    title: 'Your Rights as a Worker',
+    content: [
+      "You have three core rights under Alberta's OH&S Act. The right to refuse dangerous work: if you have reasonable grounds to believe a task is an undue hazard or a serious, imminent threat to you or someone else, stop, report it to your supervisor, and it'll get investigated. You won't be disciplined for exercising that right.",
+      "The right to know about workplace hazards: your employer has to give you the information, instruction, training, and supervision you need to work safely — hazards, safe work procedures, emergency procedures, and proper PPE use. If you're ever unsure how to do something safely, ask before you start.",
+      "And the right to participate: raise concerns, report hazards, give input on safe work procedures, and take part in the safety program. Alberta's OH&S Act, Regulation, and Code set the legal minimum for all of this, and a copy is available if you want to reference it.",
+    ],
+  },
+  {
+    title: 'Safety Responsibilities',
+    content: [
+      "Every level of the company has a role. As a worker, that means using safe work procedures, reporting unsafe conditions and acts, making safety suggestions, and setting a good example — plus taking responsibility for your own safety and everyone else's.",
+      'Supervisors and the safety coordinator promote safety awareness, set up safe work procedures, instruct and correct workers, inspect for hazards, investigate incidents, and enforce the rules.',
+      'Management sets the safety policy itself — providing a safe workplace, the right training and PPE, regular inspections, first aid, and reporting injuries to WCB — and keeps the whole operation compliant.',
+    ],
+  },
+  {
+    title: 'Safe Work Practices — Equipment',
+    content: [
+      'Every shift starts with a pre-start inspection — walk around the machine and check for damaged hoses or fittings, leaks, cracked welds, and loose bolts before you operate it.',
+      "Refuel at the end of each shift, at least 100 metres from any watercourse. Use the provided handles and maintain three-point contact mounting and dismounting, stay within block boundaries, and lower hydraulic attachments before parking. Seat belts are mandatory, and do a radio check whenever you get in or out of the equipment.",
+    ],
+  },
+  {
+    title: 'Safe Work Practices — Driving',
+    content: [
+      "Know where your vehicle's insurance and registration are kept, and make sure they're current. Seat belts are mandatory any time the vehicle's moving, and posted speed limits apply everywhere.",
+      "Use radio communication on bush roads, and always call before passing equipment working near the road. Keep an eye on the vehicle's condition — fluid levels, handling, anything that feels off — and report problems to management. Treat the vehicle the way you'd treat your own.",
+    ],
+  },
+  {
+    title: 'Emergency Equipment and Spill Response',
+    content: [
+      'Every vehicle carries a CSA Type 3 intermediate first aid kit, a spill kit with at least 10 white and 5 grey absorbent pads, and a 5-pound or larger ABC fire extinguisher. At camp, all four exits have a fire extinguisher, and the office has a first aid kit, stretcher, blankets, and a splint. The evacuation plan is posted in the dining room.',
+      "If there's a spill: stop the source if it's safe, keep people clear and remove ignition sources, contain it with the spill kit or absorbents before it reaches soil or water, and notify your supervisor immediately. Depending on the substance and amount it may need to be reported externally too — then clean it up, document it, and restock the kit.",
+    ],
+  },
+  {
+    title: 'Accident and Incident Reporting',
+    content: [
+      "Every accident, incident, work refusal, near miss, and health occurrence gets reported and investigated, no matter how minor it looks — the depth of the investigation just scales with the severity.",
+      "If someone's hurt, get them medical attention first, then secure the area to prevent further damage. Any serious incident, injury, or fatality gets reported to the owner immediately, and OH&S has to be notified within 24 hours of anything with the potential for serious injury. In serious cases, whoever's first on scene needs to secure it and not disturb anything.",
+    ],
+  },
+  {
+    title: 'Emergency Contacts',
+    content: [
+      "Your foreman and safety coordinator keep the full emergency contact list — ambulance, hospital, RCMP, and more — and it's also posted at camp and right in this app, under Safety. Know where to find it before you need it.",
+    ],
+  },
+  {
+    title: 'Discipline Policy',
+    content: [
+      'Safety violations follow a step process: a documented verbal warning first, then a written warning that may include additional training, and for serious or repeated issues, suspension — which can lead to demotion or termination depending on management\'s review.',
+    ],
+  },
+  {
+    title: 'Workplace Violence and Harassment',
+    content: [
+      "Zero tolerance — violence or harassment of any kind, from employees or visitors, isn't tolerated and can lead to discipline up to termination, or criminal prosecution. This covers threats, assaults, bullying, intimidation, and physical or sexual harassment.",
+      "Report any incident, direct or indirect, to your supervisor as soon as possible — if they're not available, any other supervisor works. Every report gets investigated, and everything is kept confidential.",
+    ],
+  },
+  {
+    title: 'Drug and Alcohol Policy',
+    content: [
+      'Every position and worksite here is considered safety-sensitive, so this policy applies to everyone. No using, possessing, or offering drugs or alcohol at a company workplace or while doing company business, and testing follows USDOT standards.',
+      "If someone's suspected of being impaired, or an incident occurs, work stops immediately, the situation gets documented, and the employee is transported off-site. If you're dealing with a substance issue yourself, disclosing it to your supervisor opens the door to support and reasonable accommodation.",
+    ],
+  },
+  {
+    title: 'Lockout / Tagout',
+    content: [
+      "Before leaving equipment: lower all implements, shut it down at the master switch and pull the key — or the ignition, for vehicles — place the key below the switch, and put an out-of-service sign on the seat or cab entrance. Don't put the key back without a supervisor's authorization.",
+    ],
+  },
+  {
+    title: 'Safety and Tailgate Meetings',
+    content: [
+      'Safety meetings happen monthly, covering hazards, recent incidents or near misses, safe work procedures, and equipment concerns — attendance and topics are documented. Tailgate meetings happen more often, as needed, to address concerns as they come up. Show up, ask questions, and speak up.',
+    ],
+  },
+  {
+    title: 'PPE — Hard Hats',
+    content: [
+      'A hard hat protects against impacts, falling objects, splashes, and contact with energized equipment. The shell deflects the blow, the suspension absorbs and spreads it — both have to be in good shape and compatible, and any attachments need to be approved for that specific hard hat. A bump cap is not a substitute unless the only hazard is bumping into something stationary.',
+      'Check it before every use — cracks, holes, dents, fading, or a damaged suspension all mean it needs to be replaced immediately, even if a hard blow left no visible damage. Never drill, cut, paint, or modify it, and never use a metal liner around electrical hazards.',
+    ],
+  },
+  {
+    title: 'Hearing, Foot, and Eye Protection',
+    content: [
+      "Wear hearing protection anywhere sound levels top 85 decibels over 8 hours — a good rule of thumb is if you can't hold a normal conversation at 1 metre, protection is required.",
+      'Approved protective footwear is mandatory for everyone, and so is eye protection any time there\'s a risk of flying particles, sparks, chemicals, or debris — grinding, welding, and mechanical work all count. Inspect your PPE daily to make sure it\'s still doing its job.',
+    ],
+  },
+];
+// Builds one role's orientation video — the same ORIENTATION_MODULES_BASE
+// content, with that role's hazard summary spliced in right above
+// Worker Rights (index 2), exactly where it sits in the written manual.
+// Reuses the same hazard-dedup/list-text helpers the retired per-role
+// Job Hazards videos used to.
+function buildOrientationModules(jobKey) {
+  const tasks = JOB_HAZARDS[jobKey].tasks;
+  const seen = new Set();
+  const rawHazards = [];
+  tasks.forEach((t) => t.hazards.forEach((h) => { if (!seen.has(h)) { seen.add(h); rawHazards.push(h); } }));
+  const allHazards = jhDedupeHazards(rawHazards);
+  const roleLabel = JOB_HAZARDS[jobKey].label;
+  const hazardContent = allHazards.length > 14
+    ? [
+        `As a ${roleLabel}, keep an eye out for: ${jhHazardListText(allHazards.slice(0, Math.ceil(allHazards.length / 2)))}.`,
+        `And also: ${jhHazardListText(allHazards.slice(Math.ceil(allHazards.length / 2)))}. Treat these as a constant background risk through your workday.`,
+      ]
+    : [`As a ${roleLabel}, keep an eye out for: ${jhHazardListText(allHazards)}. Treat these as a constant background risk through your workday.`];
+  const hazardsModule = { title: `Hazards for ${roleLabel}`, content: hazardContent };
+  return [
+    ORIENTATION_MODULES_BASE[0],
+    ORIENTATION_MODULES_BASE[1],
+    hazardsModule,
+    ...ORIENTATION_MODULES_BASE.slice(2),
+  ];
+}
+const ORIENTATION_AUTO_COURSES = {};
+ALL_JOB_HAZARD_ROLE_KEYS.forEach((jobKey) => {
+  const courseKey = 'orientation' + jobKey.charAt(0).toUpperCase() + jobKey.slice(1);
+  ORIENTATION_AUTO_COURSES[courseKey] = {
+    label: `Employee Safety Orientation — ${JOB_HAZARDS[jobKey].label}`,
+    subtitle: 'Company safety orientation, narrated video (no quiz)',
     noQuiz: true,
     icon: jobKey,
-    modules: buildJobHazardModules(jobKey),
+    modules: buildOrientationModules(jobKey),
     quiz: [],
   };
 });
@@ -1348,31 +1475,17 @@ const TRAINING_COURSES = {
       { q: 'Which combination for governor & leak tests is correct?', options: ['Cut-out 100–110 PSI; cut-in 10 PSI below; max 8 PSI drop in 2 min leak test', 'Cut-out 120–135 PSI; cut-in 20–25 PSI below; max 6 PSI drop in 2 min leak test', 'Cut-out 140–160 PSI; cut-in 10–15 PSI below; max 4 PSI drop', 'Cut-out 90–100 PSI; cut-in 5 PSI below; max 2 PSI drop'], correct: 1 },
     ],
   },
-  // Job-hazard courses — the video version of the task-by-task hazard
-  // lists in JOB_HAZARDS, one module per task, narrated the same
-  // WHMIS/TDG-style way but watch-only: no quiz, no checkpoint, no
-  // certificate (see the `noQuiz` flag, read by the course list badge
-  // and the video player's Finish button/goNext logic). Buncher Operator
-  // is the first one built as the style sample; the rest of JOB_HAZARDS'
-  // 14 roles follow the same pattern once this one's approved.
-  jhBuncherOperator: {
-    label: 'Job Hazards — Buncher Operator',
-    subtitle: 'Job hazard awareness, narrated video (no quiz)',
-    noQuiz: true,
-    icon: 'buncherOperator',
-    modules: buildJobHazardModules('buncherOperator'),
-    quiz: [], // watch-only course — see noQuiz above.
-  },
-  ...JOB_HAZARD_AUTO_COURSES,
+  ...ORIENTATION_AUTO_COURSES,
 };
 // Maps a JOB_HAZARDS key to its video course's key in TRAINING_COURSES,
 // for the "Watch the video version" cross-link on that role's Job
-// Hazards detail screen. Built the same way for every role: buncherOperator
-// is hand-written above; the rest come from JOB_HAZARD_AUTO_ROLE_KEYS,
-// following the same 'jh' + Role naming the auto-builder above uses.
-const JOB_HAZARD_COURSE_KEY = { buncherOperator: 'jhBuncherOperator' };
-JOB_HAZARD_AUTO_ROLE_KEYS.forEach((jobKey) => {
-  JOB_HAZARD_COURSE_KEY[jobKey] = 'jh' + jobKey.charAt(0).toUpperCase() + jobKey.slice(1);
+// Hazards detail screen. Points at that role's orientation video now —
+// the standalone Job Hazards videos it used to point at were retired in
+// favor of folding hazards into orientation (see ORIENTATION_AUTO_COURSES
+// above), so this just reuses the same 'orientation' + Role naming.
+const JOB_HAZARD_COURSE_KEY = {};
+ALL_JOB_HAZARD_ROLE_KEYS.forEach((jobKey) => {
+  JOB_HAZARD_COURSE_KEY[jobKey] = 'orientation' + jobKey.charAt(0).toUpperCase() + jobKey.slice(1);
 });
 // Woodlands Training isn't a TRAINING_COURSES entry — it's an outside
 // LMS course (see EXTERNAL_SAFETY_LINKS) with no quiz of its own, so
@@ -1503,13 +1616,13 @@ const TDG_QUESTION_POOLS = {
 const COURSE_VIDEO_CHECKPOINTS = {
   whmis: { 0: [0], 1: [0], 2: [0, 1], 3: [0, 1, 2], 4: [0, 1], 5: [0], 6: [0] },
   tdg: { 0: [0], 1: [0, 1], 2: [0], 3: [0, 1], 4: [0], 5: [0, 1], 6: [0] },
-  // Job-hazard courses (every value in JOB_HAZARD_COURSE_KEY) are
+  // Orientation videos (every value in ORIENTATION_AUTO_COURSES) are
   // watch-only — no quiz checkpoints — but still need a (empty) entry
   // here so the course list's click handler routes straight into the
   // video player instead of the read-then-quiz screen (see the click
   // handler's comment). Built for all 14 roles at once rather than
   // listed by hand.
-  ...Object.values(JOB_HAZARD_COURSE_KEY).reduce((acc, k) => { acc[k] = {}; return acc; }, {}),
+  ...Object.keys(ORIENTATION_AUTO_COURSES).reduce((acc, k) => { acc[k] = {}; return acc; }, {}),
 };
 // Which courses draw checkpoint questions from a per-module pool (see
 // startQuizSession) — keyed by course, so a future course's pools plug
@@ -7890,12 +8003,15 @@ const JOB_HAZARD_MODULE_BACKGROUND = [
   { color: '#33404D', colorDark: '#1F262E' },
   { color: '#607D8B', colorDark: '#37474F' },
   { color: '#D9822B', colorDark: '#A35F17' },
+  { color: '#5C6BC0', colorDark: '#3949AB' },
+  { color: '#8D6E63', colorDark: '#5D4037' },
+  { color: '#26A69A', colorDark: '#00897B' },
 ];
 const MODULE_BACKGROUND_BY_COURSE = {
   whmis: MODULE_BACKGROUND,
   tdg: TDG_MODULE_BACKGROUND,
-  // Every job-hazard course shares the same palette above.
-  ...Object.values(JOB_HAZARD_COURSE_KEY).reduce((acc, k) => { acc[k] = JOB_HAZARD_MODULE_BACKGROUND; return acc; }, {}),
+  // Every orientation video shares the same palette above.
+  ...Object.keys(ORIENTATION_AUTO_COURSES).reduce((acc, k) => { acc[k] = JOB_HAZARD_MODULE_BACKGROUND; return acc; }, {}),
 };
 
 // Small full-color prop icons — what the cartoon worker below is shown
@@ -20831,7 +20947,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     className="w-full text-left rounded-lg px-3 py-3 mb-3 font-display text-sm font-bold uppercase tracking-wide"
                     style={{ background: COLORS.accent, color: '#1B1F19' }}
                   >
-                    ▶ Watch the Video Version
+                    ▶ Watch the Orientation Video
                   </button>
                 )}
                 <div className="space-y-3">
