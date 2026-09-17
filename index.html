@@ -8666,15 +8666,6 @@ function LongPressReorderList({ entries, onReorder, renderItem, disabled }) {
   const longPressTimer = useRef(null);
   const startY = useRef(0);
   const movedBeforePress = useRef(false);
-  // Set the instant a long-press actually fires (drag mode entered),
-  // regardless of whether the finger then moves. A row here can be a
-  // whole clickable element (an accordion header, say) — without this,
-  // releasing after a long-press still fires a native "click" on
-  // whatever's underneath, which would immediately re-trigger that
-  // element's own onClick (e.g. re-collapsing/expanding it) right after
-  // the drag, undoing or masking the reorder. Consumed and reset by the
-  // capture-phase onClick below, so it never leaks into an unrelated tap.
-  const longPressFiredRef = useRef(false);
 
   useEffect(() => {
     if (!draggingKey) setOrder(entries.map((e) => e.key));
@@ -8693,7 +8684,7 @@ function LongPressReorderList({ entries, onReorder, renderItem, disabled }) {
     startY.current = clientY;
     clearTimer();
     longPressTimer.current = setTimeout(() => {
-      if (!movedBeforePress.current) { setDraggingKey(key); longPressFiredRef.current = true; }
+      if (!movedBeforePress.current) setDraggingKey(key);
     }, 450);
   };
   const handleMove = (clientY, evt) => {
@@ -8731,33 +8722,61 @@ function LongPressReorderList({ entries, onReorder, renderItem, disabled }) {
         <div
           key={entry.key}
           ref={(el) => { rowRefs.current[entry.key] = el; }}
-          onTouchStart={(e) => handleDown(entry.key, e.touches[0].clientY)}
-          onTouchMove={(e) => handleMove(e.touches[0].clientY, e)}
-          onTouchEnd={handleUp}
-          onMouseDown={(e) => handleDown(entry.key, e.clientY)}
-          onMouseMove={(e) => draggingKey && handleMove(e.clientY, e)}
-          onMouseUp={handleUp}
-          onMouseLeave={() => draggingKey === entry.key && handleUp()}
-          onClickCapture={(e) => {
-            if (longPressFiredRef.current) {
-              longPressFiredRef.current = false;
-              e.preventDefault();
-              e.stopPropagation();
-            }
-          }}
           style={{
-            touchAction: disabled ? 'auto' : 'none', // must be set from the start, not switched on once dragging begins — iOS Safari decides how to handle the gesture (scroll vs. custom) right at touchstart, and won't retroactively hand control back once it's picked scrolling. Only forced off while this list is actually reorderable (disabled=false), so scrolling still works normally inside an expanded row when dragging isn't active.
-            userSelect: 'none',
-            WebkitUserSelect: 'none', // iOS Safari needs its own prefixed property, or the long-press still pops up the text-selection bubbles/magnifier before our drag timer fires
-            WebkitTouchCallout: 'none', // suppresses iOS's press-and-hold callout menu (Copy/Look Up/etc.) on the row too
+            display: 'flex',
+            alignItems: 'stretch',
+            gap: 4,
+            position: 'relative',
             opacity: draggingKey === entry.key ? 0.6 : 1,
-            transform: draggingKey === entry.key ? 'scale(1.02)' : 'none',
+            transform: draggingKey === entry.key ? 'scale(1.01)' : 'none',
             boxShadow: draggingKey === entry.key ? '0 4px 14px #00000055' : 'none',
-            position: 'relative', zIndex: draggingKey === entry.key ? 10 : 'auto',
+            zIndex: draggingKey === entry.key ? 10 : 'auto',
             transition: draggingKey === entry.key ? 'none' : 'transform 0.15s ease',
           }}
         >
-          {renderItem(entry, draggingKey === entry.key)}
+          {!disabled && (
+            // A dedicated drag handle, not the whole row — only THIS
+            // needs touch-action:none (set from the start; iOS won't
+            // hand scroll control back once it's picked a gesture, see
+            // above), so scrolling through the rest of the row/list
+            // works normally everywhere else without needing a separate
+            // "reorder mode" toggle. Since the handle carries no click
+            // behavior of its own, there's also nothing for a
+            // long-press-then-release to misfire into afterward — the
+            // old onClickCapture suppression this replaced was only
+            // needed because the drag listeners used to sit on the same
+            // element as the row's own onClick (e.g. an accordion
+            // header).
+            <div
+              onTouchStart={(e) => handleDown(entry.key, e.touches[0].clientY)}
+              onTouchMove={(e) => handleMove(e.touches[0].clientY, e)}
+              onTouchEnd={handleUp}
+              onMouseDown={(e) => handleDown(entry.key, e.clientY)}
+              onMouseMove={(e) => draggingKey && handleMove(e.clientY, e)}
+              onMouseUp={handleUp}
+              onMouseLeave={() => draggingKey === entry.key && handleUp()}
+              style={{
+                touchAction: 'none',
+                userSelect: 'none',
+                WebkitUserSelect: 'none',
+                WebkitTouchCallout: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 30,
+                flexShrink: 0,
+                cursor: 'grab',
+                color: '#9098A3',
+                fontSize: 18,
+                letterSpacing: -2,
+              }}
+            >
+              ⠿
+            </div>
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {renderItem(entry, draggingKey === entry.key)}
+          </div>
         </div>
       ))}
     </div>
@@ -8769,13 +8788,12 @@ function LongPressReorderList({ entries, onReorder, renderItem, disabled }) {
 function OrganizeChecklistRow({ label, dragging }) {
   return (
     <div
-      className="flex items-center gap-3 px-3 py-3 mb-1.5 rounded-lg"
+      className="flex items-center px-3 py-3 mb-1.5 rounded-lg"
       style={{
         background: dragging ? COLORS.surfaceRaised : COLORS.surface, border: `1px solid ${COLORS.line}`,
         userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none',
       }}
     >
-      <span style={{ color: COLORS.inkDim, fontSize: 18, lineHeight: 1 }}>☰</span>
       <span className="text-sm flex-1">{label}</span>
     </div>
   );
@@ -8790,7 +8808,7 @@ function ChecklistItemsPanel({ title, items, order, checklistType }) {
   const entries = effOrder.map((canonicalIdx) => ({ key: String(canonicalIdx), label: items[canonicalIdx], canonicalIdx }));
   return (
     <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
-      <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Press and hold an item, then drag it up or down to reorder.</p>
+      <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Press and hold an item's ⠿ handle, then drag it up or down to reorder.</p>
       <LongPressReorderList
         entries={entries}
         renderItem={(entry, dragging) => <OrganizeChecklistRow label={entry.label} dragging={dragging} />}
@@ -8807,7 +8825,7 @@ function ChecklistItemsPanel({ title, items, order, checklistType }) {
 function YardChecklistItemsPanel({ yardOrder }) {
   return (
     <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
-      <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>Press and hold an item, then drag it up or down within its section to reorder.</p>
+      <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>Press and hold an item's ⠿ handle, then drag it up or down within its section to reorder.</p>
       {YARD_INSPECTION_SECTIONS.map((section, sIdx) => {
         const effOrder = effectiveItemOrder((yardOrder && yardOrder[sIdx]) || null, section.items.length);
         const entries = effOrder.map((canonicalIdx) => ({ key: String(canonicalIdx), label: section.items[canonicalIdx], canonicalIdx }));
@@ -20568,7 +20586,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 onToggle={() => setDocumentsFolderExpanded((x) => !x)}
               >
                 {documentsFolderExpanded && (
-                  <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Press and hold a category, then drag to reorder.</p>
+                  <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Press and hold a category's ⠿ handle, then drag to reorder.</p>
                 )}
                 <LongPressReorderList
                   entries={orderedFoldered.map((c) => ({ key: c }))}
@@ -20607,7 +20625,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Nothing on file yet.{(isAdmin || isSafety) ? ' Tap "Edit list" to add numbers.' : ''}</p>
             )}
             {emergencyContactsEditMode && (
-              <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Press and hold a row to drag it. Headers group the numbers below them — add one for Ambulance, RCMP, Mill, etc.</p>
+              <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Press and hold a row's ⠿ handle to drag it. Headers group the numbers below them — add one for Ambulance, RCMP, Mill, etc.</p>
             )}
             <LongPressReorderList
               entries={emergencyContacts.map((item) => ({ key: item.id }))}
@@ -22063,7 +22081,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           return (
             <div className="mb-2">
               {!anyExpanded && (
-                <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Press and hold a section, then drag to reorder.</p>
+                <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Press and hold a section's ⠿ handle, then drag to reorder.</p>
               )}
               <LongPressReorderList
                 entries={orderedKeys.map((k) => ({ key: k }))}
