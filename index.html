@@ -1265,6 +1265,89 @@ const TRAINING_COURSES = {
               // same as WHMIS — kept as an empty array (not removed) for
               // the same defensive-fallback reason as WHMIS's above.
   },
+  // Flat-quiz courses built around an outside video (see `videoUrl`) —
+  // same shape as TDG's old flat quiz, no COURSE_VIDEO_CHECKPOINTS entry
+  // (that's what keeps them out of video-checkpoint mode and routes them
+  // to the plain read-then-quiz screen instead), so startQuizSession
+  // falls through to its flat-quiz branch automatically. The "modules"
+  // content here is just a pointer at the outside video, not a
+  // narration of it — the actual video render block shows an "Open
+  // Video" link for any course with videoUrl but no in-app video.
+  hoursOfService: {
+    label: 'Hours of Service Training',
+    subtitle: 'Daily log rules, from the Hours of Service training video',
+    passScore: 80,
+    videoUrl: 'https://youtu.be/XgnlylSYsJI',
+    modules: [
+      {
+        title: 'Before You Start',
+        content: ['This quiz covers the Hours of Service training video — daily logs, duty statuses, and home terminal rules. Watch the video first, then come back and take the quiz below.'],
+      },
+    ],
+    quiz: [
+      { question: "When must the driver complete the information section on the daily log?", options: ['At the end of each week', 'At the start of each work shift', 'After completing the first trip of the day', 'Only when requested by a carrier'], correct: 1 },
+      { question: 'Which of the following information must be included at the start of the log?', options: ["Driver's name, co-driver's name (if applicable), and vehicle information", 'Cargo weight, destination city, and fuel used', 'Number of rest breaks and total distance', 'Only odometer readings'], correct: 0 },
+      { question: 'What does the home terminal refer to?', options: ['The province where the carrier is registered', "The driver's personal residence", 'The place of business where the driver normally reports for work', "The company's head office"], correct: 2 },
+      { question: "Where is the driver's home terminal usually located?", options: ["At the carrier's main office designated to the Registrar of Motor Vehicle Services", 'At the place of business of the carrier where the driver regularly reports for duty', 'At the highway weigh station closest to the route', "At the driver's home address"], correct: 1 },
+      { question: 'The daily grid in the log covers what time frame?', options: ['From 6:00 a.m. to 6:00 p.m.', 'From midnight to midnight', 'From start time to end time only', 'From 8:00 a.m. to 8:00 a.m.'], correct: 1 },
+      { question: 'The grid is divided into four rows representing which duty statuses?', options: ['Driving, sleeping, resting, and eating', 'Off duty (not in sleeper), off duty in sleeper berth, driving, and on duty (not driving)', 'Driving, fueling, inspecting, and loading', 'Resting, standby, travel, and maintenance'], correct: 1 },
+      { question: 'What is the purpose of the last column on the daily grid?', options: ['To record fuel stops and receipts', 'To write notes about mechanical issues', 'To total the hours spent in each duty status at the end of the workday', 'To record lunch break times only'], correct: 2 },
+    ],
+  },
+  weightsAndDimensions: {
+    label: 'Weights and Dimensions Training',
+    subtitle: 'Legal limits, permits, and escort rules, from the Weights and Dimensions training video',
+    passScore: 80,
+    videoUrl: 'https://youtu.be/ro08ae5hIk8',
+    modules: [
+      {
+        title: 'Before You Start',
+        content: ['This quiz covers the Weights and Dimensions training video — legal limits, permits, axle weights, and escort vehicle rules. Watch the video first, then come back and take the quiz below.'],
+      },
+    ],
+    quiz: [
+      { question: 'What is the tare weight of a vehicle?', options: ['The weight of the vehicle including full cargo and passengers', 'The weight of the vehicle empty, without cargo or passengers', 'The weight of the vehicle plus trailer', 'The maximum legal weight allowed on the highway'], correct: 1 },
+      { question: 'What are the maximum legal width and height for common commercial vehicles in Alberta?', options: ['2.9 m wide and 4.0 m high', '2.6 m wide and 4.15 m high', '3.0 m wide and 4.88 m high', '3.2 m wide and 5.0 m high'], correct: 1 },
+      { question: 'Why does the provincial government issue permits for overweight or over-dimensional vehicles?', options: ['To generate extra revenue for the province', 'To ensure safety, protect infrastructure, and provide safe movement of large/heavy loads', 'To speed up deliveries for carriers', 'To reduce the need for inspections'], correct: 1 },
+      { question: 'Why is axle weight distribution important?', options: ['To improve traction only', 'To avoid overloading axles and prevent damage to roads and bridges', 'To allow exceeding GVW limits for short distances', "It isn't important if total weight is under GVW"], correct: 1 },
+      { question: 'Which of the following are requirements for escort vehicles (pilot cars) when accompanying over-dimensional loads?', options: ['Maintain 2-way radio communication with the truck at all times', 'A pilot vehicle must precede the load at a distance of 300–1000 meters', 'A trail vehicle must follow the load at a distance of 100–300 meters', 'All of the above'], correct: 3 },
+      { question: 'Which of the following are equipment requirements for escort vehicles (pilot cars)?', options: ['3 approved warning devices', '3 warning flags for traffic marking and 1 warning flag per crew member', 'One reflective vest and one flashlight per crew member', 'All of the above'], correct: 3 },
+      { question: "Road restrictions and bans may change irregularly, and it is the carrier's responsibility to know which routes have restrictions and to abide by them.", options: ['True', 'False'], correct: 0 },
+      { question: 'Legal width, height, and length limits are the same in every Canadian province.', options: ['True', 'False'], correct: 1 },
+      { question: 'Any over-dimensional load always requires an oversize permit.', options: ['True', 'False'], correct: 0 },
+      { question: "Load securement rules don't matter if the vehicle is under GVW.", options: ['True', 'False'], correct: 1 },
+      { question: 'Drivers must check clearances under bridges and overpasses for tall loads.', options: ['True', 'False'], correct: 0 },
+    ],
+  },
+  preTripInspection: {
+    label: 'Pre-Trip Inspection Training',
+    subtitle: 'Full walk-around and air brake checks, from the Pre-Trip Inspection training video',
+    passScore: 80,
+    videoUrl: 'https://youtu.be/xP6C9o5Id-M',
+    modules: [
+      {
+        title: 'Before You Start',
+        content: ['This quiz covers the Pre-Trip Inspection training video — the full walk-around, coupling and uncoupling, and air brake checks. Watch the video first, then come back and take the quiz below.'],
+      },
+    ],
+    quiz: [
+      { question: 'According to the video workflow, what do they check before starting the under-the-hood inspection?', options: ['Air brake inspection', 'Documentation', 'In-cab inspection', '360° walk-around'], correct: 1 },
+      { question: 'Wheel chocks should be placed how?', options: ['One behind each steer tire only', 'One in front of a drive tire only', 'One in front of and one behind a tire, sticking out ~1.5″', 'Two behind the same tire, flush with the tread'], correct: 2 },
+      { question: 'When entering or exiting the cab, which safety method is emphasized?', options: ['Two-point contact', 'Three-point contact', 'Face away from the cab', 'Jump down carefully'], correct: 1 },
+      { question: 'To confirm the tractor parking brakes are set, what should be true?', options: ['Red button in, yellow out', 'Yellow button in, red out', 'Both buttons in', 'Yellow button out (pulled)'], correct: 3 },
+      { question: 'Which statement about trailer registration is stated in the video?', options: ['It expires annually on the plate month', 'It must be renewed every two years', 'It does not expire (continues)', "It's valid only with a fresh CVIP"], correct: 2 },
+      { question: 'What is the minimum steer-tire tread depth mentioned during the under-hood/steer check?', options: ['1.6 mm', '2.0 mm', '3.2 mm', '4.0 mm'], correct: 2 },
+      { question: 'During steer-axle checks, which combo indicates proper condition?', options: ['Rim cracked but tires fine', 'Even tread wear, no sidewall bulges, all lug nuts present', 'Minor oil on hub acceptable', 'Valve cap optional'], correct: 1 },
+      { question: 'When uncoupling, what happens before pulling the tractor ahead?', options: ['Drop suspension, then lower landing gear', 'Lower landing gear until the feet touch the ground', 'Disconnect lines after moving the tractor 6″', 'Unlock fifth wheel after driving ahead'], correct: 1 },
+      { question: 'After unlocking the fifth wheel and pulling ahead ~5–6″, what key height/weight check is done?', options: ['Check that the apron is bent', 'Confirm visible light between fifth wheel and trailer (landing gear holding weight)', 'Ensure no light between fifth wheel and trailer', 'Inflate airbags manually'], correct: 1 },
+      { question: 'Before backing under to couple, what safety signal(s) are performed?', options: ['One horn honk only', 'Two horn honks and hazard lights on, plus a 360 walk-around', 'Four horn honks, no hazards', 'High beams on only'], correct: 1 },
+      { question: 'Which is not part of verifying a proper couple after backing in?', options: ['Hear the latch sound and do a tug/torque test (twice)', 'Confirm fifth-wheel handle is fully in and locking arm visible', 'Leave lines disconnected until departure', 'Raise landing gear fully and secure the handle'], correct: 2 },
+      { question: 'What is the main purpose of the 360 inspection after coupling?', options: ['To verify paperwork is correct', 'To ensure all exterior components, lights, and tires are safe and functional', 'To re-inspect the engine fluids', 'To check only the trailer floor'], correct: 1 },
+      { question: 'For the air-brake pop-out test of the trailer air-supply valve (red), the button should pop out at approximately:', options: ['20–45 PSI', '50–90 PSI', '40–60 PSI (or higher)', '90–120 PSI'], correct: 2 },
+      { question: 'Compressor health (air build-up) is tested from 50 to 90 PSI at ~1200 RPM and must complete within:', options: ['30 seconds', '1 minute', '2 minutes', '3 minutes'], correct: 3 },
+      { question: 'Which combination for governor & leak tests is correct?', options: ['Cut-out 100–110 PSI; cut-in 10 PSI below; max 8 PSI drop in 2 min leak test', 'Cut-out 120–135 PSI; cut-in 20–25 PSI below; max 6 PSI drop in 2 min leak test', 'Cut-out 140–160 PSI; cut-in 10–15 PSI below; max 4 PSI drop', 'Cut-out 90–100 PSI; cut-in 5 PSI below; max 2 PSI drop'], correct: 1 },
+    ],
+  },
   // Job-hazard courses — the video version of the task-by-task hazard
   // lists in JOB_HAZARDS, one module per task, narrated the same
   // WHMIS/TDG-style way but watch-only: no quiz, no checkpoint, no
@@ -1292,32 +1375,22 @@ JOB_HAZARD_AUTO_ROLE_KEYS.forEach((jobKey) => {
   JOB_HAZARD_COURSE_KEY[jobKey] = 'jh' + jobKey.charAt(0).toUpperCase() + jobKey.slice(1);
 });
 // Woodlands Training isn't a TRAINING_COURSES entry — it's an outside
-// LMS course (see EXTERNAL_SAFETY_LINKS), so there's no in-app video or
-// quiz to track. It still belongs on the training checklist (invite
-// form / assign-to-existing-employee) alongside everything else;
-// completion is just self-reported once someone's actually finished it
-// on the external site, using the same videoWatched record any other
-// watch-only course uses (see isTrainingCourseComplete).
+// LMS course (see EXTERNAL_SAFETY_LINKS) with no quiz of its own, so
+// there's no in-app video or quiz to track. It still belongs on the
+// training checklist (invite form / assign-to-existing-employee)
+// alongside everything else; completion is just self-reported once
+// someone's actually finished it on the external site, using the same
+// videoWatched record any other watch-only course uses (see
+// isTrainingCourseComplete). Hours of Service, Weights and Dimensions,
+// and Pre-Trip Inspection all started out here too, but each has its
+// own real quiz now (see TRAINING_COURSES) — those live as regular
+// flat-quiz courses instead, same as TDG, with `videoUrl` pointing at
+// the outside video someone should watch first.
 const EXTERNAL_TRAINING_COURSES = {
   woodlandsTraining: {
     label: 'Woodlands Training',
     description: "Completed on Vanderwell's outside training site — open it, finish the course there, then come back and mark it done here.",
     url: EXTERNAL_SAFETY_LINKS['Woodlands Training'].url,
-  },
-  hoursOfService: {
-    label: 'Hours of Service Training',
-    description: 'A YouTube training video on Hours of Service rules — watch it, then come back and mark it done here.',
-    url: 'https://youtu.be/XgnlylSYsJI',
-  },
-  weightsAndDimensions: {
-    label: 'Weights and Dimensions Training',
-    description: 'A YouTube training video on weights and dimensions rules — watch it, then come back and mark it done here.',
-    url: 'https://youtu.be/ro08ae5hIk8',
-  },
-  preTripInspectionTraining: {
-    label: 'Pre-Trip Inspection Training',
-    description: 'A YouTube training video on pre-trip inspections — watch it, then come back and mark it done here.',
-    url: 'https://youtu.be/xP6C9o5Id-M',
   },
 };
 
@@ -7405,7 +7478,7 @@ function TrainingChecklist({ selected, onToggle }) {
   return (
     <>
       <p className="text-xs font-semibold uppercase tracking-wide mt-1 mb-1" style={{ color: COLORS.inkDim }}>Safety courses (quiz)</p>
-      {['whmis', 'tdg'].map((key) => (
+      {['whmis', 'tdg', 'hoursOfService', 'weightsAndDimensions', 'preTripInspection'].map((key) => (
         <label key={key} className="flex items-center gap-2 text-sm py-1 cursor-pointer">
           <input type="checkbox" checked={selected.includes(key)} onChange={() => onToggle(key)} />
           <span>{TRAINING_COURSES[key].label}</span>
@@ -7431,40 +7504,6 @@ function TrainingChecklist({ selected, onToggle }) {
     </>
   );
 }
-
-// Lets admin/safety check off an external course (one with nothing
-// in-app to track, like a YouTube video) for a specific employee —
-// shown under that course's entry in the Training Courses list, next to
-// the self-report button anyone gets. Its own dropdown selection is
-// local state (just "who's picked right now"), not global — the actual
-// completion write goes through onMark (markVideoWatched) the same as
-// the self-report path.
-function ExternalCourseAdminMarker({ mechanics, isComplete, onMark }) {
-  const [pick, setPick] = useState('');
-  return (
-    <div className="rounded-lg px-3 py-2 mt-1 flex items-center gap-2 flex-wrap" style={{ background: COLORS.surface, border: `1px dashed ${COLORS.line}` }}>
-      <span className="text-xs flex-shrink-0" style={{ color: COLORS.inkDim }}>Mark for:</span>
-      <select
-        value={pick}
-        onChange={(e) => setPick(e.target.value)}
-        className="text-xs px-2 py-1.5 rounded-lg flex-1 min-w-0"
-        style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}`, color: COLORS.ink }}
-      >
-        <option value="">Choose employee…</option>
-        {mechanics.map((m) => <option key={m} value={m}>{m}{isComplete(m) ? ' ✓' : ''}</option>)}
-      </select>
-      <button
-        onClick={() => { if (pick) { onMark(pick); setPick(''); } }}
-        disabled={!pick}
-        className="text-xs font-display uppercase tracking-wider font-semibold px-3 py-1.5 rounded-lg flex-shrink-0"
-        style={{ color: '#1B1F19', background: pick ? COLORS.accent : COLORS.line }}
-      >
-        ✓ Mark Complete
-      </button>
-    </div>
-  );
-}
-
 
 // One collection's migration control — its own description, its own
 // result, its own run button, independent of any others shown alongside
@@ -13529,16 +13568,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await (next.length ? ref.set(next) : ref.remove()).catch(() => alert("Couldn't save that — check your signal and try again."));
   };
   // Marks a watch-only (noQuiz) job-hazard course — or a self-reported
-  // external course like Woodlands Training — as done. Defaults to the
-  // CURRENT mechanic (self-report), but takes an optional target name so
-  // admin/safety can check one off for someone else directly from the
-  // Training Courses list (see ExternalCourseAdminMarker) — handy for
-  // an outside video with nothing in-app to track, where the safety
-  // coordinator may be the one confirming it got watched. Quiz courses
-  // (WHMIS/TDG) don't need this, they already get a trainingRecords
-  // entry from submitTrainingQuiz.
-  const markVideoWatched = async (courseKey, forMechanic) => {
-    const slug = slugForMechanic(forMechanic || currentMechanic);
+  // external course like Woodlands Training — as done for the CURRENT
+  // mechanic. Quiz courses (WHMIS/TDG) don't need this, they already
+  // get a trainingRecords entry from submitTrainingQuiz.
+  const markVideoWatched = async (courseKey) => {
+    const slug = slugForMechanic(currentMechanic);
     await firebase.database().ref(`videoWatched/${slug}/${courseKey}`).set(Date.now()).catch(() => {});
   };
   // Whether `mechanic` has finished `courseKey` — passed for a quiz
@@ -20714,18 +20748,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 {!!Object.keys(EXTERNAL_TRAINING_COURSES).length && (
                   <p className="text-xs font-semibold uppercase tracking-wide mt-3 mb-1" style={{ color: COLORS.inkDim }}>External training (watch-only)</p>
                 )}
-                {Object.keys(EXTERNAL_TRAINING_COURSES).map((key) => (
-                  <div key={key}>
-                    {renderTrainingListItem(key)}
-                    {(isAdmin || isSafety) && (
-                      <ExternalCourseAdminMarker
-                        mechanics={mechanics}
-                        isComplete={(name) => isTrainingCourseComplete(key, name)}
-                        onMark={(name) => markVideoWatched(key, name)}
-                      />
-                    )}
-                  </div>
-                ))}
+                {Object.keys(EXTERNAL_TRAINING_COURSES).map((key) => renderTrainingListItem(key))}
               </div>
             ) : (
               <div>
@@ -20757,6 +20780,17 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         >
                           ▶ Watch as a Video Instead
                         </Btn>
+                      )}
+                      {TRAINING_COURSES[selectedCourse].videoUrl && (
+                        <a
+                          href={TRAINING_COURSES[selectedCourse].videoUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs font-display uppercase tracking-wider font-semibold px-4 py-2.5 rounded-lg inline-flex items-center"
+                          style={{ color: COLORS.accent, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}`, textDecoration: 'none' }}
+                        >
+                          ▶ Open Video ↗
+                        </a>
                       )}
                       <Btn onClick={() => { startQuizSession(selectedCourse); setCourseStage('quiz'); setQuizAnswers({}); }}>Take the Quiz</Btn>
                     </div>
