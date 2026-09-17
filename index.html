@@ -1285,13 +1285,13 @@ const TRAINING_COURSES = {
       },
     ],
     quiz: [
-      { question: "When must the driver complete the information section on the daily log?", options: ['At the end of each week', 'At the start of each work shift', 'After completing the first trip of the day', 'Only when requested by a carrier'], correct: 1 },
-      { question: 'Which of the following information must be included at the start of the log?', options: ["Driver's name, co-driver's name (if applicable), and vehicle information", 'Cargo weight, destination city, and fuel used', 'Number of rest breaks and total distance', 'Only odometer readings'], correct: 0 },
-      { question: 'What does the home terminal refer to?', options: ['The province where the carrier is registered', "The driver's personal residence", 'The place of business where the driver normally reports for work', "The company's head office"], correct: 2 },
-      { question: "Where is the driver's home terminal usually located?", options: ["At the carrier's main office designated to the Registrar of Motor Vehicle Services", 'At the place of business of the carrier where the driver regularly reports for duty', 'At the highway weigh station closest to the route', "At the driver's home address"], correct: 1 },
-      { question: 'The daily grid in the log covers what time frame?', options: ['From 6:00 a.m. to 6:00 p.m.', 'From midnight to midnight', 'From start time to end time only', 'From 8:00 a.m. to 8:00 a.m.'], correct: 1 },
-      { question: 'The grid is divided into four rows representing which duty statuses?', options: ['Driving, sleeping, resting, and eating', 'Off duty (not in sleeper), off duty in sleeper berth, driving, and on duty (not driving)', 'Driving, fueling, inspecting, and loading', 'Resting, standby, travel, and maintenance'], correct: 1 },
-      { question: 'What is the purpose of the last column on the daily grid?', options: ['To record fuel stops and receipts', 'To write notes about mechanical issues', 'To total the hours spent in each duty status at the end of the workday', 'To record lunch break times only'], correct: 2 },
+      { q: "When must the driver complete the information section on the daily log?", options: ['At the end of each week', 'At the start of each work shift', 'After completing the first trip of the day', 'Only when requested by a carrier'], correct: 1 },
+      { q: 'Which of the following information must be included at the start of the log?', options: ["Driver's name, co-driver's name (if applicable), and vehicle information", 'Cargo weight, destination city, and fuel used', 'Number of rest breaks and total distance', 'Only odometer readings'], correct: 0 },
+      { q: 'What does the home terminal refer to?', options: ['The province where the carrier is registered', "The driver's personal residence", 'The place of business where the driver normally reports for work', "The company's head office"], correct: 2 },
+      { q: "Where is the driver's home terminal usually located?", options: ["At the carrier's main office designated to the Registrar of Motor Vehicle Services", 'At the place of business of the carrier where the driver regularly reports for duty', 'At the highway weigh station closest to the route', "At the driver's home address"], correct: 1 },
+      { q: 'The daily grid in the log covers what time frame?', options: ['From 6:00 a.m. to 6:00 p.m.', 'From midnight to midnight', 'From start time to end time only', 'From 8:00 a.m. to 8:00 a.m.'], correct: 1 },
+      { q: 'The grid is divided into four rows representing which duty statuses?', options: ['Driving, sleeping, resting, and eating', 'Off duty (not in sleeper), off duty in sleeper berth, driving, and on duty (not driving)', 'Driving, fueling, inspecting, and loading', 'Resting, standby, travel, and maintenance'], correct: 1 },
+      { q: 'What is the purpose of the last column on the daily grid?', options: ['To record fuel stops and receipts', 'To write notes about mechanical issues', 'To total the hours spent in each duty status at the end of the workday', 'To record lunch break times only'], correct: 2 },
     ],
   },
   weightsAndDimensions: {
@@ -1306,17 +1306,17 @@ const TRAINING_COURSES = {
       },
     ],
     quiz: [
-      { question: 'What is the tare weight of a vehicle?', options: ['The weight of the vehicle including full cargo and passengers', 'The weight of the vehicle empty, without cargo or passengers', 'The weight of the vehicle plus trailer', 'The maximum legal weight allowed on the highway'], correct: 1 },
-      { question: 'What are the maximum legal width and height for common commercial vehicles in Alberta?', options: ['2.9 m wide and 4.0 m high', '2.6 m wide and 4.15 m high', '3.0 m wide and 4.88 m high', '3.2 m wide and 5.0 m high'], correct: 1 },
-      { question: 'Why does the provincial government issue permits for overweight or over-dimensional vehicles?', options: ['To generate extra revenue for the province', 'To ensure safety, protect infrastructure, and provide safe movement of large/heavy loads', 'To speed up deliveries for carriers', 'To reduce the need for inspections'], correct: 1 },
-      { question: 'Why is axle weight distribution important?', options: ['To improve traction only', 'To avoid overloading axles and prevent damage to roads and bridges', 'To allow exceeding GVW limits for short distances', "It isn't important if total weight is under GVW"], correct: 1 },
-      { question: 'Which of the following are requirements for escort vehicles (pilot cars) when accompanying over-dimensional loads?', options: ['Maintain 2-way radio communication with the truck at all times', 'A pilot vehicle must precede the load at a distance of 300–1000 meters', 'A trail vehicle must follow the load at a distance of 100–300 meters', 'All of the above'], correct: 3 },
-      { question: 'Which of the following are equipment requirements for escort vehicles (pilot cars)?', options: ['3 approved warning devices', '3 warning flags for traffic marking and 1 warning flag per crew member', 'One reflective vest and one flashlight per crew member', 'All of the above'], correct: 3 },
-      { question: "Road restrictions and bans may change irregularly, and it is the carrier's responsibility to know which routes have restrictions and to abide by them.", options: ['True', 'False'], correct: 0 },
-      { question: 'Legal width, height, and length limits are the same in every Canadian province.', options: ['True', 'False'], correct: 1 },
-      { question: 'Any over-dimensional load always requires an oversize permit.', options: ['True', 'False'], correct: 0 },
-      { question: "Load securement rules don't matter if the vehicle is under GVW.", options: ['True', 'False'], correct: 1 },
-      { question: 'Drivers must check clearances under bridges and overpasses for tall loads.', options: ['True', 'False'], correct: 0 },
+      { q: 'What is the tare weight of a vehicle?', options: ['The weight of the vehicle including full cargo and passengers', 'The weight of the vehicle empty, without cargo or passengers', 'The weight of the vehicle plus trailer', 'The maximum legal weight allowed on the highway'], correct: 1 },
+      { q: 'What are the maximum legal width and height for common commercial vehicles in Alberta?', options: ['2.9 m wide and 4.0 m high', '2.6 m wide and 4.15 m high', '3.0 m wide and 4.88 m high', '3.2 m wide and 5.0 m high'], correct: 1 },
+      { q: 'Why does the provincial government issue permits for overweight or over-dimensional vehicles?', options: ['To generate extra revenue for the province', 'To ensure safety, protect infrastructure, and provide safe movement of large/heavy loads', 'To speed up deliveries for carriers', 'To reduce the need for inspections'], correct: 1 },
+      { q: 'Why is axle weight distribution important?', options: ['To improve traction only', 'To avoid overloading axles and prevent damage to roads and bridges', 'To allow exceeding GVW limits for short distances', "It isn't important if total weight is under GVW"], correct: 1 },
+      { q: 'Which of the following are requirements for escort vehicles (pilot cars) when accompanying over-dimensional loads?', options: ['Maintain 2-way radio communication with the truck at all times', 'A pilot vehicle must precede the load at a distance of 300–1000 meters', 'A trail vehicle must follow the load at a distance of 100–300 meters', 'All of the above'], correct: 3 },
+      { q: 'Which of the following are equipment requirements for escort vehicles (pilot cars)?', options: ['3 approved warning devices', '3 warning flags for traffic marking and 1 warning flag per crew member', 'One reflective vest and one flashlight per crew member', 'All of the above'], correct: 3 },
+      { q: "Road restrictions and bans may change irregularly, and it is the carrier's responsibility to know which routes have restrictions and to abide by them.", options: ['True', 'False'], correct: 0 },
+      { q: 'Legal width, height, and length limits are the same in every Canadian province.', options: ['True', 'False'], correct: 1 },
+      { q: 'Any over-dimensional load always requires an oversize permit.', options: ['True', 'False'], correct: 0 },
+      { q: "Load securement rules don't matter if the vehicle is under GVW.", options: ['True', 'False'], correct: 1 },
+      { q: 'Drivers must check clearances under bridges and overpasses for tall loads.', options: ['True', 'False'], correct: 0 },
     ],
   },
   preTripInspection: {
@@ -1331,21 +1331,21 @@ const TRAINING_COURSES = {
       },
     ],
     quiz: [
-      { question: 'According to the video workflow, what do they check before starting the under-the-hood inspection?', options: ['Air brake inspection', 'Documentation', 'In-cab inspection', '360° walk-around'], correct: 1 },
-      { question: 'Wheel chocks should be placed how?', options: ['One behind each steer tire only', 'One in front of a drive tire only', 'One in front of and one behind a tire, sticking out ~1.5″', 'Two behind the same tire, flush with the tread'], correct: 2 },
-      { question: 'When entering or exiting the cab, which safety method is emphasized?', options: ['Two-point contact', 'Three-point contact', 'Face away from the cab', 'Jump down carefully'], correct: 1 },
-      { question: 'To confirm the tractor parking brakes are set, what should be true?', options: ['Red button in, yellow out', 'Yellow button in, red out', 'Both buttons in', 'Yellow button out (pulled)'], correct: 3 },
-      { question: 'Which statement about trailer registration is stated in the video?', options: ['It expires annually on the plate month', 'It must be renewed every two years', 'It does not expire (continues)', "It's valid only with a fresh CVIP"], correct: 2 },
-      { question: 'What is the minimum steer-tire tread depth mentioned during the under-hood/steer check?', options: ['1.6 mm', '2.0 mm', '3.2 mm', '4.0 mm'], correct: 2 },
-      { question: 'During steer-axle checks, which combo indicates proper condition?', options: ['Rim cracked but tires fine', 'Even tread wear, no sidewall bulges, all lug nuts present', 'Minor oil on hub acceptable', 'Valve cap optional'], correct: 1 },
-      { question: 'When uncoupling, what happens before pulling the tractor ahead?', options: ['Drop suspension, then lower landing gear', 'Lower landing gear until the feet touch the ground', 'Disconnect lines after moving the tractor 6″', 'Unlock fifth wheel after driving ahead'], correct: 1 },
-      { question: 'After unlocking the fifth wheel and pulling ahead ~5–6″, what key height/weight check is done?', options: ['Check that the apron is bent', 'Confirm visible light between fifth wheel and trailer (landing gear holding weight)', 'Ensure no light between fifth wheel and trailer', 'Inflate airbags manually'], correct: 1 },
-      { question: 'Before backing under to couple, what safety signal(s) are performed?', options: ['One horn honk only', 'Two horn honks and hazard lights on, plus a 360 walk-around', 'Four horn honks, no hazards', 'High beams on only'], correct: 1 },
-      { question: 'Which is not part of verifying a proper couple after backing in?', options: ['Hear the latch sound and do a tug/torque test (twice)', 'Confirm fifth-wheel handle is fully in and locking arm visible', 'Leave lines disconnected until departure', 'Raise landing gear fully and secure the handle'], correct: 2 },
-      { question: 'What is the main purpose of the 360 inspection after coupling?', options: ['To verify paperwork is correct', 'To ensure all exterior components, lights, and tires are safe and functional', 'To re-inspect the engine fluids', 'To check only the trailer floor'], correct: 1 },
-      { question: 'For the air-brake pop-out test of the trailer air-supply valve (red), the button should pop out at approximately:', options: ['20–45 PSI', '50–90 PSI', '40–60 PSI (or higher)', '90–120 PSI'], correct: 2 },
-      { question: 'Compressor health (air build-up) is tested from 50 to 90 PSI at ~1200 RPM and must complete within:', options: ['30 seconds', '1 minute', '2 minutes', '3 minutes'], correct: 3 },
-      { question: 'Which combination for governor & leak tests is correct?', options: ['Cut-out 100–110 PSI; cut-in 10 PSI below; max 8 PSI drop in 2 min leak test', 'Cut-out 120–135 PSI; cut-in 20–25 PSI below; max 6 PSI drop in 2 min leak test', 'Cut-out 140–160 PSI; cut-in 10–15 PSI below; max 4 PSI drop', 'Cut-out 90–100 PSI; cut-in 5 PSI below; max 2 PSI drop'], correct: 1 },
+      { q: 'According to the video workflow, what do they check before starting the under-the-hood inspection?', options: ['Air brake inspection', 'Documentation', 'In-cab inspection', '360° walk-around'], correct: 1 },
+      { q: 'Wheel chocks should be placed how?', options: ['One behind each steer tire only', 'One in front of a drive tire only', 'One in front of and one behind a tire, sticking out ~1.5″', 'Two behind the same tire, flush with the tread'], correct: 2 },
+      { q: 'When entering or exiting the cab, which safety method is emphasized?', options: ['Two-point contact', 'Three-point contact', 'Face away from the cab', 'Jump down carefully'], correct: 1 },
+      { q: 'To confirm the tractor parking brakes are set, what should be true?', options: ['Red button in, yellow out', 'Yellow button in, red out', 'Both buttons in', 'Yellow button out (pulled)'], correct: 3 },
+      { q: 'Which statement about trailer registration is stated in the video?', options: ['It expires annually on the plate month', 'It must be renewed every two years', 'It does not expire (continues)', "It's valid only with a fresh CVIP"], correct: 2 },
+      { q: 'What is the minimum steer-tire tread depth mentioned during the under-hood/steer check?', options: ['1.6 mm', '2.0 mm', '3.2 mm', '4.0 mm'], correct: 2 },
+      { q: 'During steer-axle checks, which combo indicates proper condition?', options: ['Rim cracked but tires fine', 'Even tread wear, no sidewall bulges, all lug nuts present', 'Minor oil on hub acceptable', 'Valve cap optional'], correct: 1 },
+      { q: 'When uncoupling, what happens before pulling the tractor ahead?', options: ['Drop suspension, then lower landing gear', 'Lower landing gear until the feet touch the ground', 'Disconnect lines after moving the tractor 6″', 'Unlock fifth wheel after driving ahead'], correct: 1 },
+      { q: 'After unlocking the fifth wheel and pulling ahead ~5–6″, what key height/weight check is done?', options: ['Check that the apron is bent', 'Confirm visible light between fifth wheel and trailer (landing gear holding weight)', 'Ensure no light between fifth wheel and trailer', 'Inflate airbags manually'], correct: 1 },
+      { q: 'Before backing under to couple, what safety signal(s) are performed?', options: ['One horn honk only', 'Two horn honks and hazard lights on, plus a 360 walk-around', 'Four horn honks, no hazards', 'High beams on only'], correct: 1 },
+      { q: 'Which is not part of verifying a proper couple after backing in?', options: ['Hear the latch sound and do a tug/torque test (twice)', 'Confirm fifth-wheel handle is fully in and locking arm visible', 'Leave lines disconnected until departure', 'Raise landing gear fully and secure the handle'], correct: 2 },
+      { q: 'What is the main purpose of the 360 inspection after coupling?', options: ['To verify paperwork is correct', 'To ensure all exterior components, lights, and tires are safe and functional', 'To re-inspect the engine fluids', 'To check only the trailer floor'], correct: 1 },
+      { q: 'For the air-brake pop-out test of the trailer air-supply valve (red), the button should pop out at approximately:', options: ['20–45 PSI', '50–90 PSI', '40–60 PSI (or higher)', '90–120 PSI'], correct: 2 },
+      { q: 'Compressor health (air build-up) is tested from 50 to 90 PSI at ~1200 RPM and must complete within:', options: ['30 seconds', '1 minute', '2 minutes', '3 minutes'], correct: 3 },
+      { q: 'Which combination for governor & leak tests is correct?', options: ['Cut-out 100–110 PSI; cut-in 10 PSI below; max 8 PSI drop in 2 min leak test', 'Cut-out 120–135 PSI; cut-in 20–25 PSI below; max 6 PSI drop in 2 min leak test', 'Cut-out 140–160 PSI; cut-in 10–15 PSI below; max 4 PSI drop', 'Cut-out 90–100 PSI; cut-in 5 PSI below; max 2 PSI drop'], correct: 1 },
     ],
   },
   // Job-hazard courses — the video version of the task-by-task hazard
@@ -8589,9 +8589,14 @@ function ScanDocumentForm({ scanning, onCancel, onSubmit }) {
 // allowNA adds a third "N/A" button (used by Equipment inspections;
 // Yard keeps the original two-way OK / Req. Att. shape the paper form
 // used, so it stays false there).
-function InspectionItemRow({ label, value, onChange, readOnly, allowNA }) {
+function InspectionItemRow({ label, value, onChange, readOnly, allowNA, followedUp }) {
   const status = value && value.status;
   const note = (value && value.note) || '';
+  // Same green "Followed up" swap the record list already does once
+  // reviewedBy is set — a flagged item shouldn't go on reading as
+  // outstanding forever just because that's how it was recorded at
+  // inspection time.
+  const showFollowedUp = readOnly && followedUp && status === 'reqAtt';
   if (readOnly) {
     return (
       <div className="py-2 border-b" style={{ borderColor: COLORS.line }}>
@@ -8599,13 +8604,15 @@ function InspectionItemRow({ label, value, onChange, readOnly, allowNA }) {
           <span className="text-sm flex-1">{label}</span>
           <span
             className="text-xs font-bold px-2 py-1 rounded flex-shrink-0"
-            style={status === 'reqAtt'
+            style={showFollowedUp
+              ? { background: '#6FAE7233', color: '#6FAE72' }
+              : status === 'reqAtt'
               ? { background: '#E07A5F33', color: '#E07A5F' }
               : status === 'na'
               ? { background: COLORS.inkDim + '33', color: COLORS.inkDim }
               : { background: COLORS.accent + '33', color: COLORS.accent }}
           >
-            {status === 'reqAtt' ? 'Req. Att.' : status === 'na' ? 'N/A' : status === 'ok' ? 'OK' : '—'}
+            {showFollowedUp ? '✅ Followed up' : status === 'reqAtt' ? 'Req. Att.' : status === 'na' ? 'N/A' : status === 'ok' ? 'OK' : '—'}
           </span>
         </div>
         {status === 'reqAtt' && note && (
@@ -9121,7 +9128,7 @@ function YardInspectionDetail({ record, isAdmin, onReview, onDelete, onBack, sec
           <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>{section.name}</p>
           {effectiveItemOrder((sectionOrders && sectionOrders[sIdx]) || null, section.items.length).map((iIdx) => {
             const key = `${sIdx}-${iIdx}`;
-            return <InspectionItemRow key={key} label={section.items[iIdx]} value={record.items && record.items[key]} readOnly />;
+            return <InspectionItemRow key={key} label={section.items[iIdx]} value={record.items && record.items[key]} readOnly followedUp={!!record.reviewedBy} />;
           })}
         </div>
       ))}
@@ -9165,15 +9172,24 @@ function YardInspectionDetail({ record, isAdmin, onReview, onDelete, onBack, sec
 // instead of the yard form's two-way, and the comment box stays available
 // regardless of status, matching how the paper form has notes written next
 // to OK'd items too, not just flagged ones.
-function VehicleInspectionItemRow({ label, value, onChange, readOnly }) {
+function VehicleInspectionItemRow({ label, value, onChange, readOnly, followedUp }) {
   const status = value && value.status;
   const comment = (value && value.comment) || '';
-  const badgeStyle = status === 'notOk'
+  // Once the whole record's been followed up, a Not OK item shouldn't go
+  // on showing red forever — it reads as still-outstanding even after
+  // someone's actually dealt with it. Flip it to the same green
+  // "Followed up" treatment the record list uses once reviewedBy is set
+  // (see the Yard/Vehicle/Equipment folder lists); OK and N/A items are
+  // unaffected, there was nothing to follow up on for those.
+  const showFollowedUp = readOnly && followedUp && status === 'notOk';
+  const badgeStyle = showFollowedUp
+    ? { background: '#6FAE7233', color: '#6FAE72' }
+    : status === 'notOk'
     ? { background: '#E07A5F33', color: '#E07A5F' }
     : status === 'na'
       ? { background: COLORS.inkDim + '33', color: COLORS.inkDim }
       : { background: COLORS.accent + '33', color: COLORS.accent };
-  const badgeLabel = status === 'notOk' ? 'Not OK' : status === 'na' ? 'N/A' : status === 'ok' ? 'OK' : '—';
+  const badgeLabel = showFollowedUp ? '✅ Followed up' : status === 'notOk' ? 'Not OK' : status === 'na' ? 'N/A' : status === 'ok' ? 'OK' : '—';
   if (readOnly) {
     return (
       <div className="py-2 border-b" style={{ borderColor: COLORS.line }}>
@@ -9378,7 +9394,7 @@ function VehicleInspectionDetail({ record, isAdmin, onReview, onDelete, onBack, 
       </p>
 
       {effectiveItemOrder(itemOrder, VEHICLE_INSPECTION_ITEMS.length).map((iIdx) => (
-        <VehicleInspectionItemRow key={iIdx} label={VEHICLE_INSPECTION_ITEMS[iIdx]} value={record.items && record.items[iIdx]} readOnly />
+        <VehicleInspectionItemRow key={iIdx} label={VEHICLE_INSPECTION_ITEMS[iIdx]} value={record.items && record.items[iIdx]} readOnly followedUp={!!record.reviewedBy} />
       ))}
 
       {isAdmin && !record.reviewedBy && (
@@ -9611,7 +9627,7 @@ function EquipmentInspectionDetail({ record, isAdmin, onReview, onDelete, onBack
       </p>
 
       {effectiveItemOrder(itemOrder, EQUIPMENT_INSPECTION_ITEMS.length).map((iIdx) => (
-        <InspectionItemRow key={iIdx} label={EQUIPMENT_INSPECTION_ITEMS[iIdx]} value={record.items && record.items[iIdx]} readOnly />
+        <InspectionItemRow key={iIdx} label={EQUIPMENT_INSPECTION_ITEMS[iIdx]} value={record.items && record.items[iIdx]} readOnly followedUp={!!record.reviewedBy} />
       ))}
 
       {record.comments && (
