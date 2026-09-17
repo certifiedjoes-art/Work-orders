@@ -10783,22 +10783,32 @@ function computeDayGrids(log) {
     const dayStart = new Date(dayCursor);
     const dayEndFull = new Date(dayCursor);
     dayEndFull.setDate(dayEndFull.getDate() + 1);
-    const dayEnd = new Date(Math.min(dayEndFull.getTime(), shiftEnd.getTime()));
+    // dataEnd is where REAL logged time actually stops for this day —
+    // the log's real end, or "now" for a still-open log (shiftEnd
+    // already resolves to whichever applies). dayEndFull (midnight) is
+    // always passed as the grid's own boundary below — a day column is
+    // always the full 24 hours regardless of where the real data stops,
+    // so the last status's line can visually continue through to
+    // midnight (see DriverLogDayGrid's drawEnd/hoursEnd split) the way
+    // a paper log reads, without inflating actual driving/on-duty hours
+    // past what really happened.
+    const dataEnd = new Date(Math.min(dayEndFull.getTime(), shiftEnd.getTime()));
 
     let carriedStatus = sorted[0].status;
     for (const c of sorted) {
       if (new Date(c.time) <= dayStart) carriedStatus = c.status; else break;
     }
-    const pointsInDay = sorted.filter((c) => new Date(c.time) > dayStart && new Date(c.time) < dayEnd);
+    const pointsInDay = sorted.filter((c) => new Date(c.time) > dayStart && new Date(c.time) < dataEnd);
     const points = [{ id: 'carried-' + dayStart.getTime(), status: carriedStatus, time: dayStart.toISOString(), fixed: true }, ...pointsInDay];
 
-    days.push({ dayStart, dayEnd, points, startCumDriving: cumDriving, startCumOnDuty: cumOnDuty });
+    days.push({ dayStart, dayEnd: dayEndFull, dataEnd, points, startCumDriving: cumDriving, startCumOnDuty: cumOnDuty });
 
-    // Advance the running totals across this day's real segments before moving on.
-    const drawEnd = new Date(Math.min(dayEnd.getTime(), log.end ? Infinity : Date.now()));
+    // Advance the running totals across this day's REAL segments only —
+    // never past dataEnd, so a visually-extended off-duty line on the
+    // last day never inflates tomorrow's carried totals.
     for (let i = 0; i < points.length; i++) {
       const segStart = new Date(points[i].time);
-      const segEnd = i + 1 < points.length ? new Date(points[i + 1].time) : drawEnd;
+      const segEnd = i + 1 < points.length ? new Date(points[i + 1].time) : dataEnd;
       const hrs = Math.max(0, (segEnd - segStart) / 1000 / 60 / 60);
       if (points[i].status === 'driving') cumDriving += hrs;
       if (points[i].status === 'driving' || points[i].status === 'onDuty') cumOnDuty += hrs;
@@ -10811,16 +10821,22 @@ function computeDayGrids(log) {
 // One full 24-hour (midnight-to-midnight) day's grid. Drag support is only
 // active when onUpdateChangeTime is provided — the compact preview passes
 // none, since it's just a glance, not meant to be edited directly.
-function DriverLogDayGrid({ dayStart, dayEnd, points, startCumDriving, startCumOnDuty, onUpdateChangeTime, compact, logEnded }) {
+function DriverLogDayGrid({ dayStart, dayEnd, dataEnd, points, startCumDriving, startCumOnDuty, onUpdateChangeTime, compact, logEnded }) {
   const svgRef = useRef(null);
   const [dragging, setDragging] = useState(null);
   const [draftTime, setDraftTime] = useState(null);
   const [debugBounds, setDebugBounds] = useState(null);
   const viewWidth = 1200;
+  // A right-hand "Total" column, listing each status row's hours for
+  // this day — only in the full expanded view, the compact preview is
+  // too small for it to be legible.
+  const totalsColWidth = compact ? 0 : 110;
+  const fullWidth = viewWidth + totalsColWidth;
   const rowsHeight = compact ? 90 : 176;
   const axisHeight = compact ? 16 : 26;
   const height = rowsHeight + axisHeight;
   const rowHeight = rowsHeight / DUTY_STATUS_ROWS.length;
+  const pxPerUnit = 1500 / viewWidth;
 
   const rangeMs = 24 * 60 * 60 * 1000;
   const rowY = (status) => DUTY_STATUS_ROWS.indexOf(status) * rowHeight + rowHeight / 2;
@@ -10841,23 +10857,38 @@ function DriverLogDayGrid({ dayStart, dayEnd, points, startCumDriving, startCumO
   const effective = sorted.map((c) => (dragging === c.id && draftTime ? { ...c, time: draftTime } : c))
     .sort((a, b) => new Date(a.time) - new Date(b.time));
 
+  // drawEnd is where the LAST status's line visually ends — for a
+  // completed log this is the full day boundary (dayEnd/midnight), so
+  // e.g. a final "off duty" status reads through to the end of the day
+  // the way a paper log does, rather than stopping dead wherever the
+  // driver happened to sign the log off. hoursEnd is the separate,
+  // never-extended real-data boundary used for actual hour totals
+  // (cumDriving/cumOnDuty/overLimit) — falls back to drawEnd if the
+  // caller didn't pass dataEnd, so nothing breaks if some other caller
+  // still doesn't supply it.
   const drawEnd = logEnded ? dayEnd : new Date(Math.min(dayEnd.getTime(), Date.now()));
+  const hoursEnd = dataEnd || drawEnd;
   const segments = [];
+  const statusTotals = {};
   let cumDriving = startCumDriving;
   let cumOnDuty = startCumOnDuty;
   for (let i = 0; i < effective.length; i++) {
     const segStart = new Date(effective[i].time);
-    const segEnd = i + 1 < effective.length ? new Date(effective[i + 1].time) : drawEnd;
-    if (segEnd <= segStart) continue;
-    const hrs = (segEnd - segStart) / 1000 / 60 / 60;
+    const isLast = i + 1 >= effective.length;
+    const segEndDraw = isLast ? drawEnd : new Date(effective[i + 1].time);
+    if (segEndDraw <= segStart) continue;
+    const segEndHours = isLast ? hoursEnd : segEndDraw;
+    const hrs = Math.max(0, (segEndHours - segStart) / 1000 / 60 / 60);
     if (effective[i].status === 'driving') cumDriving += hrs;
     if (effective[i].status === 'driving' || effective[i].status === 'onDuty') cumOnDuty += hrs;
+    const drawHrs = Math.max(0, (segEndDraw - segStart) / 1000 / 60 / 60);
+    statusTotals[effective[i].status] = (statusTotals[effective[i].status] || 0) + drawHrs;
     segments.push({
       id: effective[i].id,
       status: effective[i].status,
       note: effective[i].note || '',
       startX: timeToX(segStart),
-      endX: timeToX(segEnd),
+      endX: timeToX(segEndDraw),
       y: rowY(effective[i].status),
       draggable: !effective[i].fixed && !!onUpdateChangeTime,
       overLimit: cumDriving > HOS_LIMITS.driving || cumOnDuty > HOS_LIMITS.onDuty,
@@ -10956,11 +10987,11 @@ function DriverLogDayGrid({ dayStart, dayEnd, points, startCumDriving, startCumO
       )}
       <svg
         ref={svgRef}
-        viewBox={`0 0 ${viewWidth} ${height}`}
+        viewBox={`0 0 ${fullWidth} ${height}`}
         className={compact ? 'w-full h-full rounded-lg' : 'rounded-lg'}
         style={compact
           ? { background: '#fff', touchAction: 'none', display: 'block' }
-          : { background: '#fff', touchAction: 'none', display: 'block', width: 1500, height: (1500 / viewWidth) * height }}
+          : { background: '#fff', touchAction: 'none', display: 'block', width: fullWidth * pxPerUnit, height: height * pxPerUnit }}
       >
         {DUTY_STATUS_ROWS.map((status, i) => (
         <g key={status}>
@@ -10969,6 +11000,24 @@ function DriverLogDayGrid({ dayStart, dayEnd, points, startCumDriving, startCumO
         </g>
       ))}
       <line x1={0} y1={rowsHeight} x2={viewWidth} y2={rowsHeight} stroke="#ddd" strokeWidth={1} />
+
+      {!compact && (
+        <g>
+          <line x1={viewWidth + 8} y1={0} x2={viewWidth + 8} y2={rowsHeight} stroke="#ccc" strokeWidth={1} />
+          {DUTY_STATUS_ROWS.map((status, i) => (
+            <text
+              key={status + '-total'}
+              x={viewWidth + 20}
+              y={i * rowHeight + rowHeight / 2 + 4}
+              fontSize={13}
+              fontWeight="700"
+              fill="#1B1F19"
+            >
+              {(statusTotals[status] || 0).toFixed(1)}h
+            </text>
+          ))}
+        </g>
+      )}
 
       {ticks.map((tick, i) => (
         <g key={i}>
@@ -11049,7 +11098,7 @@ function DriverLogGrid({ log, onUpdateChangeTime }) {
     <div>
       <button onClick={() => { setDayIndex(dayGrids.length - 1); setExpanded(true); }} className="w-full text-left" style={{ height: 100 }}>
         <DriverLogDayGrid
-          dayStart={previewDay.dayStart} dayEnd={previewDay.dayEnd} points={previewDay.points}
+          dayStart={previewDay.dayStart} dayEnd={previewDay.dayEnd} dataEnd={previewDay.dataEnd} points={previewDay.points}
           startCumDriving={previewDay.startCumDriving} startCumOnDuty={previewDay.startCumOnDuty}
           compact
           logEnded={!!log.end}
@@ -11082,7 +11131,7 @@ function DriverLogGrid({ log, onUpdateChangeTime }) {
           </div>
           <div style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch' }}>
             <DriverLogDayGrid
-              dayStart={dayGrids[dayIndex].dayStart} dayEnd={dayGrids[dayIndex].dayEnd} points={dayGrids[dayIndex].points}
+              dayStart={dayGrids[dayIndex].dayStart} dayEnd={dayGrids[dayIndex].dayEnd} dataEnd={dayGrids[dayIndex].dataEnd} points={dayGrids[dayIndex].points}
               startCumDriving={dayGrids[dayIndex].startCumDriving} startCumOnDuty={dayGrids[dayIndex].startCumOnDuty}
               onUpdateChangeTime={onUpdateChangeTime}
               logEnded={!!log.end}
@@ -11128,7 +11177,7 @@ function PrintableDriverLog({ log, driverName }) {
           <div key={i} style={{ marginBottom: 12 }}>
             {dayGrids.length > 1 && <p style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{fmtDate(d.dayStart.toISOString())} (day {i + 1} of {dayGrids.length})</p>}
             <DriverLogDayGrid
-              dayStart={d.dayStart} dayEnd={d.dayEnd} points={d.points}
+              dayStart={d.dayStart} dayEnd={d.dayEnd} dataEnd={d.dataEnd} points={d.points}
               startCumDriving={d.startCumDriving} startCumOnDuty={d.startCumOnDuty}
               logEnded={!!log.end}
             />
