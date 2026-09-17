@@ -4122,14 +4122,16 @@ function MachineMarkerDetail({ position, assignedDrivers, onClose }) {
           <p className="text-sm mb-1" style={{ color: COLORS.inkDim }}>No one currently clocked in on this machine.</p>
         )}
         <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>Last updated {fmtTime(position.time)}</p>
-        <div className="pt-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
-          <p className="text-xs font-display uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Assigned driver{assignedDrivers && assignedDrivers.length !== 1 ? 's' : ''}</p>
-          {assignedDrivers && assignedDrivers.length ? (
-            <p className="text-sm">{assignedDrivers.join(', ')}</p>
-          ) : (
-            <p className="text-sm" style={{ color: COLORS.inkDim }}>No one assigned — set this from Unit Numbers.</p>
-          )}
-        </div>
+        {assignedDrivers != null && (
+          <div className="pt-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+            <p className="text-xs font-display uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Assigned driver{assignedDrivers.length !== 1 ? 's' : ''}</p>
+            {assignedDrivers.length ? (
+              <p className="text-sm">{assignedDrivers.join(', ')}</p>
+            ) : (
+              <p className="text-sm" style={{ color: COLORS.inkDim }}>No one assigned — set this from Unit Numbers.</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -13813,6 +13815,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const SUPPORT_TYPE_LABELS = {
     truck: 'Service Truck', pickup: 'Pickup', trailer: 'Trailer', lightTower: 'Light Tower',
   };
+  // Which unit types are actual drivable vehicles — this is what gates
+  // the "Assigned drivers" feature (Unit Numbers + the map marker
+  // detail). Heavy equipment (buncher, processor, skidder, etc.) is
+  // operated in place, not driven, so it never needed a driver
+  // assignment; trailers and light towers are towed/stationary, not
+  // self-driven either.
+  const VEHICLE_UNIT_TYPES = ['truck', 'pickup', 'winch', 'fuel'];
   // Job type is now fully derived from the unit itself — no separate stored
   // choice. Only an actual production-type unit makes someone 'production';
   // a truck/pickup/trailer/light tower (or nothing at all) is 'mechanic' —
@@ -19280,6 +19289,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           </div>
                         );
                       })()}
+                      {VEHICLE_UNIT_TYPES.includes(unitTypes[slugForUnit(u)]) && (
                       <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${COLORS.line}` }}>
                         <button
                           onClick={() => setEditingDriversForUnit(editingDriversForUnit === u ? null : u)}
@@ -19304,6 +19314,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           </div>
                         )}
                       </div>
+                      )}
                       </div>
                     )}
                   </div>
@@ -20064,7 +20075,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           return (
             <MachineMarkerDetail
               position={{ ...pos, employee: activeTrack ? activeTrack.employee : null }}
-              assignedDrivers={vehicleDriverAssignments[slugForUnit(viewingMachineName)] || []}
+              assignedDrivers={VEHICLE_UNIT_TYPES.includes(unitTypes[slugForUnit(viewingMachineName)]) ? (vehicleDriverAssignments[slugForUnit(viewingMachineName)] || []) : null}
               onClose={() => setViewingMachineName(null)}
             />
           );
@@ -20325,7 +20336,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           return (
             <MachineMarkerDetail
               position={{ ...pos, employee: activeTrack ? activeTrack.employee : null }}
-              assignedDrivers={vehicleDriverAssignments[slugForUnit(viewingMachineName)] || []}
+              assignedDrivers={VEHICLE_UNIT_TYPES.includes(unitTypes[slugForUnit(viewingMachineName)]) ? (vehicleDriverAssignments[slugForUnit(viewingMachineName)] || []) : null}
               onClose={() => setViewingMachineName(null)}
             />
           );
