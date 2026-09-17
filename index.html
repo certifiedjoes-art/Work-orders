@@ -11715,6 +11715,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // blocks access; just follows them as a reminder until each item is
   // done (see the Safety page banner).
   const [assignedTraining, setAssignedTraining] = useState(() => cacheGet('assignedTraining', {}));
+  // Emergency response phone numbers — an ordered list of header rows
+  // ("Ambulance", "RCMP", "Mill") interspersed with contact rows (name +
+  // phone), edited by admin/safety and visible to everyone. One flat
+  // ordered array rather than grouped-by-header data so headers and
+  // contacts can be freely reordered/interspersed with the same drag
+  // list (see LongPressReorderList).
+  const [emergencyContacts, setEmergencyContacts] = useState(() => cacheGet('emergencyContacts', []));
   // Completion record for watch-only (noQuiz) job-hazard courses, which
   // don't produce a trainingRecords quiz entry — { [slug]: { [courseKey]: timestamp } }.
   const [videoWatched, setVideoWatched] = useState(() => cacheGet('videoWatched', {}));
@@ -11741,6 +11748,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [safetyAccordionOrder, setSafetyAccordionOrder] = useState(() => cacheGet('safetyAccordionOrder', []));
   const [jobHazardsExpanded, setJobHazardsExpanded] = useState(false);
   const [selectedJobHazard, setSelectedJobHazard] = useState(null); // JOB_HAZARDS key, or null (showing the job picker)
+  const [emergencyContactsExpanded, setEmergencyContactsExpanded] = useState(false);
+  const [emergencyContactsEditMode, setEmergencyContactsEditMode] = useState(false);
   const [trainingExpanded, setTrainingExpanded] = useState(false);
   const [selectedCourse, setSelectedCourse] = useState(null); // TRAINING_COURSES key, or null
   const [courseStage, setCourseStage] = useState('modules'); // 'modules' | 'video' | 'quiz' | 'result'
@@ -12667,6 +12676,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   }, []);
 
   useEffect(() => {
+    const ref = firebase.database().ref('emergencyContacts');
+    const on = ref.on('value', (snap) => {
+      const val = snap.val() || [];
+      setEmergencyContacts(val);
+      cacheSet('emergencyContacts', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
     const ref = firebase.database().ref('videoWatched');
     const on = ref.on('value', (snap) => {
       const val = snap.val() || {};
@@ -13575,6 +13594,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         <span className="text-xs font-bold flex-shrink-0" style={{ color: COLORS.progress }}>Start →</span>
       </button>
     );
+  };
+  // Emergency response phone list — a single ordered array of header
+  // and contact rows (see the emergencyContacts state comment above).
+  // Always rewritten as a whole array on every edit rather than patched
+  // in place, since inserts/deletes/reorders all shift positions anyway
+  // and the list is small enough that this is simpler and cheap.
+  const saveEmergencyContacts = async (list) => {
+    await firebase.database().ref('emergencyContacts').set(list).catch(() => alert("Couldn't save — check your signal and try again."));
+  };
+  const addEmergencyHeader = () => saveEmergencyContacts([...emergencyContacts, { id: uid(), type: 'header', text: 'New Section' }]);
+  const addEmergencyContactRow = () => saveEmergencyContacts([...emergencyContacts, { id: uid(), type: 'contact', name: '', phone: '' }]);
+  const updateEmergencyItem = (id, patch) => saveEmergencyContacts(emergencyContacts.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  const removeEmergencyItem = (id) => saveEmergencyContacts(emergencyContacts.filter((item) => item.id !== id));
+  const reorderEmergencyContacts = (newOrderIds) => {
+    const byId = {};
+    emergencyContacts.forEach((item) => { byId[item.id] = item; });
+    saveEmergencyContacts(newOrderIds.map((id) => byId[id]).filter(Boolean));
   };
   // Toggles one unit in or out of someone's list of alternate jobs — admin
   // can check as many as apply. An empty resulting list removes the field
@@ -20427,6 +20463,91 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             // stuck moving together with the Documents folder.
             standalone.forEach((category) => { sections['standalone:' + category] = renderCategory(category); });
           })();
+
+          sections.emergencyContacts = (
+          <AdminSection
+            icon="🚨"
+            title="Emergency Response Numbers"
+            expanded={emergencyContactsExpanded}
+            onToggle={() => setEmergencyContactsExpanded((x) => !x)}
+          >
+            {(isAdmin || isSafety) && (
+              <div className="flex justify-end mb-2">
+                <button
+                  onClick={() => setEmergencyContactsEditMode((x) => !x)}
+                  className="text-xs font-display uppercase tracking-wider underline"
+                  style={{ color: COLORS.inkDim }}
+                >
+                  {emergencyContactsEditMode ? 'Done editing' : '✏️ Edit list'}
+                </button>
+              </div>
+            )}
+            {!emergencyContacts.length && !emergencyContactsEditMode && (
+              <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Nothing on file yet.{(isAdmin || isSafety) ? ' Tap "Edit list" to add numbers.' : ''}</p>
+            )}
+            {emergencyContactsEditMode && (
+              <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Press and hold a row to drag it. Headers group the numbers below them — add one for Ambulance, RCMP, Mill, etc.</p>
+            )}
+            <LongPressReorderList
+              entries={emergencyContacts.map((item) => ({ key: item.id }))}
+              disabled={!emergencyContactsEditMode}
+              onReorder={reorderEmergencyContacts}
+              renderItem={(entry) => {
+                const item = emergencyContacts.find((i) => i.id === entry.key);
+                if (!item) return null;
+                if (item.type === 'header') {
+                  return emergencyContactsEditMode ? (
+                    <div className="flex items-center gap-2 mt-3 mb-1">
+                      <input
+                        defaultValue={item.text}
+                        onBlur={(e) => updateEmergencyItem(item.id, { text: e.target.value })}
+                        className="flex-1 text-xs font-display uppercase tracking-wide px-2 py-1 rounded"
+                        style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.line}` }}
+                      />
+                      <button onClick={() => removeEmergencyItem(item.id)} className="text-xs px-2" style={{ color: '#E07A5F' }}>✕</button>
+                    </div>
+                  ) : (
+                    <p className="text-xs font-display uppercase tracking-wide mt-3 mb-1" style={{ color: COLORS.accent }}>{item.text}</p>
+                  );
+                }
+                return emergencyContactsEditMode ? (
+                  <div className="flex items-center gap-2 mb-1">
+                    <input
+                      defaultValue={item.name}
+                      placeholder="Name / role"
+                      onBlur={(e) => updateEmergencyItem(item.id, { name: e.target.value })}
+                      className="flex-1 text-sm px-2 py-2 rounded-lg"
+                      style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}
+                    />
+                    <input
+                      defaultValue={item.phone}
+                      placeholder="Phone"
+                      onBlur={(e) => updateEmergencyItem(item.id, { phone: e.target.value })}
+                      className="w-32 text-sm px-2 py-2 rounded-lg"
+                      style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}
+                    />
+                    <button onClick={() => removeEmergencyItem(item.id)} className="text-xs px-2" style={{ color: '#E07A5F' }}>✕</button>
+                  </div>
+                ) : (
+                  <a
+                    href={`tel:${(item.phone || '').replace(/[^0-9+]/g, '')}`}
+                    className="flex items-center justify-between rounded-lg px-3 py-2 mb-1"
+                    style={{ background: COLORS.surfaceRaised, textDecoration: 'none' }}
+                  >
+                    <span className="text-sm">{item.name || 'Untitled'}</span>
+                    <span className="text-sm font-bold" style={{ color: COLORS.accent }}>{item.phone} 📞</span>
+                  </a>
+                );
+              }}
+            />
+            {emergencyContactsEditMode && (
+              <div className="flex gap-2 mt-3">
+                <Btn onClick={addEmergencyHeader}>+ Header</Btn>
+                <Btn onClick={addEmergencyContactRow}>+ Number</Btn>
+              </div>
+            )}
+          </AdminSection>
+          );
 
           sections.jobHazards = (
           <AdminSection
