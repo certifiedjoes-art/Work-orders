@@ -11769,6 +11769,31 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
   const [notes, setNotes] = useState(shift.notes || '');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const activeType = machineType(shift.machine, unitTypes);
+  // Clock in/out — same time-only-input approach as the mechanic
+  // timesheet edit card (see TimesheetEntryCard): each keeps its own
+  // original calendar day locked in place behind the scenes, so fixing
+  // just the time doesn't accidentally shift the date, and a shift that
+  // genuinely crosses midnight still works.
+  const getLocalDatePart = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+  const toLocalTime = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const combineDateTime = (datePart, time) => {
+    if (!time || !datePart) return null;
+    return new Date(`${datePart}T${time}`).toISOString();
+  };
+  const clockInDatePart = getLocalDatePart(shift.start);
+  const clockOutDatePart = getLocalDatePart(shift.end) || clockInDatePart;
+  const [clockInTime, setClockInTime] = useState(toLocalTime(shift.start));
+  const [clockOutTime, setClockOutTime] = useState(toLocalTime(shift.end));
 
   // Wrapped defensively — this exact spot has crashed before for reasons
   // that weren't reproducible through code review alone. Whatever the real
@@ -11801,6 +11826,16 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
           <PrintableProductionShift shift={shift} unitTypes={unitTypes} />
         </PrintPortal>
       )}
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <label className="block">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock in</span>
+          <input type="time" value={clockInTime} onChange={(e) => setClockInTime(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+        </label>
+        <label className="block">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock out</span>
+          <input type="time" value={clockOutTime} onChange={(e) => setClockOutTime(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+        </label>
+      </div>
       {activeType !== 'fuel' && activeType !== 'winch' && (
         <label className="block mb-3">
           <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Block</span>
@@ -11888,7 +11923,7 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
         </div>
       ) : (
         <div className="flex gap-2 flex-wrap">
-          <Btn onClick={() => onSave({ block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes })}>Save changes</Btn>
+          <Btn onClick={() => onSave({ start: combineDateTime(clockInDatePart, clockInTime), end: combineDateTime(clockOutDatePart, clockOutTime), block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes })}>Save changes</Btn>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
           <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>Delete shift</button>
         </div>
@@ -18123,6 +18158,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     });
     Object.values(groupedByMechanic).forEach((list) => list.sort((a, b) => b.date.localeCompare(a.date)));
     const mechanicGroups = Object.keys(groupedByMechanic).sort((a, b) => a.localeCompare(b));
+    // Combined per-person timeline — mechanic timesheet entries and
+    // production shifts merged together and sorted by date, so a
+    // person's WT1 shift shows right alongside their mechanic entries
+    // for the same day instead of in a separate section underneath.
+    // Each item keeps its own real card (TimesheetEntryCard or
+    // ProductionShiftCard/EditCard) — only the ordering is merged.
+    const productionHoursByEmployee = {};
+    filteredProduction.forEach((s) => {
+      if (s.start && s.end) productionHoursByEmployee[s.employee] = (productionHoursByEmployee[s.employee] || 0) + (new Date(s.end) - new Date(s.start)) / 1000 / 60 / 60;
+    });
+    const combinedNames = Array.from(new Set([...mechanicGroups, ...filteredProduction.map((s) => s.employee)])).sort((a, b) => a.localeCompare(b));
+    const combinedByPerson = {};
+    combinedNames.forEach((name) => {
+      const mechItems = (groupedByMechanic[name] || []).map((e) => ({ kind: 'mechanic', sortDate: e.date, data: e }));
+      const prodItems = filteredProduction.filter((s) => s.employee === name).map((s) => ({ kind: 'production', sortDate: (s.end || s.start || '').slice(0, 10), data: s }));
+      combinedByPerson[name] = [...mechItems, ...prodItems].sort((a, b) => b.sortDate.localeCompare(a.sortDate));
+    });
     const clockedInNow = timesheets.filter((t) => !t.clockOut && t.date === todayStr());
 
     const baseWeekStart = weekStartOf(todayStr());
@@ -18961,63 +19013,53 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 <p className="text-sm" style={{ color: COLORS.line }}>Nothing to show yet.</p>
               ) : (
                 <div className="space-y-6 mb-8">
-                  {mechanicGroups.map((name) => (
+                  {combinedNames.map((name) => (
                     <div key={name}>
                       <p className="font-display text-xs uppercase tracking-wide mb-2 pb-2 flex items-center justify-between" style={{ color: COLORS.accent, borderBottom: `1px solid ${COLORS.line}` }}>
                         <span>{name}</span>
-                        <span>{fmtHours(totalsByMechanic[name] || 0)} total</span>
+                        <span>{fmtHours((totalsByMechanic[name] || 0) + (productionHoursByEmployee[name] || 0))} total</span>
                       </p>
                       <div className="space-y-3">
-                        {groupedByMechanic[name].map((entry) => (
-                          <TimesheetEntryCard
-                            key={entry.id}
-                            entry={entry}
-                            locked={false}
-                            canEdit={true}
-                            isEditing={editingEntryId === entry.id}
-                            onEdit={() => setEditingEntryId(entry.id)}
-                            onCancelEdit={() => setEditingEntryId(null)}
-                            onSave={async (patch) => { await updateTimesheetEntry(entry.id, patch); setEditingEntryId(null); }}
-                            onDelete={() => deleteTimesheetEntry(entry.id)}
-                            onAddJob={addTimesheetJob}
-                            onRemoveJob={removeTimesheetJob}
-                            isAdmin={isAdmin}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                  {filteredProduction.length > 0 && (
-                    <div>
-                      <p className="font-display text-xs uppercase tracking-wide mb-2 pb-2" style={{ color: COLORS.accent, borderBottom: `1px solid ${COLORS.line}` }}>
-                        {tsFilterMechanic}
-                      </p>
-                      <div className="space-y-2">
-                        {filteredProduction.sort((a, b) => (b.end || '').localeCompare(a.end || '')).map((s) => (
-                          editingShiftId === s.id ? (
+                        {combinedByPerson[name].map((item) => (
+                          item.kind === 'mechanic' ? (
+                            <TimesheetEntryCard
+                              key={item.data.id}
+                              entry={item.data}
+                              locked={false}
+                              canEdit={true}
+                              isEditing={editingEntryId === item.data.id}
+                              onEdit={() => setEditingEntryId(item.data.id)}
+                              onCancelEdit={() => setEditingEntryId(null)}
+                              onSave={async (patch) => { await updateTimesheetEntry(item.data.id, patch); setEditingEntryId(null); }}
+                              onDelete={() => deleteTimesheetEntry(item.data.id)}
+                              onAddJob={addTimesheetJob}
+                              onRemoveJob={removeTimesheetJob}
+                              isAdmin={isAdmin}
+                            />
+                          ) : editingShiftId === item.data.id ? (
                             <ProductionShiftEditCard
-                              key={s.id}
-                              shift={s}
+                              key={item.data.id}
+                              shift={item.data}
                               unitTypes={unitTypes}
                               units={units}
                               onCancel={() => setEditingShiftId(null)}
-                              onSave={(patch) => updateProductionShift(s.id, patch)}
-                              onDelete={() => deleteProductionShift(s.id)}
+                              onSave={(patch) => updateProductionShift(item.data.id, patch)}
+                              onDelete={() => deleteProductionShift(item.data.id)}
                               isAdmin={isAdmin}
                             />
                           ) : (
                             <ProductionShiftCard
-                              key={s.id}
-                              shift={s}
+                              key={item.data.id}
+                              shift={item.data}
                               unitTypes={unitTypes}
                               isAdmin={isAdmin}
-                              onEdit={() => setEditingShiftId(s.id)}
+                              onEdit={() => setEditingShiftId(item.data.id)}
                             />
                           )
                         ))}
                       </div>
                     </div>
-                  )}
+                  ))}
                 </div>
               )}
             </React.Fragment>
