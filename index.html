@@ -14710,10 +14710,21 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const buildCourseSlides = (courseKey) => {
     const course = TRAINING_COURSES[courseKey];
     const checkpoints = COURSE_VIDEO_CHECKPOINTS[courseKey] || {};
+    // Orientation courses repeat the EXACT same wording, word for word, in
+    // every module except index 2 — the role-specific "Hazards for
+    // [Role]" module buildOrientationModules always splices in at that
+    // fixed position. Sharing one narration clip across all 14 roles for
+    // those identical modules (audioId "orientationBase-...") means
+    // recording ~68 clips once instead of the same lines ~14 separate
+    // times; only the Hazards module (mi === 2) still gets a per-role
+    // audioId. WHMIS/TDG and anything else keep the original
+    // courseKey-based audioId untouched.
+    const isOrientation = !!ORIENTATION_AUTO_COURSES[courseKey];
     const slides = [];
     course.modules.forEach((m, mi) => {
-      slides.push({ type: 'title', moduleIndex: mi, title: m.title, audioId: `${courseKey}-${mi}-title` });
-      m.content.forEach((text, pi) => slides.push({ type: 'text', moduleIndex: mi, title: m.title, text, pictograms: (SLIDE_PICTOGRAMS_BY_COURSE[courseKey] || {})[`${mi}-${pi}`], audioId: `${courseKey}-${mi}-${pi}` }));
+      const audioBase = isOrientation && mi !== 2 ? `orientationBase-${mi}` : `${courseKey}-${mi}`;
+      slides.push({ type: 'title', moduleIndex: mi, title: m.title, audioId: `${audioBase}-title` });
+      m.content.forEach((text, pi) => slides.push({ type: 'text', moduleIndex: mi, title: m.title, text, pictograms: (SLIDE_PICTOGRAMS_BY_COURSE[courseKey] || {})[`${mi}-${pi}`], audioId: `${audioBase}-${pi}` }));
       (checkpoints[mi] || []).forEach((qi) => slides.push({ type: 'quiz', qi, moduleIndex: mi, audioId: `${courseKey}-quiz-${qi}` }));
     });
     return slides;
