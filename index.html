@@ -1152,124 +1152,164 @@ const JOB_HAZARD_AUTO_ROLE_KEYS = [
 // Every JOB_HAZARDS role, buncherOperator included this time.
 const ALL_JOB_HAZARD_ROLE_KEYS = ['buncherOperator', ...JOB_HAZARD_AUTO_ROLE_KEYS];
 
-// The company Employee Safety Orientation, paraphrased from the written
-// manual into narrated video slides — identical for every role except
-// one module (see buildOrientationModules below), which slots in that
-// role's own hazard summary right above Worker Rights, the same spot it
-// sits in the written manual. Kept as short, plain-spoken paragraphs
-// rather than reading the policy text verbatim, same voice as the other
-// narrated courses.
+// The company Employee Safety Orientation, using the exact wording from
+// the written manual (the user's own edited document) — identical for
+// every role except one module (see buildOrientationModules below),
+// which slots in that role's own hazard summary right above Worker
+// Rights, the same spot it sits in the written manual.
 const ORIENTATION_MODULES_BASE = [
   {
-    title: 'Welcome and Our Safety Commitment',
+    title: 'Harder Contracting Ltd. Employee Safety Orientation',
     content: [
-      "Harder Contracting is committed to the safety of our people, our equipment, the environment, and the public. That's not just a policy line — management is accountable for building and maintaining our Health and Safety program across every part of the operation, built to meet or exceed the legal minimum, not just scrape by.",
-      "Safety here is a team effort. Workers and anyone working on our sites, including subcontractors, are expected to follow company, municipal, provincial, and federal rules. If something's unsafe, the goal is to fix it, not push through it.",
+      "Harder Contracting Ltd. is committed to the safety of its staff, equipment, the environment, and the public. Management is committed to the physical, psychological and social wellbeing of employees. Our goal is to maintain a successful business safely, and to continually improve the Health and Safety performance of this company. We support our safety program and believe that teamwork is essential to an injury and accident free workplace.",
+      "Management is responsible and accountable for the development and maintenance of the company's Health and Safety program in every area of company operations. Workers and other worksite parties (subcontractors) are responsible and accountable to adhere to all company, municipal, provincial and federal rules and regulations.",
+      'Our Health and Safety Program has been developed to support the commitment to safety and meet or exceed legislative requirements and accepted industry standards.',
     ],
   },
   {
     title: 'Job-Specific Training and Hazard Assessments',
     content: [
-      "Before non-routine work, a change in site conditions, or work at a temporary or mobile site, a field-level hazard assessment gets done. Work only continues once the hazards it identifies have been eliminated or controlled.",
-      "You have the right to refuse dangerous work — more on that next — and the hazards specific to your own job are covered right after this.",
+      'A site-specific or field-level hazard assessment will be completed when worksite conditions change, non-routine work is added, or work is performed at a temporary or mobile worksite. Employees have the right to refuse dangerous work. Work will proceed only after corrective action has eliminated or controlled identified hazards.',
     ],
   },
   // <<HAZARDS>> — buildOrientationModules inserts this role's hazard
   // summary here, right above Worker Rights.
   {
-    title: 'Your Rights as a Worker',
+    title: 'Worker Rights',
     content: [
-      "You have three core rights under Alberta's OH&S Act. The right to refuse dangerous work: if you have reasonable grounds to believe a task is an undue hazard or a serious, imminent threat to you or someone else, stop, report it to your supervisor, and it'll get investigated. You won't be disciplined for exercising that right.",
-      "The right to know about workplace hazards: your employer has to give you the information, instruction, training, and supervision you need to work safely — hazards, safe work procedures, emergency procedures, and proper PPE use. If you're ever unsure how to do something safely, ask before you start.",
-      "And the right to participate: raise concerns, report hazards, give input on safe work procedures, and take part in the safety program. Alberta's OH&S Act, Regulation, and Code set the legal minimum for all of this, and a copy is available if you want to reference it.",
+      "Right to Refuse Dangerous Work: You have the right to refuse work if you have reasonable grounds to believe the work presents an undue hazard, a serious and imminent threat to your health and safety, or someone else's. If you believe something is unsafe, stop and report the concern and the reason for the refusal to your supervisor. We will investigate the hazard and take steps to correct it. You will not be disciplined for exercising this right in accordance with the OHS Act.",
+      "Right to Know About Workplace Hazards: You have the right to know about the hazards associated with your work. Your employer must provide you with the information, instruction, training and supervision you need to work safely. This includes being informed about workplace hazards, safe work procedures, emergency procedures, and the proper use of Personal Protective Equipment. If you're unsure about the hazard or how to do a job safely, ask your supervisor before proceeding.",
+      "Right to Participate in Health and Safety Activities: This means you can raise safety concerns, report hazards, provide input on safe work procedures, and participate in your workplace's health and safety program. You are encouraged to speak up when you see something that could cause harm.",
+      'OH&S Act, Regulations and Code: Harder Contracting Ltd. follows Alberta\'s Occupational Health and Safety Act, Regulation, and Code. These provincial laws establish the minimum health and safety requirements for our workplace. You have rights and responsibilities under this legislation, and you are expected to follow the applicable safety requirements, procedures and training provided by the company. A current copy of the OHS Act, Regulation and Code is available for you to reference if you have any questions.',
     ],
   },
   {
-    title: 'Safety Responsibilities',
+    title: 'Safety Responsibilities — Worker',
     content: [
-      "Every level of the company has a role. As a worker, that means using safe work procedures, reporting unsafe conditions and acts, making safety suggestions, and setting a good example — plus taking responsibility for your own safety and everyone else's.",
-      'Supervisors and the safety coordinator promote safety awareness, set up safe work procedures, instruct and correct workers, inspect for hazards, investigate incidents, and enforce the rules.',
-      'Management sets the safety policy itself — providing a safe workplace, the right training and PPE, regular inspections, first aid, and reporting injuries to WCB — and keeps the whole operation compliant.',
+      'Take responsibility for their safety and the safety of others by ensuring that they do not violate the rules. Use safe work procedures. Report unsafe conditions. Make safety suggestions. Report unsafe acts. Use safe work procedures. Make safety suggestions. Set a good example.',
     ],
   },
   {
-    title: 'Safe Work Practices — Equipment',
+    title: 'Safety Responsibilities — Supervisors and Safety Coordinator',
     content: [
-      'Every shift starts with a pre-start inspection — walk around the machine and check for damaged hoses or fittings, leaks, cracked welds, and loose bolts before you operate it.',
-      "Refuel at the end of each shift, at least 100 metres from any watercourse. Use the provided handles and maintain three-point contact mounting and dismounting, stay within block boundaries, and lower hydraulic attachments before parking. Seat belts are mandatory, and do a radio check whenever you get in or out of the equipment.",
+      'Promote safety awareness. Establish safe work procedures. Instruct workers. Correct unsafe practices. Detect troubled employees. Correct unsafe conditions. Enforce safety rules. Inspect for hazards. Investigate all incidents. Ensure proper maintenance. Comply with regulations. Set a good example.',
     ],
   },
   {
-    title: 'Safe Work Practices — Driving',
+    title: 'Safety Responsibilities — Manager',
     content: [
-      "Know where your vehicle's insurance and registration are kept, and make sure they're current. Seat belts are mandatory any time the vehicle's moving, and posted speed limits apply everywhere.",
-      "Use radio communication on bush roads, and always call before passing equipment working near the road. Keep an eye on the vehicle's condition — fluid levels, handling, anything that feels off — and report problems to management. Treat the vehicle the way you'd treat your own.",
+      'Establish a safety policy. Provide a safe work place. Maintain a safety program. Ensure proper training for workers. Ensure Personal Protective Equipment is available. Ensure regular inspections are done. Correct unsafe conditions. Provide first aid. Investigate all accidents. Report injuries to WCB. Ensure compliance with regulations. Set a good example.',
     ],
   },
   {
-    title: 'Emergency Equipment and Spill Response',
+    title: 'Safe Work Practices and Procedures — Equipment',
     content: [
-      'Every vehicle carries a CSA Type 3 intermediate first aid kit, a spill kit with at least 10 white and 5 grey absorbent pads, and a 5-pound or larger ABC fire extinguisher. At camp, all four exits have a fire extinguisher, and the office has a first aid kit, stretcher, blankets, and a splint. The evacuation plan is posted in the dining room.',
-      "If there's a spill: stop the source if it's safe, keep people clear and remove ignition sources, contain it with the spill kit or absorbents before it reaches soil or water, and notify your supervisor immediately. Depending on the substance and amount it may need to be reported externally too — then clean it up, document it, and restock the kit.",
+      'Complete the daily pre-start inspection before operating equipment. Walk around the equipment and check for damaged hoses or fittings, leaks, cracked welds, and loose bolts. Refuel equipment at the end of each shift and at least 100 m from any watercourse.',
+      'Use the provided handles when entering, exiting, or moving around equipment. Maintain three-point contact when mounting and dismounting. Stay within block boundaries. When parking equipment, lower all hydraulic attachments. Seat belts must be worn. Watch for overhead hazards. Operators must complete radio checks when entering or exiting equipment.',
     ],
   },
   {
-    title: 'Accident and Incident Reporting',
+    title: 'Safe Work Practices and Procedures — Driving',
     content: [
-      "Every accident, incident, work refusal, near miss, and health occurrence gets reported and investigated, no matter how minor it looks — the depth of the investigation just scales with the severity.",
-      "If someone's hurt, get them medical attention first, then secure the area to prevent further damage. Any serious incident, injury, or fatality gets reported to the owner immediately, and OH&S has to be notified within 24 hours of anything with the potential for serious injury. In serious cases, whoever's first on scene needs to secure it and not disturb anything.",
+      "Know where the vehicle's insurance and registration documents are kept and ensure they are current. Seat belts must be worn whenever the vehicle is in motion. Follow posted speed limits.",
+      "Use radio communication on bush roads. Always call before passing equipment operating near the road. Drivers must monitor the vehicle's operating condition, fluid levels, handling, and other safety-related conditions, and report problems to management. Use the vehicle respectfully as you would your own.",
     ],
   },
   {
-    title: 'Emergency Contacts',
+    title: 'Emergency Procedures — First Aid, Fire Extinguishers, and Spill Kits',
     content: [
-      "Your foreman and safety coordinator keep the full emergency contact list — ambulance, hospital, RCMP, and more — and it's also posted at camp and right in this app, under Safety. Know where to find it before you need it.",
+      'Each vehicle is equipped with a CSA Type 3 intermediate first aid kit, a spill kit containing at least 10 white and five grey absorbent pads, and an ABC-class fire extinguisher 5lb or greater.',
+      'At camp, all four exits have a fire extinguisher. A first aid kit, stretcher, blankets, and splint are located in the office. The emergency response procedures and evacuation plan are posted on the board in the dining room.',
+    ],
+  },
+  {
+    title: 'Spill Response',
+    content: [
+      '1. Stop the source if it is safe to do so. 2. Protect yourself and others—keep people away from the spill and eliminate ignition sources, if applicable. 3. Contain the spill using spill kits, absorbents, berms, plugs, or other appropriate materials, especially to prevent it from reaching soil or water.',
+      '4. Notify the supervisor or company immediately. 5. Report externally when required, based on the substance, amount, location, and applicable Alberta environmental requirements. 6. Clean up the spill and dispose of contaminated material properly. 7. Document the incident and restock the spill kit.',
+    ],
+  },
+  {
+    title: 'Accident and Incident Investigation Policy',
+    content: [
+      'It is the policy of Harder Contracting Ltd. to report and investigate all accidents, incidents, work refusals, near misses and occupational health occurrences regardless of the severity of injury or the amount of property damage. The extent of the investigation will depend on the outcome or potential outcome of the incident. Management and supervisors are responsible for investigation results and will be held accountable for timely investigations, relevant root causes and ensuring that corrective actions resulting from the investigation are implemented.',
+      'Immediately following the accident/incident an injured person is to be protected from further injury and receive medical attention. Once the injured person has been removed from the area, steps are to be taken to prevent further damage to equipment and materials. In all cases of a serious incident, injury or fatality, the company owner is to be notified immediately. Legislation requires all accidents and incidents that have potential for serious injury to be reported to O.H.&S. within 24 hours of occurrence.',
+      'Following an accident/incident the foremen must document: Names, addresses and telephone numbers of the people directly involved. Equipment and material involved. Environmental factors involved. A time log of events and activities. In all cases of a serious accident, injury or fatality, the first on the scene must secure the site so as not to disturb the scene of the accident that is reportable to O.H.&S. under the Designation of Serious Injury and Accident Regulations.',
+    ],
+  },
+  {
+    title: 'Emergency Contact List',
+    content: [
+      "The full emergency contact list — Emergency and Fire (911), the company owners, the Safety Coordinator, ambulance and hospital numbers, RCMP, OH&S, and more — is posted at camp, and is also kept up to date right in this app, under Safety.",
     ],
   },
   {
     title: 'Discipline Policy',
     content: [
-      'Safety violations follow a step process: a documented verbal warning first, then a written warning that may include additional training, and for serious or repeated issues, suspension — which can lead to demotion or termination depending on management\'s review.',
+      'To ensure that all employees and subcontractors are held accountable for their own actions in relation to unsafe work practices, on the job safety, and company rules and regulations, the following disciplinary action steps may be taken by the company.',
+      'Verbal Warning — First Infraction: A verbal warning is the first step in disciplinary action and should be utilized when supervisors notice that safe work procedures or company policies are not being followed. The verbal warning will be documented and sent to the appropriate management official.',
+      'Written Warning: After issuing a verbal warning (or if an initial, serious infraction occurs), supervisors should issue a written warning indicating whether or not the employee should participate in formal or informal training. Written notice will be documented as a "Written Warning" and sent to the appropriate management official.',
+      'Suspension: Serious infractions and (continued) lack of personal accountability will result in a suspension from work. Management will determine whether or not the employee will undergo a suspension, the suspension will be extended for a longer period of time, or the employee will be demoted or terminated from their current position. A copy of all written warnings and/or suspensions will be sent to the individual\'s personnel file.',
     ],
   },
   {
     title: 'Workplace Violence and Harassment',
     content: [
-      "Zero tolerance — violence or harassment of any kind, from employees or visitors, isn't tolerated and can lead to discipline up to termination, or criminal prosecution. This covers threats, assaults, bullying, intimidation, and physical or sexual harassment.",
-      "Report any incident, direct or indirect, to your supervisor as soon as possible — if they're not available, any other supervisor works. Every report gets investigated, and everything is kept confidential.",
+      'Our company shall provide a safe environment for all personnel including visitors and is committed to having zero violence/harassment on the work site. Acts and/or threats of violence/harassment by employees on our work sites will not be tolerated. These acts and/or threats will be grounds for appropriate remedial action, including but not limited to, discipline up to and including termination of employment and criminal prosecution. Similarly, acts and/or threats of violence/harassment by visitors against employees will not be tolerated and will be grounds for appropriate remedial action, including but not limited to criminal prosecution.',
+      'Employees will receive training and instruction on workplace violence and harassment policies and procedures during orientation. The policy and procedures will be reviewed annually with all employees.',
+      'Violence/harassment is any action imposed on another that harms, injures or intimidates. Violence is typically physical in nature. Violence/harassment includes, but is not limited to threats, assaults and abuse. Violence can also include bullying and intimidation, harassment, physical and sexual assault and stalking.',
+      "Employees are responsible to report all threats or acts of violence/harassment, both direct and indirect, as soon as possible. If your immediate supervisor cannot be reached, contact any other company supervisory personnel. Be specific when reporting the facts of the incident.",
     ],
   },
   {
     title: 'Drug and Alcohol Policy',
     content: [
-      'Every position and worksite here is considered safety-sensitive, so this policy applies to everyone. No using, possessing, or offering drugs or alcohol at a company workplace or while doing company business, and testing follows USDOT standards.',
-      "If someone's suspected of being impaired, or an incident occurs, work stops immediately, the situation gets documented, and the employee is transported off-site. If you're dealing with a substance issue yourself, disclosing it to your supervisor opens the door to support and reasonable accommodation.",
+      'Harder Contracting Ltd. is committed to providing a safe and productive workplace for employees, contractors, and visitors. The inappropriate use of drugs and alcohol can have adverse effects on job performance, the health of employees and the safety of the individual and his/her co-workers.',
+      'Harder Contracting Ltd. considers all employee positions and worksites to be safety-sensitive. All employees are therefore subject to this policy. An employee, contractor, or visitor may not use, possess, or offer for sale alcohol or illicit drugs while at a company workplace or while engaged in company business. Drug testing will be done after any incident or when there is a suspicion of drug or alcohol use.',
+      "If an employee is suspected of being under the influence of drugs or alcohol, or if an incident has occurred, the supervisor will stop work immediately, bring the employee to the office or site supervisor's trailer for a discussion, and document who was involved, what happened, where and when it happened, and all other relevant details. The employee will then be transported off site by the supervisor or a designated employee.",
+      'If the employee has a substance abuse or substance dependency problem, the company is committed to assisting the employee in finding a medically recognized individualized assessment, treatment and rehabilitation.',
     ],
   },
   {
-    title: 'Lockout / Tagout',
+    title: 'Lockout/Tagout Procedure',
     content: [
-      "Before leaving equipment: lower all implements, shut it down at the master switch and pull the key — or the ignition, for vehicles — place the key below the switch, and put an out-of-service sign on the seat or cab entrance. Don't put the key back without a supervisor's authorization.",
+      'Lower all implements before shutdown. Locate the master switch on equipment and disconnect the key (in vehicles this is the ignition). Place the key below the master switch. Place an "out of service" sign on the seat or at the cab entrance of the equipment. Do not replace the key without proper authorization from a supervisor or until it is time to return to service and re-energize the equipment.',
     ],
   },
   {
-    title: 'Safety and Tailgate Meetings',
+    title: 'Safety Meetings and Tailgate Meetings',
     content: [
-      'Safety meetings happen monthly, covering hazards, recent incidents or near misses, safe work procedures, and equipment concerns — attendance and topics are documented. Tailgate meetings happen more often, as needed, to address concerns as they come up. Show up, ask questions, and speak up.',
+      'Harder Contracting Ltd. holds a safety meeting once each month. Employees are expected to attend and participate. These meetings are used to discuss workplace hazards, recent incidents or near misses, safe work procedures, equipment concerns, and changes affecting worker safety. Employees are encouraged to ask questions and report safety concerns or suggestions. Attendance and the subjects discussed will be documented.',
+      'Tailgate meetings will be held regularly to address safety concerns raised by employees or management.',
     ],
   },
   {
-    title: 'PPE — Hard Hats',
+    title: 'Personal Protective Equipment — Hard Hats',
     content: [
-      'A hard hat protects against impacts, falling objects, splashes, and contact with energized equipment. The shell deflects the blow, the suspension absorbs and spreads it — both have to be in good shape and compatible, and any attachments need to be approved for that specific hard hat. A bump cap is not a substitute unless the only hazard is bumping into something stationary.',
-      'Check it before every use — cracks, holes, dents, fading, or a damaged suspension all mean it needs to be replaced immediately, even if a hard blow left no visible damage. Never drill, cut, paint, or modify it, and never use a metal liner around electrical hazards.',
+      'A hard hat helps protect you from impacts, falling objects, bumps, chemical or harmful-substance splashes, and contact with energized objects or equipment.',
+      'Use the right head protection: Wear approved equipment that is suitable for the job hazards and meets applicable Alberta OHS and CSA requirements. Know the two parts — the shell deflects blows, the suspension absorbs and spreads impact energy — both must be compatible and in good condition. Use approved attachments only: face shields, hearing protection, lights, liners and chin straps must be designed for that specific hard hat and installed as directed. A bump cap is not a hard hat — it may only be used when the sole hazard is bumping your head against a stationary object and the employer has approved it.',
+      'Inspect before every use: check the shell for cracks, holes, pits, brittleness, dents, fading, chalking or other damage. Check the suspension, straps and adjustment system for wear, stretching, tears or damage. Make sure the shell and suspension fit correctly and all parts are compatible.',
+      'Remove from service and replace immediately if the hard hat is cracked, holed, pitted, brittle, deformed or otherwise damaged; if it has taken a hard blow or impact, even when no damage is visible; or if any part is damaged, its safety is in doubt, or the manufacturer\'s replacement date has been reached.',
+      'Never drill, cut, remove the brim/peak, or alter the shell or suspension. Never use paint, solvents or unapproved stickers/chemicals that could weaken the shell. Never use a metal or conductive liner where electrical hazards may exist. Never wear or route a chin strap contrary to the manufacturer\'s instructions. Never carry or store objects inside the hard hat while wearing it.',
     ],
   },
   {
-    title: 'Hearing, Foot, and Eye Protection',
+    title: 'Hearing Protection',
     content: [
-      "Wear hearing protection anywhere sound levels top 85 decibels over 8 hours — a good rule of thumb is if you can't hold a normal conversation at 1 metre, protection is required.",
-      'Approved protective footwear is mandatory for everyone, and so is eye protection any time there\'s a risk of flying particles, sparks, chemicals, or debris — grinding, welding, and mechanical work all count. Inspect your PPE daily to make sure it\'s still doing its job.',
+      'Where sound levels exceed the lower exposure limit of 85 dBA for 8 hours, hearing protection must be worn. As a rule of thumb, hearing protection should be worn when a normal conversation cannot be heard at a distance of 1 metre. Hearing protection must be in the form of earmuffs or earplugs, as stated in the Alberta Occupational Health and Safety Code, Part 16, Noise Exposure.',
+    ],
+  },
+  {
+    title: 'Foot Protection',
+    content: [
+      "Where there is a danger of injury to a worker's foot, protective footwear that meets applicable CSA requirements must be worn, as stated in the Alberta Occupational Health and Safety Code, Part 18, section 233. Harder Contracting Ltd. requires all employees to wear approved protective footwear while working. This requirement is mandatory.",
+      'Daily inspection: Each worker must inspect their Personal Protective Equipment daily to ensure it is in proper condition and will protect the worker for the purpose for which it was designed.',
+    ],
+  },
+  {
+    title: 'Eye Protection',
+    content: [
+      "Where there is a danger of injury to or irritation of a worker's eyes or face, the worker must wear protective equipment that meets applicable CSA requirements. Harder Contracting Ltd. requires all employees to wear appropriate eye protection when grinding, welding, performing mechanical work, or carrying out any other task that could expose the eyes to flying particles, sparks, debris, chemicals, or other hazards. This requirement is mandatory.",
     ],
   },
 ];
