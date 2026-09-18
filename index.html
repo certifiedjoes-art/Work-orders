@@ -8445,6 +8445,31 @@ function JobRoleIcon({ roleKey, size = 168, color = '#1B1F19' }) {
     </div>
   );
 }
+// A course's `icon` field is a JOB_HAZARDS role key (e.g. 'buncherOperator').
+// Where that role has a matching Unit Numbers machine type (buncher,
+// processor, skidder, loader, crawler, grader), the course badge shows the
+// real uploaded icon for that machine type instead of the generic line-art
+// glyph — same photo already used for that unit type on the map. Roles
+// with no equipment counterpart (cook, mechanic, manager, etc.) keep the
+// JobRoleIcon glyph.
+const JOB_ROLE_TO_MACHINE_TYPE = {
+  buncherOperator: 'buncher',
+  processorOperator: 'processor',
+  skidderOperator: 'skidder',
+  logLoaderOperator: 'loader',
+  crawlerOperator: 'crawler',
+  graderOperator: 'grader',
+};
+function CourseRoleIcon({ roleKey, machineIcon, size = 168, color = '#1B1F19' }) {
+  if (machineIcon) {
+    return (
+      <div style={{ width: size, height: size, borderRadius: '50%', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 18px #00000033', flexShrink: 0, overflow: 'hidden' }}>
+        <img src={machineIcon} alt="" style={{ width: '82%', height: '82%', objectFit: 'contain' }} />
+      </div>
+    );
+  }
+  return <JobRoleIcon roleKey={roleKey} size={size} color={color} />;
+}
 // A small looping animated scene — a stick figure pouring one chemical
 // A small looping animated scene — a stick figure pouring two chemicals
 // together right in his own hands, then a jagged comic-style burst
@@ -21527,10 +21552,21 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           one faint icon shared across a whole module — for
                           WHMIS/TDG. Job-hazard courses (see `course.icon`)
                           instead show one consistent equipment/role icon
-                          throughout, badge-style, in the same spot. */}
+                          throughout, badge-style, in the same spot — the
+                          real uploaded unit-type icon when there's a
+                          matching machine type (see JOB_ROLE_TO_MACHINE_TYPE),
+                          otherwise the line-art JobRoleIcon glyph. */}
                       <div className="flex justify-center pt-2" style={{ position: 'relative' }}>
                         {course.icon ? (
-                          <JobRoleIcon roleKey={course.icon} size={168} color={bg.color} />
+                          <CourseRoleIcon
+                            roleKey={course.icon}
+                            machineIcon={(() => {
+                              const mType = JOB_ROLE_TO_MACHINE_TYPE[course.icon];
+                              return mType ? (machineIconOverrides[mType] || MACHINE_ICON_IMAGES[mType] || null) : null;
+                            })()}
+                            size={168}
+                            color={bg.color}
+                          />
                         ) : slide.illustration === 'mixExplosion' ? (
                           <MixExplosionScene size={168} />
                         ) : slide.illustration === 'placardMismatch' ? (
@@ -21607,24 +21643,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           );
                         })()}
                       </div>
-
-                      {ttsVoices.length > 0 && (
-                        <div className="px-4" style={{ position: 'relative' }}>
-                          <select
-                            value={chosenTrainingVoice ? chosenTrainingVoice.voiceURI : ''}
-                            onChange={(e) => {
-                              setTtsVoiceURI(e.target.value);
-                              try { localStorage.setItem('trainingVoiceURI', e.target.value); } catch (err) {}
-                            }}
-                            className="w-full px-3 py-2 rounded-lg text-xs mb-2"
-                            style={{ background: '#ffffffdd', color: '#1B1F19', border: 'none' }}
-                          >
-                            {ttsVoices.filter((v) => v.lang && v.lang.toLowerCase().startsWith('en')).map((v) => (
-                              <option key={v.voiceURI} value={v.voiceURI}>{v.name} ({v.lang})</option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
 
                       <div className="flex gap-2 flex-wrap px-4 pb-6" style={{ position: 'relative' }}>
                         {slide.type !== 'quiz' && (
