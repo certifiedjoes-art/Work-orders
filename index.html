@@ -4491,7 +4491,7 @@ function SidebarMenu({ show, onClose, mechanic, isAdmin, isForeman, isProduction
             {item('⏱️', 'Shift', () => onNavigate('shift'))}
             {item('🗺️', 'Maps', () => onNavigate('maps'))}
             {item('🛣️', 'Highway Map', () => onNavigate('highwayMap'))}
-            {!(isAdmin || isForeman) && item('🦺', 'Safety', () => onNavigate('safety'))}
+            {!isAdmin && item('🦺', 'Safety', () => onNavigate('safety'))}
             {isAdmin && item('🔢', 'Unit Numbers', () => onNavigate('units'))}
             {isAdmin && item('📍', 'Block Numbers', () => onNavigate('blocks'))}
             {!isProduction && item('🎉', t('shoutouts'), () => onNavigate('shoutouts'))}
@@ -18719,7 +18719,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </button>
           )}
 
-          {(isAdmin || isSafety) && (
+          {(isAdmin || isSafety || isForeman) && (
           <button
             onClick={() => setScreen('safety')}
             className="w-full flex items-center justify-between rounded-lg px-4 py-3.5 mb-3 font-display font-semibold text-sm uppercase tracking-wide"
@@ -21156,7 +21156,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             const sections = {};
 
             (() => {
-            const visibleCategories = SAFETY_CATEGORIES.filter((category) => (isAdmin || isSafety) || !ADMIN_ONLY_SAFETY_CATEGORIES.includes(category));
+            const visibleCategories = SAFETY_CATEGORIES.filter((category) => (isAdmin || isSafety || isForeman) || !ADMIN_ONLY_SAFETY_CATEGORIES.includes(category));
             const foldered = FOLDERED_SAFETY_CATEGORIES.filter((c) => visibleCategories.includes(c));
             const standalone = visibleCategories.filter((c) => !FOLDERED_SAFETY_CATEGORIES.includes(c));
             const renderCategory = (category) => {
@@ -21884,7 +21884,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </AdminSection>
           );
 
-          sections.trainingMatrix = (isAdmin || isSafety) ? (
+          sections.trainingMatrix = (isAdmin || isSafety || isForeman) ? (
             <AdminSection
               icon="🎓"
               title="Training Matrix"
@@ -21906,6 +21906,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 />
               ) : (
                 <div>
+                  {(isAdmin || isSafety) && (
                   <div className="flex gap-2 mb-4">
                     <button
                       onClick={() => setEditingTrainingPersonId('new')}
@@ -21932,6 +21933,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       </button>
                     )}
                   </div>
+                  )}
 
                   {[...TRAINING_MATRIX_CATEGORIES, ...new Set(trainingMatrix.map((p) => p.category).filter((c) => c && !TRAINING_MATRIX_CATEGORIES.includes(c)))].map((cat) => {
                     const people = trainingMatrix.filter((p) => (p.category || TRAINING_MATRIX_CATEGORIES[0]) === cat);
@@ -21943,10 +21945,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           {people.map((p) => {
                             const status = trainingPersonStatus(p);
                             const statusLabel = status === 'expired' ? 'Expired' : status === 'expiringSoon' ? 'Due Soon' : '';
+                            const canEdit = isAdmin || isSafety;
+                            const Row = canEdit ? 'button' : 'div';
                             return (
-                              <button
+                              <Row
                                 key={p.id}
-                                onClick={() => setEditingTrainingPersonId(p.id)}
+                                {...(canEdit ? { onClick: () => setEditingTrainingPersonId(p.id) } : {})}
                                 className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
                                 style={{ background: COLORS.surfaceRaised }}
                               >
@@ -21956,7 +21960,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                                     {statusLabel}
                                   </span>
                                 )}
-                              </button>
+                              </Row>
                             );
                           })}
                         </div>
@@ -21972,7 +21976,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </AdminSection>
           ) : null;
 
-          sections.inspections = (isAdmin || isSafety) ? (
+          sections.inspections = (isAdmin || isSafety || isForeman) ? (
             <AdminSection
               icon="🧰"
               title={`Inspections${safetyInspectionType ? ' — ' + SAFETY_INSPECTION_TYPES.find((t) => t.key === safetyInspectionType).label : ''}`}
@@ -22043,6 +22047,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     />
                   ) : (
                     <div>
+                      {(isAdmin || isSafety) && (
                       <div className="flex gap-2 mb-4">
                         <button
                           onClick={() => setNewYardInspectionOpen(true)}
@@ -22059,6 +22064,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           📋 Checklist Items {checklistItemsExpanded ? '▲' : '▼'}
                         </button>
                       </div>
+                      )}
 
                       {checklistItemsExpanded && (
                         <YardChecklistItemsPanel yardOrder={inspectionChecklistOrder.yard} />
@@ -22148,6 +22154,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     />
                   ) : (
                     <div>
+                      {(isAdmin || isSafety) && (
                       <div className="flex gap-2 mb-4">
                         <button
                           onClick={() => setNewVehicleInspectionOpen(true)}
@@ -22164,6 +22171,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           📋 Checklist Items {checklistItemsExpanded ? '▲' : '▼'}
                         </button>
                       </div>
+                      )}
 
                       {checklistItemsExpanded && (
                         <ChecklistItemsPanel title="Vehicle" items={VEHICLE_INSPECTION_ITEMS} order={inspectionChecklistOrder.vehicle} checklistType="vehicle" />
@@ -22260,6 +22268,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     />
                   ) : (
                     <div>
+                      {(isAdmin || isSafety) && (
                       <div className="flex gap-2 mb-4">
                         <button
                           onClick={() => setNewEquipmentInspectionOpen(true)}
@@ -22276,6 +22285,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           📋 Checklist Items {checklistItemsExpanded ? '▲' : '▼'}
                         </button>
                       </div>
+                      )}
 
                       {checklistItemsExpanded && (
                         <ChecklistItemsPanel title="Equipment" items={EQUIPMENT_INSPECTION_ITEMS} order={inspectionChecklistOrder.equipment} checklistType="equipment" />
@@ -22460,7 +22470,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </AdminSection>
           ) : null;
 
-          sections.workerOrientation = (isAdmin || isSafety) ? (
+          sections.workerOrientation = (isAdmin || isSafety || isForeman) ? (
             <AdminSection
               icon="🪪"
               title={`Worker Orientation${workerOrientationType ? ' — ' + (workerOrientationType === 'employeeOrientation' ? 'Employee Orientation' : 'Operator Training') : ''}`}
@@ -22541,6 +22551,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     )
                   ) : (
                     <div>
+                      {(isAdmin || isSafety) && (
                       <button
                         onClick={() => setNewWorkerOrientationOpen(true)}
                         className="text-xs font-semibold px-3 py-2 rounded-lg mb-4"
@@ -22548,6 +22559,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       >
                         + New Record
                       </button>
+                      )}
 
                       {[...new Set(workerOrientations.filter((r) => r.type === workerOrientationType).map((r) => r.employeeName))]
                         .sort((a, b) => a.localeCompare(b))
@@ -22598,10 +22610,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             expanded={incidentReportingExpanded}
             onToggle={() => setIncidentReportingExpanded((x) => !x)}
           >
-            {!(isAdmin || isSafety) ? (
+            {!(isAdmin || isSafety || isForeman) ? (
               // Regular employees: just a quick "what happened" form and a
               // read-only list of their own past reports — no investigation
               // fields, no other employees' reports, nothing to manage.
+              // Foremen get the full investigation tools below (same as
+              // Admin/Safety) — they're the ones who sometimes have to run
+              // an incident report, even though the rest of the Safety page
+              // is read-only for them.
               reportingQuickIncident ? (
                 <NewNearMissForm
                   title="Report an Incident"
@@ -22647,7 +22663,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             ) : viewingIncidentReportId ? (
               <IncidentReportDetail
                 record={incidentReports.find((r) => r.id === viewingIncidentReportId)}
-                isAdmin={isAdmin || isSafety}
+                isAdmin={isAdmin || isSafety || isForeman}
                 actionBusy={incidentReportActionBusy}
                 onBack={() => setViewingIncidentReportId(null)}
                 onAddSignature={addIncidentReportSignature}
@@ -23411,7 +23427,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </div>
 
           <div className="mt-8 flex justify-end">
-            {!confirmDelete ? (
+            {order.status === 'Done' ? (
+              <span className="text-xs" style={{ color: COLORS.inkDim }}>Completed work orders can't be deleted — that keeps the record intact.</span>
+            ) : !confirmDelete ? (
               <Btn variant="danger" onClick={() => setConfirmDelete(true)}>{t('deleteWorkOrder')}</Btn>
             ) : (
               <div className="flex items-center gap-2">
