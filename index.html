@@ -4277,7 +4277,7 @@ function HighwayLocationDetail({ location, canManage, onDelete, onClose }) {
 
 // Shown when tapping a live machine marker — read-only, nothing to manage
 // here since it's generated automatically from the shift/track lifecycle.
-function MachineMarkerDetail({ position, assignedDrivers, diagnostics, isVehicle, onClose }) {
+function MachineMarkerDetail({ position, assignedDrivers, diagnostics, isVehicle, voltageMuted, onClose }) {
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 150, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-end' }}>
       <div className="w-full p-5" style={{ background: COLORS.bg, borderRadius: '16px 16px 0 0', border: `2px solid ${COLORS.line}`, borderBottom: 'none' }}>
@@ -4317,8 +4317,9 @@ function MachineMarkerDetail({ position, assignedDrivers, diagnostics, isVehicle
             {diagnostics.voltage != null && (
               <div>
                 <p className="text-xs font-display uppercase tracking-wide" style={{ color: COLORS.inkDim }}>Battery voltage</p>
-                <p className="text-sm font-mono font-semibold" style={{ color: isLowVoltage(diagnostics.voltage, isVehicle) ? COLORS.danger : COLORS.ink2 }}>
-                  {diagnostics.voltage}V {isLowVoltage(diagnostics.voltage, isVehicle) ? '⚠️ Low' : ''}
+                <p className="text-sm font-mono font-semibold" style={{ color: !voltageMuted && isLowVoltage(diagnostics.voltage, isVehicle) ? COLORS.danger : COLORS.ink2 }}>
+                  {diagnostics.voltage}V {!voltageMuted && isLowVoltage(diagnostics.voltage, isVehicle) ? '⚠️ Low' : ''}
+                  {voltageMuted ? ' (monitoring off)' : ''}
                 </p>
               </div>
             )}
@@ -12223,6 +12224,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // automatically once that function is deployed — nothing else to wire
   // up client-side when it lands.
   const [samsaraDiagnostics, setSamsaraDiagnostics] = useState(() => cacheGet('samsaraDiagnostics', {}));
+  // Units where the low-voltage banner/warning is muted, keyed by
+  // slugForUnit: { [slug]: true }. For units with a physical battery
+  // master switch — voltage reads low/zero whenever it's just switched
+  // off (parked), not an actual charging problem, so the mechanic can
+  // turn monitoring off for that specific unit from Unit Numbers. Engine
+  // hours / oil-change tracking for that unit is unaffected — this only
+  // silences the voltage side.
+  const [voltageMonitoringDisabled, setVoltageMonitoringDisabled] = useState(() => cacheGet('voltageMonitoringDisabled', {}));
   // Hours-at-last-oil-change per unit, keyed by slugForUnit: { [slug]: hours }.
   // Set manually from Unit Numbers, and auto-reset to the unit's current
   // Samsara hours whenever an order tagged oilChangeDue gets closed.
@@ -13212,6 +13221,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   }, []);
 
   useEffect(() => {
+    const ref = firebase.database().ref('voltageMonitoringDisabled');
+    const on = ref.on('value', (snap) => {
+      const val = snap.val() || {};
+      setVoltageMonitoringDisabled(val);
+      cacheSet('voltageMonitoringDisabled', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
     const ref = firebase.database().ref('oilChangeBaselines');
     const on = ref.on('value', (snap) => {
       const val = snap.val() || {};
@@ -14051,6 +14070,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (isNaN(val)) return;
     await firebase.database().ref('oilChangeBaselines/' + slug).set(val).catch(() => alert("Couldn't save that — check your signal and try again."));
   };
+  // Mutes/unmutes the low-voltage banner for one unit — for units with a
+  // physical battery master switch, where a low/zero reading just means
+  // it's parked and switched off, not an actual charging problem.
+  const toggleVoltageMonitoring = async (unit) => {
+    const slug = slugForUnit(unit);
+    const ref = firebase.database().ref('voltageMonitoringDisabled/' + slug);
+    await (voltageMonitoringDisabled[slug] ? ref.remove() : ref.set(true)).catch(() => alert("Couldn't save that — check your signal and try again."));
+  };
   // Marks a watch-only (noQuiz) job-hazard course — or a self-reported
   // external course like Woodlands Training — as done for the CURRENT
   // mechanic. Quiz courses (WHMIS/TDG) don't need this, they already
@@ -14213,6 +14240,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // unit just means it's left out, not flagged.
   const lowVoltageUnits = units
     .map((unit) => {
+      if (voltageMonitoringDisabled[slugForUnit(unit)]) return null;
       const diag = samsaraDiagnostics[slugForUnit(unit)];
       if (!diag || diag.voltage == null) return null;
       return isLowVoltage(diag.voltage, is12VoltUnit(unit)) ? { name: unit, voltage: diag.voltage } : null;
@@ -19839,6 +19867,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           </div>
                         )}
                       </div>
+                      {unitTypes[slugForUnit(u)] && (
+                      <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+                        <label className="flex items-center justify-between gap-2 text-xs cursor-pointer">
+                          <span className="font-display uppercase tracking-wider" style={{ color: COLORS.inkDim }}>
+                            🔋 Low-voltage monitoring{voltageMonitoringDisabled[slugForUnit(u)] ? ' — OFF' : ' — ON'}
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={!voltageMonitoringDisabled[slugForUnit(u)]}
+                            onChange={() => toggleVoltageMonitoring(u)}
+                          />
+                        </label>
+                        <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>
+                          Turn off for units with a battery master switch — otherwise it flags low voltage every time it's just parked and switched off.
+                        </p>
+                      </div>
+                      )}
                       </div>
                     )}
                   </div>
@@ -20604,6 +20649,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               assignedDrivers={VEHICLE_UNIT_TYPES.includes(unitTypes[slugForUnit(viewingMachineName)]) ? (vehicleDriverAssignments[slugForUnit(viewingMachineName)] || []) : null}
               diagnostics={samsaraDiagnostics[slugForUnit(viewingMachineName)]}
               isVehicle={is12VoltUnit(viewingMachineName)}
+              voltageMuted={!!voltageMonitoringDisabled[slugForUnit(viewingMachineName)]}
               onClose={() => setViewingMachineName(null)}
             />
           );
@@ -20867,6 +20913,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               assignedDrivers={VEHICLE_UNIT_TYPES.includes(unitTypes[slugForUnit(viewingMachineName)]) ? (vehicleDriverAssignments[slugForUnit(viewingMachineName)] || []) : null}
               diagnostics={samsaraDiagnostics[slugForUnit(viewingMachineName)]}
               isVehicle={is12VoltUnit(viewingMachineName)}
+              voltageMuted={!!voltageMonitoringDisabled[slugForUnit(viewingMachineName)]}
               onClose={() => setViewingMachineName(null)}
             />
           );
