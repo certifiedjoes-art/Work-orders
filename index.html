@@ -9359,9 +9359,10 @@ function PrintableEquipmentInspection({ record, itemOrder }) {
   );
 }
 
-function YardInspectionDetail({ record, isAdmin, onReview, onDelete, onBack, sectionOrders }) {
+function YardInspectionDetail({ record, isAdmin, onReview, onUpdateItem, onDelete, onBack, sectionOrders }) {
   const [reviewerName, setReviewerName] = useState('');
   const [reviewing, setReviewing] = useState(false);
+  const [editingItems, setEditingItems] = useState(false);
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <div className="flex items-center justify-between mb-3 no-print">
@@ -9383,12 +9384,31 @@ function YardInspectionDetail({ record, isAdmin, onReview, onDelete, onBack, sec
         {record.reviewedBy ? `Reviewed by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}` : 'Not yet reviewed'}
       </p>
 
+      {isAdmin && (
+        <button
+          onClick={() => setEditingItems((v) => !v)}
+          className="text-xs font-semibold uppercase tracking-wide underline mb-2 no-print"
+          style={{ color: COLORS.accent }}
+        >
+          {editingItems ? '✓ Done editing items' : '✏️ Edit items'}
+        </button>
+      )}
+
       {YARD_INSPECTION_SECTIONS.map((section, sIdx) => (
         <div key={section.name} className="mb-4">
           <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>{section.name}</p>
           {effectiveItemOrder((sectionOrders && sectionOrders[sIdx]) || null, section.items.length).map((iIdx) => {
             const key = `${sIdx}-${iIdx}`;
-            return <InspectionItemRow key={key} label={section.items[iIdx]} value={record.items && record.items[key]} readOnly followedUp={!!record.reviewedBy} />;
+            return (
+              <InspectionItemRow
+                key={key}
+                label={section.items[iIdx]}
+                value={record.items && record.items[key]}
+                readOnly={!editingItems}
+                followedUp={!!record.reviewedBy}
+                onChange={(v) => onUpdateItem(key, v)}
+              />
+            );
           })}
         </div>
       ))}
@@ -9628,10 +9648,11 @@ function NewVehicleInspectionForm({ knownUnits, defaultInspector, submitting, on
 // Read-only detail view of one past vehicle inspection, plus the paper
 // form's "Follow up Action Dated" + Signature line — filled in later, once
 // anything flagged Not OK actually gets addressed.
-function VehicleInspectionDetail({ record, isAdmin, onReview, onDelete, onBack, itemOrder }) {
+function VehicleInspectionDetail({ record, isAdmin, onReview, onUpdateItem, onDelete, onBack, itemOrder }) {
   const [followUpDate, setFollowUpDate] = useState('');
   const [reviewerName, setReviewerName] = useState('');
   const [reviewing, setReviewing] = useState(false);
+  const [editingItems, setEditingItems] = useState(false);
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <div className="flex items-center justify-between mb-3 no-print">
@@ -9653,8 +9674,25 @@ function VehicleInspectionDetail({ record, isAdmin, onReview, onDelete, onBack, 
         {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
       </p>
 
+      {isAdmin && (
+        <button
+          onClick={() => setEditingItems((v) => !v)}
+          className="text-xs font-semibold uppercase tracking-wide underline mb-2 no-print"
+          style={{ color: COLORS.accent }}
+        >
+          {editingItems ? '✓ Done editing items' : '✏️ Edit items'}
+        </button>
+      )}
+
       {effectiveItemOrder(itemOrder, VEHICLE_INSPECTION_ITEMS.length).map((iIdx) => (
-        <VehicleInspectionItemRow key={iIdx} label={VEHICLE_INSPECTION_ITEMS[iIdx]} value={record.items && record.items[iIdx]} readOnly followedUp={!!record.reviewedBy} />
+        <VehicleInspectionItemRow
+          key={iIdx}
+          label={VEHICLE_INSPECTION_ITEMS[iIdx]}
+          value={record.items && record.items[iIdx]}
+          readOnly={!editingItems}
+          followedUp={!!record.reviewedBy}
+          onChange={(v) => onUpdateItem(iIdx, v)}
+        />
       ))}
 
       {isAdmin && !record.reviewedBy && (
@@ -9859,10 +9897,11 @@ function NewEquipmentInspectionForm({ knownUnits, defaultInspector, submitting, 
 
 // Read-only detail view of one past equipment inspection, plus the paper
 // form's "Follow up Dated" + Signature line.
-function EquipmentInspectionDetail({ record, isAdmin, onReview, onDelete, onBack, itemOrder }) {
+function EquipmentInspectionDetail({ record, isAdmin, onReview, onUpdateItem, onDelete, onBack, itemOrder }) {
   const [followUpDate, setFollowUpDate] = useState('');
   const [reviewerName, setReviewerName] = useState('');
   const [reviewing, setReviewing] = useState(false);
+  const [editingItems, setEditingItems] = useState(false);
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <div className="flex items-center justify-between mb-3 no-print">
@@ -9886,8 +9925,26 @@ function EquipmentInspectionDetail({ record, isAdmin, onReview, onDelete, onBack
         {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
       </p>
 
+      {isAdmin && (
+        <button
+          onClick={() => setEditingItems((v) => !v)}
+          className="text-xs font-semibold uppercase tracking-wide underline mb-2 no-print"
+          style={{ color: COLORS.accent }}
+        >
+          {editingItems ? '✓ Done editing items' : '✏️ Edit items'}
+        </button>
+      )}
+
       {effectiveItemOrder(itemOrder, EQUIPMENT_INSPECTION_ITEMS.length).map((iIdx) => (
-        <InspectionItemRow key={iIdx} label={EQUIPMENT_INSPECTION_ITEMS[iIdx]} value={record.items && record.items[iIdx]} readOnly followedUp={!!record.reviewedBy} />
+        <InspectionItemRow
+          key={iIdx}
+          label={EQUIPMENT_INSPECTION_ITEMS[iIdx]}
+          value={record.items && record.items[iIdx]}
+          readOnly={!editingItems}
+          allowNA
+          followedUp={!!record.reviewedBy}
+          onChange={(v) => onUpdateItem(iIdx, v)}
+        />
       ))}
 
       {record.comments && (
@@ -14602,6 +14659,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const record = safetyInspections.find((r) => r.id === recordId);
     if (!record) return;
     const updated = { ...record, reviewedAt: Date.now(), ...extra };
+    const next = safetyInspections.map((r) => (r.id === recordId ? updated : r));
+    setSafetyInspections(next);
+    cacheSet('safetyInspections', next);
+    await queueWrite('safetyInspections', { kind: 'save', entry: updated });
+  };
+  // Lets an admin correct a single item's OK/N/A/Req.Att. status after an
+  // inspection has already been submitted — e.g. a mechanic actually fixed
+  // something flagged, or an item was mis-tapped during the walk-around.
+  const updateSafetyInspectionItem = async (recordId, itemKey, value) => {
+    const record = safetyInspections.find((r) => r.id === recordId);
+    if (!record) return;
+    const updated = { ...record, items: { ...(record.items || {}), [itemKey]: value } };
     const next = safetyInspections.map((r) => (r.id === recordId ? updated : r));
     setSafetyInspections(next);
     cacheSet('safetyInspections', next);
@@ -21987,6 +22056,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       isAdmin={isAdmin || isSafety}
                       onBack={() => setViewingSafetyInspectionId(null)}
                       onReview={(reviewerName) => reviewSafetyInspection(viewingSafetyInspectionId, { reviewedBy: reviewerName })}
+                      onUpdateItem={(key, value) => updateSafetyInspectionItem(viewingSafetyInspectionId, key, value)}
                       onDelete={async () => { await deleteSafetyInspection(viewingSafetyInspectionId); setViewingSafetyInspectionId(null); }}
                       sectionOrders={inspectionChecklistOrder.yard}
                     />
@@ -22091,6 +22161,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       isAdmin={isAdmin || isSafety}
                       onBack={() => setViewingSafetyInspectionId(null)}
                       onReview={(extra) => reviewSafetyInspection(viewingSafetyInspectionId, extra)}
+                      onUpdateItem={(key, value) => updateSafetyInspectionItem(viewingSafetyInspectionId, key, value)}
                       onDelete={async () => { await deleteSafetyInspection(viewingSafetyInspectionId); setViewingSafetyInspectionId(null); }}
                       itemOrder={inspectionChecklistOrder.vehicle}
                     />
@@ -22195,6 +22266,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       isAdmin={isAdmin || isSafety}
                       onBack={() => setViewingSafetyInspectionId(null)}
                       onReview={(extra) => reviewSafetyInspection(viewingSafetyInspectionId, extra)}
+                      onUpdateItem={(key, value) => updateSafetyInspectionItem(viewingSafetyInspectionId, key, value)}
                       onDelete={async () => { await deleteSafetyInspection(viewingSafetyInspectionId); setViewingSafetyInspectionId(null); }}
                       itemOrder={inspectionChecklistOrder.equipment}
                     />
