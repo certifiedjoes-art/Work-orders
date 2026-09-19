@@ -16083,8 +16083,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // Prompt to clock in once per login, if they haven't already for today.
   // Mechanics only — production employees already get a clear "Not clocked
   // in" prompt right on their own Shift screen, no need to duplicate it here.
+  // Admins are skipped too — Joe opening the work order board to check on
+  // things isn't him starting a shift, so it shouldn't nag him to clock in.
   useEffect(() => {
-    if (currentMechanic && !openEntry && jobTypeFor(currentMechanic) === 'mechanic') {
+    if (currentMechanic && !openEntry && jobTypeFor(currentMechanic) === 'mechanic' && !isAdmin) {
       setShowClockInPrompt(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
