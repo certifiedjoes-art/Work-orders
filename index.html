@@ -9362,7 +9362,6 @@ function PrintableEquipmentInspection({ record, itemOrder }) {
 function YardInspectionDetail({ record, isAdmin, onReview, onUpdateItem, onDelete, onBack, sectionOrders }) {
   const [reviewerName, setReviewerName] = useState('');
   const [reviewing, setReviewing] = useState(false);
-  const [editingItems, setEditingItems] = useState(false);
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <div className="flex items-center justify-between mb-3 no-print">
@@ -9384,16 +9383,6 @@ function YardInspectionDetail({ record, isAdmin, onReview, onUpdateItem, onDelet
         {record.reviewedBy ? `Reviewed by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}` : 'Not yet reviewed'}
       </p>
 
-      {isAdmin && (
-        <button
-          onClick={() => setEditingItems((v) => !v)}
-          className="text-xs font-semibold uppercase tracking-wide underline mb-2 no-print"
-          style={{ color: COLORS.accent }}
-        >
-          {editingItems ? '✓ Done editing items' : '✏️ Edit items'}
-        </button>
-      )}
-
       {YARD_INSPECTION_SECTIONS.map((section, sIdx) => (
         <div key={section.name} className="mb-4">
           <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>{section.name}</p>
@@ -9404,7 +9393,7 @@ function YardInspectionDetail({ record, isAdmin, onReview, onUpdateItem, onDelet
                 key={key}
                 label={section.items[iIdx]}
                 value={record.items && record.items[key]}
-                readOnly={!editingItems}
+                readOnly={!isAdmin}
                 followedUp={!!record.reviewedBy}
                 onChange={(v) => onUpdateItem(key, v)}
               />
@@ -9652,7 +9641,6 @@ function VehicleInspectionDetail({ record, isAdmin, onReview, onUpdateItem, onDe
   const [followUpDate, setFollowUpDate] = useState('');
   const [reviewerName, setReviewerName] = useState('');
   const [reviewing, setReviewing] = useState(false);
-  const [editingItems, setEditingItems] = useState(false);
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <div className="flex items-center justify-between mb-3 no-print">
@@ -9674,22 +9662,12 @@ function VehicleInspectionDetail({ record, isAdmin, onReview, onUpdateItem, onDe
         {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
       </p>
 
-      {isAdmin && (
-        <button
-          onClick={() => setEditingItems((v) => !v)}
-          className="text-xs font-semibold uppercase tracking-wide underline mb-2 no-print"
-          style={{ color: COLORS.accent }}
-        >
-          {editingItems ? '✓ Done editing items' : '✏️ Edit items'}
-        </button>
-      )}
-
       {effectiveItemOrder(itemOrder, VEHICLE_INSPECTION_ITEMS.length).map((iIdx) => (
         <VehicleInspectionItemRow
           key={iIdx}
           label={VEHICLE_INSPECTION_ITEMS[iIdx]}
           value={record.items && record.items[iIdx]}
-          readOnly={!editingItems}
+          readOnly={!isAdmin}
           followedUp={!!record.reviewedBy}
           onChange={(v) => onUpdateItem(iIdx, v)}
         />
@@ -9901,7 +9879,6 @@ function EquipmentInspectionDetail({ record, isAdmin, onReview, onUpdateItem, on
   const [followUpDate, setFollowUpDate] = useState('');
   const [reviewerName, setReviewerName] = useState('');
   const [reviewing, setReviewing] = useState(false);
-  const [editingItems, setEditingItems] = useState(false);
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <div className="flex items-center justify-between mb-3 no-print">
@@ -9925,22 +9902,12 @@ function EquipmentInspectionDetail({ record, isAdmin, onReview, onUpdateItem, on
         {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
       </p>
 
-      {isAdmin && (
-        <button
-          onClick={() => setEditingItems((v) => !v)}
-          className="text-xs font-semibold uppercase tracking-wide underline mb-2 no-print"
-          style={{ color: COLORS.accent }}
-        >
-          {editingItems ? '✓ Done editing items' : '✏️ Edit items'}
-        </button>
-      )}
-
       {effectiveItemOrder(itemOrder, EQUIPMENT_INSPECTION_ITEMS.length).map((iIdx) => (
         <InspectionItemRow
           key={iIdx}
           label={EQUIPMENT_INSPECTION_ITEMS[iIdx]}
           value={record.items && record.items[iIdx]}
-          readOnly={!editingItems}
+          readOnly={!isAdmin}
           allowNA
           followedUp={!!record.reviewedBy}
           onChange={(v) => onUpdateItem(iIdx, v)}
