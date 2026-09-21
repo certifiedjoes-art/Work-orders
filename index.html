@@ -429,6 +429,10 @@ const translations = {
     remove: 'Remove',
     addAnotherChecklist: 'Add another checklist to this job:',
     pickChecklist: 'Pick a checklist to use for this job:',
+    checklistNotePlaceholder: 'Notes (optional) — what was done',
+    recordVoiceNote: 'Record voice note',
+    reRecordVoiceNote: 'Re-record',
+    stopRecording: 'Stop',
     selectChecklistDots: 'Select a checklist…',
     createChecklistForJob: '+ Create a checklist just for this job',
     notesUpdates: 'Notes & Updates',
@@ -580,6 +584,10 @@ const translations = {
     remove: 'Quitar',
     addAnotherChecklist: 'Agregar otra lista a este trabajo:',
     pickChecklist: 'Elige una lista para este trabajo:',
+    checklistNotePlaceholder: 'Notas (opcional) — qué se hizo',
+    recordVoiceNote: 'Grabar nota de voz',
+    reRecordVoiceNote: 'Regrabar',
+    stopRecording: 'Detener',
     selectChecklistDots: 'Selecciona una lista…',
     createChecklistForJob: '+ Crear una lista solo para este trabajo',
     notesUpdates: 'Notas y Actualizaciones',
@@ -731,6 +739,10 @@ const translations = {
     remove: 'Wajnämen',
     addAnotherChecklist: 'Nieha Tjakliest touféjen fa dise Aarbeit:',
     pickChecklist: 'Wähl en Tjakliest fa dise Aarbeit:',
+    checklistNotePlaceholder: 'Notitse (opsional) — waut jedone es',
+    recordVoiceNote: 'Stemm Notiets opnehme',
+    reRecordVoiceNote: 'Wada opnehme',
+    stopRecording: 'Oppheare',
     selectChecklistDots: 'Wähl en Tjakliest…',
     createChecklistForJob: '+ Moak en Tjakliest bloos fa dise Aarbeit',
     notesUpdates: 'Notitse un Nieheite',
@@ -13929,7 +13941,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       nameOrigLang: template.nameOrigLang,
       nameTranslations: template.nameTranslations,
       itemTranslations: template.itemTranslations,
-      items: template.items.map((text) => ({ id: uid(), text, checked: false, checkedBy: null, checkedAt: null })),
+      items: template.items.map((text) => ({ id: uid(), text, checked: false, checkedBy: null, checkedAt: null, note: '', noteAudioUrl: null })),
     };
     const nextChecklists = [...getChecklists(order), checklist];
     await updateOrder(orderId, { checklists: nextChecklists, checklist: null });
@@ -13957,7 +13969,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       nameOrigLang,
       nameTranslations,
       itemTranslations,
-      items: items.map((text) => ({ id: uid(), text, checked: false, checkedBy: null, checkedAt: null })),
+      items: items.map((text) => ({ id: uid(), text, checked: false, checkedBy: null, checkedAt: null, note: '', noteAudioUrl: null })),
     };
     const nextChecklists = [...getChecklists(order), checklist];
     await updateOrder(orderId, { checklists: nextChecklists, checklist: null });
@@ -13986,6 +13998,35 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await updateOrder(orderId, { checklists: nextChecklists, checklist: null });
   };
 
+  const setChecklistItemNote = async (orderId, checklistId, itemId, note) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return;
+    const nextChecklists = getChecklists(order).map((c) => {
+      if (c.id !== checklistId) return c;
+      const items = c.items.map((it) => (it.id === itemId ? { ...it, note } : it));
+      return { ...c, items };
+    });
+    await updateOrder(orderId, { checklists: nextChecklists, checklist: null });
+  };
+
+  const setChecklistItemVoiceNote = async (orderId, checklistId, itemId, url) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return;
+    const nextChecklists = getChecklists(order).map((c) => {
+      if (c.id !== checklistId) return c;
+      const items = c.items.map((it) => (it.id === itemId ? { ...it, noteAudioUrl: url } : it));
+      return { ...c, items };
+    });
+    await updateOrder(orderId, { checklists: nextChecklists, checklist: null });
+  };
+
+  const uploadChecklistItemVoiceNote = async (orderId, checklistId, itemId, blob) => {
+    const storageRef = firebase.storage().ref(`checklistVoiceNotes/${orderId}-${checklistId}-${itemId}-${Date.now()}.webm`);
+    await storageRef.put(blob);
+    const url = await storageRef.getDownloadURL();
+    await setChecklistItemVoiceNote(orderId, checklistId, itemId, url);
+  };
+
   const updateOrderChecklist = async (orderId, checklistId, name, itemsText) => {
     const trimmedName = name.trim();
     const lines = itemsText.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -13997,7 +14038,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     (existing ? existing.items : []).forEach((it) => { existingByText[it.text] = it; });
     // Keep the checked state for any item whose text didn't change; new/edited
     // lines start fresh so a corrected item doesn't stay marked done by mistake.
-    const items = lines.map((text) => existingByText[text] || { id: uid(), text, checked: false, checkedBy: null, checkedAt: null });
+    const items = lines.map((text) => existingByText[text] || { id: uid(), text, checked: false, checkedBy: null, checkedAt: null, note: '', noteAudioUrl: null });
     const { nameOrigLang, nameTranslations, itemTranslations } = await translateChecklistContent(trimmedName, lines, lang);
     const nextChecklists = getChecklists(order).map((c) =>
       c.id === checklistId ? { ...c, templateName: trimmedName, items, nameOrigLang, nameTranslations, itemTranslations } : c
@@ -23327,25 +23368,43 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     )}
                     <div className="space-y-3">
                       {c.items.map((it, idx) => (
-                        <label key={it.id} className="flex items-start gap-3 cursor-pointer group">
-                          <input
-                            type="checkbox"
-                            checked={it.checked}
-                            onChange={() => toggleChecklistItem(order.id, c.id, it.id)}
-                            className="mt-1 w-5 h-5 rounded focus:outline-none focus:ring-2 cursor-pointer"
-                            style={{ accentColor: COLORS.accent }}
-                          />
-                          <div className="flex-1">
-                            <span className="text-base" style={{ color: it.checked ? COLORS.line : COLORS.ink, textDecoration: it.checked ? 'line-through' : 'none' }}>
-                              {getLocalizedChecklistText(it.text, c.nameOrigLang, c.itemTranslations, lang, idx)}
-                            </span>
-                            {it.checked && it.checkedBy && (
-                              <span className="block font-mono text-xs mt-1" style={{ color: COLORS.line }}>
-                                ✓ {it.checkedBy} on {new Date(it.checkedAt).toLocaleDateString()}
+                        <div key={it.id}>
+                          <label className="flex items-start gap-3 cursor-pointer group">
+                            <input
+                              type="checkbox"
+                              checked={it.checked}
+                              onChange={() => toggleChecklistItem(order.id, c.id, it.id)}
+                              className="mt-1 w-5 h-5 rounded focus:outline-none focus:ring-2 cursor-pointer"
+                              style={{ accentColor: COLORS.accent }}
+                            />
+                            <div className="flex-1">
+                              <span className="text-base" style={{ color: it.checked ? COLORS.line : COLORS.ink, textDecoration: it.checked ? 'line-through' : 'none' }}>
+                                {getLocalizedChecklistText(it.text, c.nameOrigLang, c.itemTranslations, lang, idx)}
                               </span>
-                            )}
-                          </div>
-                        </label>
+                              {it.checked && it.checkedBy && (
+                                <span className="block font-mono text-xs mt-1" style={{ color: COLORS.line }}>
+                                  ✓ {it.checkedBy} on {new Date(it.checkedAt).toLocaleDateString()}
+                                </span>
+                              )}
+                            </div>
+                          </label>
+                          <input
+                            type="text"
+                            defaultValue={it.note || ''}
+                            onBlur={(e) => {
+                              if (e.target.value !== (it.note || '')) setChecklistItemNote(order.id, c.id, it.id, e.target.value);
+                            }}
+                            placeholder={t('checklistNotePlaceholder')}
+                            className="w-full text-sm px-2 py-1 rounded mt-1"
+                            style={{ marginLeft: '2rem', width: 'calc(100% - 2rem)', background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                          />
+                          <ChecklistItemVoiceNote
+                            url={it.noteAudioUrl}
+                            onRecorded={(blob) => uploadChecklistItemVoiceNote(order.id, c.id, it.id, blob)}
+                            onRemove={() => setChecklistItemVoiceNote(order.id, c.id, it.id, null)}
+                            t={t}
+                          />
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -24630,6 +24689,76 @@ function NoteForm({ onSubmit, t }) {
           {isShoutout ? tr('postShoutout') : tr('post')}
         </Btn>
       </div>
+    </div>
+  );
+}
+
+function ChecklistItemVoiceNote({ url, onRecorded, onRemove, t }) {
+  const tr = t || ((k) => translations.en[k] || k);
+  const [recording, setRecording] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((tk) => tk.stop());
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        setUploading(true);
+        try {
+          await onRecorded(blob);
+        } catch (err) {
+          console.error('voice note upload failed', err);
+          alert("Couldn't save that voice note — check your signal and try again.");
+        }
+        setUploading(false);
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    } catch (err) {
+      console.error('mic access failed', err);
+      alert("Couldn't access the microphone — check that this device allows it for the app.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && recording) {
+      mediaRecorderRef.current.stop();
+      setRecording(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center flex-wrap gap-2 mt-1" style={{ marginLeft: '2rem' }}>
+      {url && !recording && (
+        <audio controls src={url} className="h-8" style={{ maxWidth: '200px' }} />
+      )}
+      <button
+        type="button"
+        onClick={recording ? stopRecording : startRecording}
+        disabled={uploading}
+        className="text-xs px-2 py-1 rounded font-display uppercase tracking-wide"
+        style={{
+          background: recording ? '#D6604A' : COLORS.surfaceRaised,
+          color: recording ? '#fff' : COLORS.accent,
+          border: `1px solid ${COLORS.line}`,
+        }}
+      >
+        {uploading ? tr('uploadingDots') : recording ? '⏹ ' + tr('stopRecording') : url ? '🎤 ' + tr('reRecordVoiceNote') : '🎤 ' + tr('recordVoiceNote')}
+      </button>
+      {url && !recording && (
+        <button type="button" onClick={onRemove} className="text-xs px-2" style={{ color: '#D6604A' }}>
+          ✕
+        </button>
+      )}
     </div>
   );
 }
