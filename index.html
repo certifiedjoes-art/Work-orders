@@ -4500,6 +4500,7 @@ function SidebarMenu({ show, onClose, mechanic, isAdmin, isForeman, isProduction
           </div>
 
           <div className="space-y-1 mb-4">
+            {isAdmin && item('🛠️', 'Admin', () => onNavigate('admin'))}
             {item('⏱️', 'Shift', () => onNavigate('shift'))}
             {item('🗺️', 'Maps', () => onNavigate('maps'))}
             {item('🛣️', 'Highway Map', () => onNavigate('highwayMap'))}
@@ -17986,10 +17987,42 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
+        <SidebarMenu
+          show={showSidebar}
+          onClose={() => setShowSidebar(false)}
+          mechanic={currentMechanic}
+          isProduction={jobTypeFor(currentMechanic) === 'production'}
+          isForeman={isForeman}
+          isAdmin={isAdmin}
+          onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
+          onCheckUpdates={async () => {
+            try {
+              const regs = await navigator.serviceWorker.getRegistrations();
+              await Promise.all(regs.map((r) => r.unregister()));
+              const keys = await caches.keys();
+              await Promise.all(keys.map((k) => caches.delete(k)));
+            } catch (e) {}
+            window.location.reload(true);
+          }}
+          onLogout={async () => {
+            const keepSession = !!localStorage.getItem('webauthn_cred_' + currentMechanic);
+            if (!keepSession && !navigator.onLine) {
+              const proceed = confirm("You're offline right now. Logging out means you won't be able to sign back in until you have signal again. Log out anyway?");
+              if (!proceed) return;
+            }
+            if (!keepSession) { await firebase.auth().signOut().catch(() => {}); }
+            setCurrentMechanic(null);
+            setScreen('login');
+          }}
+          t={t}
+        />
         <div className="max-w-2xl mx-auto">
-          <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
-            {t('backToBoard')}
-          </button>
+          <div className="flex items-center justify-between mb-6">
+            <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
+              {isAdmin ? '← Admin' : t('backToBoard')}
+            </button>
+            <button onClick={() => setShowSidebar(true)} className="text-2xl leading-none px-3 py-1.5 rounded-lg" style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>☰</button>
+          </div>
           <h1 className="font-display text-3xl font-bold mb-2">{t('timeClock')}</h1>
           <p className="text-sm mb-8" style={{ color: COLORS.inkDim }}>{currentMechanic}</p>
 
