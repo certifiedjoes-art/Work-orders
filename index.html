@@ -18162,6 +18162,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   onAddJob={addTimesheetJob}
                   onRemoveJob={removeTimesheetJob}
                   isAdmin={isAdmin}
+                  onConfirmHours={(val) => updateTimesheetEntry(entry.id, { hoursConfirmedGood: val })}
                 />
               ))}
             </div>
@@ -18473,6 +18474,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         onAddJob={addTimesheetJob}
                         onRemoveJob={removeTimesheetJob}
                         isAdmin={isAdmin}
+                        onConfirmHours={(val) => updateTimesheetEntry(entry.id, { hoursConfirmedGood: val })}
                       />
                     ))}
                   </div>
@@ -19412,6 +19414,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                               onAddJob={addTimesheetJob}
                               onRemoveJob={removeTimesheetJob}
                               isAdmin={isAdmin}
+                              onConfirmHours={(val) => updateTimesheetEntry(item.data.id, { hoursConfirmedGood: val })}
                             />
                           ) : editingShiftId === item.data.id ? (
                             <ProductionShiftEditCard
@@ -19431,6 +19434,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                               unitTypes={unitTypes}
                               isAdmin={isAdmin}
                               onEdit={() => setEditingShiftId(item.data.id)}
+                              onConfirmHours={(val) => updateProductionShift(item.data.id, { hoursConfirmedGood: val })}
                             />
                           )
                         ))}
@@ -23709,7 +23713,7 @@ function PrintableTimesheetEntry({ entry }) {
 // Show-raw-data toggle and Signed (view) expandable signature. The only
 // things layered on top are what's actually specific to a production
 // machine: which unit/block, fuel delivered, and any downtime logged.
-function ProductionShiftCard({ shift, unitTypes, isAdmin, onEdit }) {
+function ProductionShiftCard({ shift, unitTypes, isAdmin, onEdit, onConfirmHours }) {
   const [showSignature, setShowSignature] = useState(false);
   const [showRawData, setShowRawData] = useState(false);
   const hours = shift.start && shift.end ? (new Date(shift.end) - new Date(shift.start)) / 1000 / 60 / 60 : null;
@@ -23732,9 +23736,36 @@ function ProductionShiftCard({ shift, unitTypes, isAdmin, onEdit }) {
         <span>Out {shift.end ? fmtTime(shift.end) : '—'}</span>
       </div>
       {hours != null && (
-        <p className="text-xs font-mono mb-2" style={{ color: hours > 16 ? '#E07A5F' : COLORS.accent }}>
-          Total for the day: <span className="font-bold">{fmtHours(hours)}</span>
-          {hours > 16 && ' ⚠️ looks wrong — likely a corrupted date on one of the saved times'}
+        <p className="text-xs font-mono mb-2 flex flex-wrap items-center gap-2" style={{ color: hours > 24 && !shift.hoursConfirmedGood ? '#E07A5F' : hours > 16 && !shift.hoursConfirmedGood ? COLORS.progress : COLORS.accent }}>
+          <span>
+            Total for the day: <span className="font-bold">{fmtHours(hours)}</span>
+            {shift.hoursConfirmedGood
+              ? (hours > 16 && ' — confirmed correct')
+              : (
+                <>
+                  {hours > 24 && ' ⚠️ looks wrong — likely a corrupted date on one of the saved times'}
+                  {hours > 16 && hours <= 24 && ' — long shift'}
+                </>
+              )}
+          </span>
+          {isAdmin && hours > 16 && !shift.hoursConfirmedGood && onConfirmHours && (
+            <button
+              onClick={() => onConfirmHours(true)}
+              className="text-xs underline font-sans normal-case"
+              style={{ color: COLORS.accent }}
+            >
+              ✓ Mark correct
+            </button>
+          )}
+          {isAdmin && shift.hoursConfirmedGood && onConfirmHours && (
+            <button
+              onClick={() => onConfirmHours(false)}
+              className="text-xs underline font-sans normal-case"
+              style={{ color: COLORS.inkDim }}
+            >
+              Undo
+            </button>
+          )}
         </p>
       )}
       <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>
@@ -23783,7 +23814,7 @@ function ProductionShiftCard({ shift, unitTypes, isAdmin, onEdit }) {
     </div>
   );
 }
-function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCancelEdit, onSave, onDelete, onAddJob, onRemoveJob, isAdmin }) {
+function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCancelEdit, onSave, onDelete, onAddJob, onRemoveJob, isAdmin, onConfirmHours }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showSignature, setShowSignature] = useState(false);
   const [showRawData, setShowRawData] = useState(false);
@@ -23900,9 +23931,36 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
         {entry.skippedLunch && <span>No break taken</span>}
       </div>
       {entry.clockOut && (
-        <p className="text-xs font-mono mb-2" style={{ color: entryHours(entry) > 16 ? '#E07A5F' : COLORS.accent }}>
-          Total for the day: <span className="font-bold">{fmtHours(entryHours(entry))}</span>
-          {entryHours(entry) > 16 && ' ⚠️ looks wrong — likely a corrupted date on one of the saved times'}
+        <p className="text-xs font-mono mb-2 flex flex-wrap items-center gap-2" style={{ color: entryHours(entry) > 24 && !entry.hoursConfirmedGood ? '#E07A5F' : entryHours(entry) > 16 && !entry.hoursConfirmedGood ? COLORS.progress : COLORS.accent }}>
+          <span>
+            Total for the day: <span className="font-bold">{fmtHours(entryHours(entry))}</span>
+            {entry.hoursConfirmedGood
+              ? (entryHours(entry) > 16 && ' — confirmed correct')
+              : (
+                <>
+                  {entryHours(entry) > 24 && ' ⚠️ looks wrong — likely a corrupted date on one of the saved times'}
+                  {entryHours(entry) > 16 && entryHours(entry) <= 24 && ' — long shift'}
+                </>
+              )}
+          </span>
+          {isAdmin && entryHours(entry) > 16 && !entry.hoursConfirmedGood && onConfirmHours && (
+            <button
+              onClick={() => onConfirmHours(true)}
+              className="text-xs underline font-sans normal-case"
+              style={{ color: COLORS.accent }}
+            >
+              ✓ Mark correct
+            </button>
+          )}
+          {isAdmin && entry.hoursConfirmedGood && onConfirmHours && (
+            <button
+              onClick={() => onConfirmHours(false)}
+              className="text-xs underline font-sans normal-case"
+              style={{ color: COLORS.inkDim }}
+            >
+              Undo
+            </button>
+          )}
         </p>
       )}
       {isAdmin && typeof entry.logBookMismatchHours === 'number' && entry.logBookMismatchHours > 0 && (
