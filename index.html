@@ -6921,13 +6921,20 @@ function PreTripInspectionDetail({ inspection, onDelete }) {
   );
 }
 
-function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel }) {
+function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel, units, unitTypes }) {
   const [unitsData, setUnitsData] = useState([
     { unitName: truckUnitName, unitType: 'truck', items: TRUCK_PRETRIP_ITEMS.map((def) => ({ ...def, status: null, severity: null, note: '', photos: [] })) },
   ]);
   const [expandedUnitIndex, setExpandedUnitIndex] = useState(0);
   const [addingTrailer, setAddingTrailer] = useState(false);
   const [newTrailerName, setNewTrailerName] = useState('');
+  const [trailerEntryMode, setTrailerEntryMode] = useState('dropdown');
+
+  // Trailers already added to this inspection are dropped from the picker so
+  // the same one can't be added twice.
+  const alreadyAddedNames = unitsData.map((u) => u.unitName);
+  const availableTrailerUnits = (units || [])
+    .filter((u) => u && (unitTypes || {})[slugForUnit(u)] === 'trailer' && !alreadyAddedNames.includes(u));
   const [signature, setSignature] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -6984,14 +6991,50 @@ function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel }) {
 
       {addingTrailer ? (
         <div className="rounded-lg p-4 mb-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-          <TextInput value={newTrailerName} onChange={(e) => setNewTrailerName(e.target.value)} placeholder="Trailer unit name/number" className="w-full mb-2" />
+          {trailerEntryMode === 'dropdown' ? (
+            <React.Fragment>
+              <Select value={newTrailerName} onChange={(e) => setNewTrailerName(e.target.value)} className="w-full mb-2">
+                <option value="" disabled>Select a trailer…</option>
+                {availableTrailerUnits.map((u) => <option key={u} value={u}>{u}</option>)}
+              </Select>
+              {availableTrailerUnits.length === 0 && (
+                <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>
+                  No trailers left in the unit list — an admin can add one under Unit Numbers, or type one in below.
+                </p>
+              )}
+              <button
+                onClick={() => { setTrailerEntryMode('manual'); setNewTrailerName(''); }}
+                className="text-xs underline mb-2"
+                style={{ color: COLORS.accent }}
+              >
+                Not listed? Type it in instead
+              </button>
+            </React.Fragment>
+          ) : (
+            <React.Fragment>
+              <TextInput value={newTrailerName} onChange={(e) => setNewTrailerName(e.target.value)} placeholder="Trailer unit name/number" className="w-full mb-2" />
+              {availableTrailerUnits.length > 0 && (
+                <button
+                  onClick={() => { setTrailerEntryMode('dropdown'); setNewTrailerName(''); }}
+                  className="text-xs underline mb-2"
+                  style={{ color: COLORS.accent }}
+                >
+                  Pick from unit list instead
+                </button>
+              )}
+            </React.Fragment>
+          )}
           <div className="flex gap-2">
             <Btn onClick={addTrailer} disabled={!newTrailerName.trim()}>Add trailer</Btn>
-            <Btn variant="ghost" onClick={() => { setAddingTrailer(false); setNewTrailerName(''); }}>Cancel</Btn>
+            <Btn variant="ghost" onClick={() => { setAddingTrailer(false); setNewTrailerName(''); setTrailerEntryMode('dropdown'); }}>Cancel</Btn>
           </div>
         </div>
       ) : (
-        <button onClick={() => setAddingTrailer(true)} className="w-full rounded-lg p-3 mb-4 text-sm" style={{ border: `2px dashed ${COLORS.accent}`, color: COLORS.accent }}>
+        <button
+          onClick={() => { setAddingTrailer(true); setTrailerEntryMode(availableTrailerUnits.length > 0 ? 'dropdown' : 'manual'); }}
+          className="w-full rounded-lg p-3 mb-4 text-sm"
+          style={{ border: `2px dashed ${COLORS.accent}`, color: COLORS.accent }}
+        >
           + Add a trailer
         </button>
       )}
@@ -17677,6 +17720,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         <PreTripInspectionForm
           driver={currentMechanic}
           truckUnitName={effectiveUnit}
+          units={units}
+          unitTypes={unitTypes}
           onCancel={() => setShowPreTripForm(false)}
           onSubmit={async (unitsData, signature) => {
             await submitPreTripInspection(unitsData, signature);
