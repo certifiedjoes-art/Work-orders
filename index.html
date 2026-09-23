@@ -19149,7 +19149,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   />
                 )}
 
-                {(isAdmin || isSafety) && (
+                {(isAdmin || isSafety || isForeman) && (
                   <div className="mb-3">
                     <button
                       onClick={() => setEditingTrainingFor(editingTrainingFor === m ? null : m)}
