@@ -18627,9 +18627,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const combinedNames = Array.from(new Set([...mechanicGroups, ...filteredProduction.map((s) => s.employee)])).sort((a, b) => a.localeCompare(b));
     const combinedByPerson = {};
     combinedNames.forEach((name) => {
-      const mechItems = (groupedByMechanic[name] || []).map((e) => ({ kind: 'mechanic', sortDate: e.date, data: e }));
+      const mechItems = (groupedByMechanic[name] || []).map((e) => ({ kind: 'mechanic', sortDate: e.date || '', data: e }));
       const prodItems = filteredProduction.filter((s) => s.employee === name).map((s) => ({ kind: 'production', sortDate: (s.end || s.start || '').slice(0, 10), data: s }));
-      combinedByPerson[name] = [...mechItems, ...prodItems].sort((a, b) => b.sortDate.localeCompare(a.sortDate));
+      combinedByPerson[name] = [...mechItems, ...prodItems].sort((a, b) => (b.sortDate || '').localeCompare(a.sortDate || ''));
     });
     const clockedInNow = timesheets.filter((t) => !t.clockOut && t.date === todayStr());
 
