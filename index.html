@@ -2833,10 +2833,29 @@ function ClockOutReviewOverlay({ show, openEntry, skippedLunch, mechanic, onConf
   const savedSignature = mechanic ? localStorage.getItem('savedSignature_' + mechanic) : null;
   const [signature, setSignature] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-  useEffect(() => { if (show) { setSubmitting(false); } }, [show]);
+  // For someone who forgot to clock out for a day or two — the date this
+  // clock-out actually happened can be corrected right here, since only
+  // the person living it knows that. Nothing else about a past entry is
+  // editable this way; that stays admin-only. Defaults to today, and
+  // resets whenever the overlay reopens for a new clock-out.
+  const [fixingDate, setFixingDate] = useState(false);
+  const [clockOutDate, setClockOutDate] = useState(() => localDateStr());
+  useEffect(() => {
+    if (show) {
+      setSubmitting(false);
+      setFixingDate(false);
+      setClockOutDate(localDateStr());
+    }
+  }, [show]);
   if (!show || !openEntry) return null;
+  const combineDateWithNowTime = (dateStr) => {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return new Date(`${dateStr}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`).toISOString();
+  };
+  const effectiveClockOut = fixingDate ? combineDateWithNowTime(clockOutDate) : new Date().toISOString();
   const previewHours = (() => {
-    let ms = new Date() - new Date(openEntry.clockIn);
+    let ms = new Date(effectiveClockOut) - new Date(openEntry.clockIn);
     if (openEntry.lunchStart && openEntry.lunchEnd) ms -= new Date(openEntry.lunchEnd) - new Date(openEntry.lunchStart);
     return Math.max(0, ms / 1000 / 60 / 60);
   })();
@@ -2847,7 +2866,25 @@ function ClockOutReviewOverlay({ show, openEntry, skippedLunch, mechanic, onConf
         <p className="text-sm text-center mb-5" style={{ color: COLORS.inkDim }}>{mechanic}</p>
         <div className="rounded-lg p-4 mb-5 space-y-2" style={{ background: COLORS.surfaceRaised }}>
           <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Clock in</span><span>{fmtTime(openEntry.clockIn)}</span></div>
-          <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Clock out</span><span>{fmtTime(new Date().toISOString())}</span></div>
+          <div className="flex justify-between items-center text-sm">
+            <span style={{ color: COLORS.inkDim }}>Clock out</span>
+            {fixingDate ? (
+              <input
+                type="date"
+                value={clockOutDate}
+                onChange={(e) => setClockOutDate(e.target.value)}
+                className="rounded-lg px-2 py-1 text-xs font-mono focus:outline-none focus:ring-2"
+                style={{ background: COLORS.surface, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+              />
+            ) : (
+              <span>{fmtDate(effectiveClockOut)}, {fmtTime(effectiveClockOut)}</span>
+            )}
+          </div>
+          {!fixingDate && (
+            <button type="button" onClick={() => setFixingDate(true)} className="text-xs underline" style={{ color: COLORS.accent }}>
+              Forgot to clock out yesterday or before? Fix the date
+            </button>
+          )}
           {openEntry.lunchStart && openEntry.lunchEnd && (
             <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Break</span><span>{fmtTime(openEntry.lunchStart)}–{fmtTime(openEntry.lunchEnd)}</span></div>
           )}
@@ -2869,7 +2906,7 @@ function ClockOutReviewOverlay({ show, openEntry, skippedLunch, mechanic, onConf
             onClick={async () => {
               setSubmitting(true);
               if (mechanic && signature) localStorage.setItem('savedSignature_' + mechanic, signature);
-              await onConfirm(signature);
+              await onConfirm(signature, fixingDate ? effectiveClockOut : null);
             }}
             disabled={!signature || submitting}
           >
@@ -2886,9 +2923,26 @@ function ProductionClockOutReviewOverlay({ show, shift, mechanic, unitTypes, onC
   const savedSignature = mechanic ? localStorage.getItem('savedSignature_' + mechanic) : null;
   const [signature, setSignature] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-  useEffect(() => { if (show) { setSubmitting(false); } }, [show]);
+  // Same as the mechanic clock-out overlay — someone who forgot to end
+  // their shift for a day or two can fix the DATE here, nothing else.
+  // Doesn't apply to a same-day machine switch, so it's hidden then.
+  const [fixingDate, setFixingDate] = useState(false);
+  const [clockOutDate, setClockOutDate] = useState(() => localDateStr());
+  useEffect(() => {
+    if (show) {
+      setSubmitting(false);
+      setFixingDate(false);
+      setClockOutDate(localDateStr());
+    }
+  }, [show]);
   if (!show || !shift) return null;
-  const previewHours = Math.max(0, (new Date() - new Date(shift.start)) / 1000 / 60 / 60);
+  const combineDateWithNowTime = (dateStr) => {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return new Date(`${dateStr}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`).toISOString();
+  };
+  const effectiveEnd = fixingDate && !isSwitch ? combineDateWithNowTime(clockOutDate) : new Date().toISOString();
+  const previewHours = Math.max(0, (new Date(effectiveEnd) - new Date(shift.start)) / 1000 / 60 / 60);
   const activeType = machineType(shift.machine, unitTypes);
   const extraHours = (shift.extraTasks || []).reduce((sum, t) => sum + (parseFloat(t.hours) || 0), 0);
   return (
@@ -2898,7 +2952,25 @@ function ProductionClockOutReviewOverlay({ show, shift, mechanic, unitTypes, onC
         <p className="text-sm text-center mb-5" style={{ color: COLORS.inkDim }}>{mechanic} — {shift.machine}</p>
         <div className="rounded-lg p-4 mb-5 space-y-2" style={{ background: COLORS.surfaceRaised }}>
           <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Start</span><span>{fmtTime(shift.start)}</span></div>
-          <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>End</span><span>{fmtTime(new Date().toISOString())}</span></div>
+          <div className="flex justify-between items-center text-sm">
+            <span style={{ color: COLORS.inkDim }}>End</span>
+            {fixingDate ? (
+              <input
+                type="date"
+                value={clockOutDate}
+                onChange={(e) => setClockOutDate(e.target.value)}
+                className="rounded-lg px-2 py-1 text-xs font-mono focus:outline-none focus:ring-2"
+                style={{ background: COLORS.surface, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+              />
+            ) : (
+              <span>{fmtDate(effectiveEnd)}, {fmtTime(effectiveEnd)}</span>
+            )}
+          </div>
+          {!isSwitch && !fixingDate && (
+            <button type="button" onClick={() => setFixingDate(true)} className="text-xs underline" style={{ color: COLORS.accent }}>
+              Forgot to clock out yesterday or before? Fix the date
+            </button>
+          )}
           {shift.block && (
             <div className="flex justify-between text-sm"><span style={{ color: COLORS.inkDim }}>Block</span><span>{shift.block}</span></div>
           )}
@@ -2926,7 +2998,7 @@ function ProductionClockOutReviewOverlay({ show, shift, mechanic, unitTypes, onC
             onClick={async () => {
               setSubmitting(true);
               if (mechanic && signature) localStorage.setItem('savedSignature_' + mechanic, signature);
-              await onConfirm(signature);
+              await onConfirm(signature, fixingDate && !isSwitch ? effectiveEnd : null);
             }}
             disabled={!signature || submitting}
           >
@@ -11968,8 +12040,14 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
     if (!time || !datePart) return null;
     return new Date(`${datePart}T${time}`).toISOString();
   };
-  const clockInDatePart = getLocalDatePart(shift.start);
-  const clockOutDatePart = getLocalDatePart(shift.end) || clockInDatePart;
+  // Date and time are edited separately — most fixes are just a wrong
+  // clock time, so keeping the date locked in place behind the scenes
+  // used to be safer. But that meant a shift with a genuinely wrong DATE
+  // (e.g. a clock-out that silently landed a day or two later — see the
+  // "looks wrong" flag on TimesheetEntryCard/ProductionShiftCard) could
+  // never actually be corrected here. Both are now editable.
+  const [clockInDate, setClockInDate] = useState(getLocalDatePart(shift.start));
+  const [clockOutDate, setClockOutDate] = useState(getLocalDatePart(shift.end) || getLocalDatePart(shift.start));
   const [clockInTime, setClockInTime] = useState(toLocalTime(shift.start));
   const [clockOutTime, setClockOutTime] = useState(toLocalTime(shift.end));
 
@@ -12007,11 +12085,21 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
       <div className="grid grid-cols-2 gap-3 mb-3">
         <label className="block">
           <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock in</span>
-          <input type="time" value={clockInTime} onChange={(e) => setClockInTime(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+          <div className="flex gap-1">
+            {isAdmin && (
+              <input type="date" value={clockInDate} onChange={(e) => setClockInDate(e.target.value)} className="w-1/2 rounded-lg px-2 py-2 text-xs font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            )}
+            <input type="time" value={clockInTime} onChange={(e) => setClockInTime(e.target.value)} className={isAdmin ? 'w-1/2 rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2' : 'w-full rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2'} style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+          </div>
         </label>
         <label className="block">
           <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock out</span>
-          <input type="time" value={clockOutTime} onChange={(e) => setClockOutTime(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+          <div className="flex gap-1">
+            {isAdmin && (
+              <input type="date" value={clockOutDate} onChange={(e) => setClockOutDate(e.target.value)} className="w-1/2 rounded-lg px-2 py-2 text-xs font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            )}
+            <input type="time" value={clockOutTime} onChange={(e) => setClockOutTime(e.target.value)} className={isAdmin ? 'w-1/2 rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2' : 'w-full rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2'} style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+          </div>
         </label>
       </div>
       {activeType !== 'fuel' && activeType !== 'winch' && (
@@ -12101,7 +12189,7 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
         </div>
       ) : (
         <div className="flex gap-2 flex-wrap">
-          <Btn onClick={() => onSave({ start: combineDateTime(clockInDatePart, clockInTime), end: combineDateTime(clockOutDatePart, clockOutTime), block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes })}>Save changes</Btn>
+          <Btn onClick={() => onSave({ start: combineDateTime(clockInDate, clockInTime), end: combineDateTime(clockOutDate, clockOutTime), block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes })}>Save changes</Btn>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
           <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>Delete shift</button>
         </div>
@@ -16009,8 +16097,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setShowProductionClockOutReview(true);
   };
 
-  const confirmProductionClockOut = async (signatureDataUrl) => {
-    await patchOpenProductionShift({ end: new Date().toISOString(), signature: signatureDataUrl, signedAt: new Date().toISOString() });
+  const confirmProductionClockOut = async (signatureDataUrl, endOverride) => {
+    await patchOpenProductionShift({ end: endOverride || new Date().toISOString(), signature: signatureDataUrl, signedAt: new Date().toISOString() });
     if (openProductionShift && TRACK_ELIGIBLE_TYPES.includes(machineType(openProductionShift.machine, unitTypes))) {
       await endMachineTrack('productionShift', openProductionShift.id);
     }
@@ -16303,10 +16391,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
   const [pendingClockOutSkippedLunch, setPendingClockOutSkippedLunch] = useState(null);
 
-  const clockOut = async (skippedLunch, signatureDataUrl) => {
+  const clockOut = async (skippedLunch, signatureDataUrl, clockOutOverride) => {
     if (!openEntry) return;
     await patchOneTimesheetEntry(openEntry.id, {
-      clockOut: new Date().toISOString(),
+      clockOut: clockOutOverride || new Date().toISOString(),
       skippedLunch: !!skippedLunch,
       signature: signatureDataUrl || null,
       signedAt: signatureDataUrl ? new Date().toISOString() : null,
@@ -18140,7 +18228,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             openEntry={openEntry}
             skippedLunch={pendingClockOutSkippedLunch}
             mechanic={currentMechanic}
-            onConfirm={(signature) => clockOut(pendingClockOutSkippedLunch, signature)}
+            onConfirm={(signature, clockOutOverride) => clockOut(pendingClockOutSkippedLunch, signature, clockOutOverride)}
             onCancel={() => setPendingClockOutSkippedLunch(null)}
           />
 
@@ -23918,8 +24006,13 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
     if (!time || !datePart) return null;
     return new Date(`${datePart}T${time}`).toISOString();
   };
-  const clockInDatePart = getLocalDatePart(entry.clockIn) || entry.date;
-  const clockOutDatePart = getLocalDatePart(entry.clockOut) || clockInDatePart;
+  // Date is now editable too (not just time) — a shift whose date itself
+  // got corrupted (e.g. a clock-out that silently landed a day or two
+  // later — see the "looks wrong" flag below) couldn't be fixed here
+  // otherwise. Saving also corrects entry.date to match, since that's
+  // the field everything else (grouping, filtering, sorting) keys off.
+  const [clockInDate, setClockInDate] = useState(getLocalDatePart(entry.clockIn) || entry.date);
+  const [clockOutDate, setClockOutDate] = useState(getLocalDatePart(entry.clockOut) || getLocalDatePart(entry.clockIn) || entry.date);
   const [clockInTime, setClockInTime] = useState(toLocalTime(entry.clockIn));
   const [clockOutTime, setClockOutTime] = useState(toLocalTime(entry.clockOut));
   const [lunchStartTime, setLunchStartTime] = useState(toLocalTime(entry.lunchStart));
@@ -23932,11 +24025,21 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
         <div className="grid grid-cols-2 gap-3 mb-3">
           <label className="block">
             <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock in</span>
-            <input type="time" value={clockInTime} onChange={(e) => setClockInTime(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            <div className="flex gap-1">
+              {isAdmin && (
+                <input type="date" value={clockInDate} onChange={(e) => setClockInDate(e.target.value)} className="w-1/2 rounded-lg px-2 py-2 text-xs font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+              )}
+              <input type="time" value={clockInTime} onChange={(e) => setClockInTime(e.target.value)} className={isAdmin ? 'w-1/2 rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2' : 'w-full rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2'} style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            </div>
           </label>
           <label className="block">
             <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock out</span>
-            <input type="time" value={clockOutTime} onChange={(e) => setClockOutTime(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            <div className="flex gap-1">
+              {isAdmin && (
+                <input type="date" value={clockOutDate} onChange={(e) => setClockOutDate(e.target.value)} className="w-1/2 rounded-lg px-2 py-2 text-xs font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+              )}
+              <input type="time" value={clockOutTime} onChange={(e) => setClockOutTime(e.target.value)} className={isAdmin ? 'w-1/2 rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2' : 'w-full rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2'} style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            </div>
           </label>
           <label className="block">
             <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Break start</span>
@@ -23961,10 +24064,11 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
             <Btn
               onClick={() =>
                 onSave({
-                  clockIn: combineDateTime(clockInDatePart, clockInTime),
-                  clockOut: combineDateTime(clockOutDatePart, clockOutTime),
-                  lunchStart: combineDateTime(clockInDatePart, lunchStartTime),
-                  lunchEnd: combineDateTime(clockInDatePart, lunchEndTime),
+                  date: clockInDate,
+                  clockIn: combineDateTime(clockInDate, clockInTime),
+                  clockOut: combineDateTime(clockOutDate, clockOutTime),
+                  lunchStart: combineDateTime(clockInDate, lunchStartTime),
+                  lunchEnd: combineDateTime(clockInDate, lunchEndTime),
                 })
               }
             >
