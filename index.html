@@ -16428,7 +16428,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const rows = [];
 
     if (entries.length > 0) {
-      const sorted = [...entries].sort((a, b) => (a.mechanic || '').localeCompare(b.mechanic || '') || a.date.localeCompare(b.date));
+      const sorted = [...entries].sort((a, b) => (a.mechanic || '').localeCompare(b.mechanic || '') || (a.date || '').localeCompare(b.date || ''));
       const byMechanic = {};
       sorted.forEach((e) => {
         const name = e.mechanic || 'Unknown';
@@ -18024,7 +18024,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const myEntries = timesheets
       .filter((t) => t.mechanic === currentMechanic)
       .slice()
-      .sort((a, b) => b.date.localeCompare(a.date) || (b.clockIn || '').localeCompare(a.clockIn || ''));
+      .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.clockIn || '').localeCompare(a.clockIn || ''));
     const onLunch = openEntry && openEntry.lunchStart && !openEntry.lunchEnd;
 
     return (
@@ -18283,7 +18283,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       if (!groupedByMechanic[e.mechanic]) groupedByMechanic[e.mechanic] = [];
       groupedByMechanic[e.mechanic].push(e);
     });
-    Object.values(groupedByMechanic).forEach((list) => list.sort((a, b) => b.date.localeCompare(a.date)));
+    Object.values(groupedByMechanic).forEach((list) => list.sort((a, b) => (b.date || '').localeCompare(a.date || '')));
     const mechanicGroups = Object.keys(groupedByMechanic).sort((a, b) => a.localeCompare(b));
 
     const clockedInNow = timesheets.filter((t) => !t.clockOut && t.date === todayStr());
@@ -18612,7 +18612,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       if (!groupedByMechanic[e.mechanic]) groupedByMechanic[e.mechanic] = [];
       groupedByMechanic[e.mechanic].push(e);
     });
-    Object.values(groupedByMechanic).forEach((list) => list.sort((a, b) => b.date.localeCompare(a.date)));
+    Object.values(groupedByMechanic).forEach((list) => list.sort((a, b) => (b.date || '').localeCompare(a.date || '')));
     const mechanicGroups = Object.keys(groupedByMechanic).sort((a, b) => a.localeCompare(b));
     // Combined per-person timeline — mechanic timesheet entries and
     // production shifts merged together and sorted by date, so a
@@ -23617,7 +23617,7 @@ function NewTemplateForm({ onSubmit, onCancel, initialName, initialItemsText, is
 }
 
 function WeekReviewTable({ entries, printMode }) {
-  const sorted = [...entries].sort((a, b) => (a.mechanic || '').localeCompare(b.mechanic || '') || a.date.localeCompare(b.date));
+  const sorted = [...entries].sort((a, b) => (a.mechanic || '').localeCompare(b.mechanic || '') || (a.date || '').localeCompare(b.date || ''));
   const groups = [];
   sorted.forEach((e) => {
     const last = groups[groups.length - 1];
