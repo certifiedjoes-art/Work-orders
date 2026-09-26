@@ -12122,11 +12122,11 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
       {activeType !== 'crawler' && activeType !== 'grader' && activeType !== 'winch' && activeType !== 'fuel' && (
         <div className="grid grid-cols-2 gap-3 mb-3">
           <label className="block">
-            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Start hours</span>
+            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Machine hours start</span>
             <TextInput type="number" value={startHours} onChange={(e) => setStartHours(e.target.value)} />
           </label>
           <label className="block">
-            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>End hours</span>
+            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Machine hours stop</span>
             <TextInput type="number" value={endHours} onChange={(e) => setEndHours(e.target.value)} />
           </label>
         </div>
@@ -17992,8 +17992,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               {activeType !== 'crawler' && activeType !== 'grader' && activeType !== 'winch' && activeType !== 'fuel' && (
                 <Section label="Machine hours">
                   <div className="grid grid-cols-2 gap-3">
-                    <TextInput type="number" inputMode="decimal" placeholder="Start" value={openProductionShift.startHours} onChange={(e) => patchOpenProductionShift({ startHours: e.target.value })} />
-                    <TextInput type="number" inputMode="decimal" placeholder="End" value={openProductionShift.endHours} onChange={(e) => patchOpenProductionShift({ endHours: e.target.value })} />
+                    <TextInput type="number" inputMode="decimal" placeholder="Machine hours start" value={openProductionShift.startHours} onChange={(e) => patchOpenProductionShift({ startHours: e.target.value })} />
+                    <TextInput type="number" inputMode="decimal" placeholder="Machine hours stop" value={openProductionShift.endHours} onChange={(e) => patchOpenProductionShift({ endHours: e.target.value })} />
                   </div>
                 </Section>
               )}
