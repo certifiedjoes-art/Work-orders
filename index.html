@@ -4909,6 +4909,17 @@ function localDateStr(d) {
   const date = d || new Date();
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
+// Same fix as localDateStr, for turning a saved ISO timestamp (a shift's
+// start/end) into the LOCAL calendar day it actually happened on. Doing
+// `iso.slice(0, 10)` instead reads the date straight out of the UTC-based
+// ISO string, which is one day ahead of local time for the second half of
+// every day in this timezone — so a shift that ended at 6pm local, well
+// before midnight, would silently get bucketed under tomorrow's date
+// everywhere shifts are grouped, filtered, or sorted by day.
+function localDateFromIso(iso) {
+  if (!iso) return '';
+  return localDateStr(new Date(iso));
+}
 function weekStartOf(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() - d.getDay());
@@ -16613,7 +16624,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         const extraHours = (s.extraTasks || []).reduce((sum, t) => sum + (parseFloat(t.hours) || 0), 0);
         rows.push([
           s.employee,
-          (s.end || s.start || '').slice(0, 10),
+          localDateFromIso(s.end || s.start),
           s.machine,
           s.block || '',
           fmtTime(s.start),
@@ -18387,7 +18398,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     weekEntries.forEach((e) => {
       weekTotalsByMechanic[e.mechanic] = (weekTotalsByMechanic[e.mechanic] || 0) + entryHours(e);
     });
-    const weekProductionShifts = productionShifts.filter((s) => s.end && s.end.slice(0, 10) >= viewedWeekStart && s.end.slice(0, 10) <= viewedWeekEnd);
+    const weekProductionShifts = productionShifts.filter((s) => s.end && localDateFromIso(s.end) >= viewedWeekStart && localDateFromIso(s.end) <= viewedWeekEnd);
     const weekApproved = isWeekApproved(viewedWeekStart);
 
     return (
@@ -18695,7 +18706,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     });
     const filteredProduction = productionShifts.filter((s) => {
       if (!s.end) return false;
-      const d = s.end.slice(0, 10);
+      const d = localDateFromIso(s.end);
       if (tsFilterMechanic && s.employee !== tsFilterMechanic) return false;
       if (tsFilterStart && d < tsFilterStart) return false;
       if (tsFilterEnd && d > tsFilterEnd) return false;
@@ -18724,7 +18735,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const combinedByPerson = {};
     combinedNames.forEach((name) => {
       const mechItems = (groupedByMechanic[name] || []).map((e) => ({ kind: 'mechanic', sortDate: e.date || '', data: e }));
-      const prodItems = filteredProduction.filter((s) => s.employee === name).map((s) => ({ kind: 'production', sortDate: (s.end || s.start || '').slice(0, 10), data: s }));
+      const prodItems = filteredProduction.filter((s) => s.employee === name).map((s) => ({ kind: 'production', sortDate: localDateFromIso(s.end || s.start), data: s }));
       combinedByPerson[name] = [...mechItems, ...prodItems].sort((a, b) => (b.sortDate || '').localeCompare(a.sortDate || ''));
     });
     const clockedInNow = timesheets.filter((t) => !t.clockOut && t.date === todayStr());
@@ -18750,7 +18761,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     // tracked separately and never folded into the hours total, since
     // they're for billing only. Fuel deliveries don't show a "production"
     // number here at all — that's what the Fuel Log section is for.
-    const weekProductionShifts = productionShifts.filter((s) => s.end && s.end.slice(0, 10) >= viewedWeekStart && s.end.slice(0, 10) <= viewedWeekEnd);
+    const weekProductionShifts = productionShifts.filter((s) => s.end && localDateFromIso(s.end) >= viewedWeekStart && localDateFromIso(s.end) <= viewedWeekEnd);
     const productionWeekByPerson = {};
     weekProductionShifts.forEach((s) => {
       if (!productionWeekByPerson[s.employee]) {
@@ -18789,7 +18800,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       Object.entries(s.fuelLog).forEach(([receivingUnit, amounts]) => {
         const liters = (amounts || []).reduce((sum, v) => sum + (parseFloat(v) || 0), 0);
         if (liters > 0) {
-          fuelDeliveries.push({ date: (s.end || s.start || '').slice(0, 10), truck: s.machine, receivingUnit, liters });
+          fuelDeliveries.push({ date: localDateFromIso(s.end || s.start), truck: s.machine, receivingUnit, liters });
         }
       });
     });
@@ -23747,7 +23758,7 @@ function WeekReviewTable({ entries, productionEntries, printMode }) {
   const productionRows = (productionEntries || []).map((s) => ({
     id: s.id,
     person: s.employee,
-    date: (s.end || s.start || '').slice(0, 10),
+    date: localDateFromIso(s.end || s.start),
     clockIn: s.start,
     clockOut: s.end,
     breakLabel: '—',
