@@ -18387,6 +18387,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     weekEntries.forEach((e) => {
       weekTotalsByMechanic[e.mechanic] = (weekTotalsByMechanic[e.mechanic] || 0) + entryHours(e);
     });
+    const weekProductionShifts = productionShifts.filter((s) => s.end && s.end.slice(0, 10) >= viewedWeekStart && s.end.slice(0, 10) <= viewedWeekEnd);
     const weekApproved = isWeekApproved(viewedWeekStart);
 
     return (
@@ -18466,22 +18467,29 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 <Btn onClick={() => approveWeek(viewedWeekStart)} disabled={Object.keys(weekTotalsByMechanic).length === 0}>
                   Approve this week
                 </Btn>
-                <Btn variant="ghost" onClick={() => setShowWeekTable((s) => !s)} disabled={weekEntries.length === 0}>
+                <Btn variant="ghost" onClick={() => setShowWeekTable((s) => !s)} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
                   {showWeekTable ? '✕ Hide table' : '👁️ View here'}
                 </Btn>
-                <Btn variant="ghost" onClick={() => exportTimesheets(weekEntries, [], 'week-review', viewedWeekStart, weekEndOf(viewedWeekStart))} disabled={weekEntries.length === 0}>
+                <Btn variant="ghost" onClick={() => exportTimesheets(weekEntries, weekProductionShifts, 'week-review', viewedWeekStart, weekEndOf(viewedWeekStart))} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
                   📊 Open as spreadsheet
                 </Btn>
-                <Btn variant="ghost" onClick={() => window.print()} disabled={weekEntries.length === 0}>
+                <Btn variant="ghost" onClick={() => window.print()} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
                   🖨️ Print
                 </Btn>
               </div>
             )}
             {showWeekTable && (
               <React.Fragment>
-                <WeekReviewTable entries={weekEntries} />
+                <WeekReviewTable
+                  entries={weekEntries}
+                  productionEntries={tsFilterMechanic ? weekProductionShifts.filter((s) => s.employee === tsFilterMechanic) : weekProductionShifts}
+                />
                 <PrintPortal>
-                  <WeekReviewTable entries={tsFilterMechanic ? weekEntries.filter((e) => e.mechanic === tsFilterMechanic) : weekEntries} printMode />
+                  <WeekReviewTable
+                    entries={tsFilterMechanic ? weekEntries.filter((e) => e.mechanic === tsFilterMechanic) : weekEntries}
+                    productionEntries={tsFilterMechanic ? weekProductionShifts.filter((s) => s.employee === tsFilterMechanic) : weekProductionShifts}
+                    printMode
+                  />
                 </PrintPortal>
               </React.Fragment>
             )}
@@ -19436,14 +19444,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 <Btn onClick={() => approveWeek(viewedWeekStart)} disabled={weekGroups.length === 0}>
                   Approve this week
                 </Btn>
-                <Btn variant="ghost" onClick={() => setShowWeekTable((s) => !s)} disabled={weekEntries.length === 0}>
+                <Btn variant="ghost" onClick={() => setShowWeekTable((s) => !s)} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
                   {showWeekTable ? '✕ Hide table' : '👁️ View here'}
                 </Btn>
                 <Btn variant="ghost" onClick={() => exportTimesheets(weekEntries, weekProductionShifts, 'week-review', viewedWeekStart, weekEndOf(viewedWeekStart))} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
                   📊 Open as spreadsheet
                 </Btn>
                 {isAdmin && (
-                  <Btn variant="ghost" onClick={() => window.print()} disabled={weekEntries.length === 0}>
+                  <Btn variant="ghost" onClick={() => window.print()} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
                     🖨️ Print
                   </Btn>
                 )}
@@ -19451,10 +19459,17 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             )}
             {showWeekTable && (
               <React.Fragment>
-                <WeekReviewTable entries={weekEntries} />
+                <WeekReviewTable
+                  entries={weekEntries}
+                  productionEntries={tsFilterMechanic ? weekProductionShifts.filter((s) => s.employee === tsFilterMechanic) : weekProductionShifts}
+                />
                 {isAdmin && (
                   <PrintPortal>
-                    <WeekReviewTable entries={tsFilterMechanic ? weekEntries.filter((e) => e.mechanic === tsFilterMechanic) : weekEntries} printMode />
+                    <WeekReviewTable
+                      entries={tsFilterMechanic ? weekEntries.filter((e) => e.mechanic === tsFilterMechanic) : weekEntries}
+                      productionEntries={tsFilterMechanic ? weekProductionShifts.filter((s) => s.employee === tsFilterMechanic) : weekProductionShifts}
+                      printMode
+                    />
                   </PrintPortal>
                 )}
               </React.Fragment>
@@ -23704,15 +23719,45 @@ function NewTemplateForm({ onSubmit, onCancel, initialName, initialItemsText, is
   );
 }
 
-function WeekReviewTable({ entries, printMode }) {
-  const sorted = [...entries].sort((a, b) => (a.mechanic || '').localeCompare(b.mechanic || '') || (a.date || '').localeCompare(b.date || ''));
+function WeekReviewTable({ entries, productionEntries, printMode }) {
+  // Mechanic timesheet entries and production shifts have different
+  // shapes (clockIn/clockOut vs. start/end, jobs vs. machine+block), so
+  // both get normalized into one common row shape here before sorting —
+  // otherwise this table only ever showed mechanics, never production
+  // employees' actual day-by-day shifts (just their weekly total showed
+  // up elsewhere).
+  const mechanicRows = (entries || []).map((e) => ({
+    id: e.id,
+    person: e.mechanic,
+    date: e.date,
+    clockIn: e.clockIn,
+    clockOut: e.clockOut,
+    breakLabel: !e.skippedLunch && e.lunchStart && e.lunchEnd ? `${fmtTime(e.lunchStart)}–${fmtTime(e.lunchEnd)}` : '—',
+    workedThruBreak: e.skippedLunch ? 'Yes' : 'No',
+    paidHours: entryHours(e),
+    signed: !!e.signature,
+    detail: (e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`).join(' | ') || '—',
+  }));
+  const productionRows = (productionEntries || []).map((s) => ({
+    id: s.id,
+    person: s.employee,
+    date: (s.end || s.start || '').slice(0, 10),
+    clockIn: s.start,
+    clockOut: s.end,
+    breakLabel: '—',
+    workedThruBreak: '—',
+    paidHours: s.end ? Math.max(0, (new Date(s.end) - new Date(s.start)) / 1000 / 60 / 60) : 0,
+    signed: !!s.signature,
+    detail: s.machine + (s.block ? ` — Block ${s.block}` : ''),
+  }));
+  const sorted = [...mechanicRows, ...productionRows].sort((a, b) => (a.person || '').localeCompare(b.person || '') || (a.date || '').localeCompare(b.date || ''));
   const groups = [];
   sorted.forEach((e) => {
     const last = groups[groups.length - 1];
-    if (last && last.mechanic === e.mechanic) {
+    if (last && last.person === e.person) {
       last.entries.push(e);
     } else {
-      groups.push({ mechanic: e.mechanic, entries: [e] });
+      groups.push({ person: e.person, entries: [e] });
     }
   });
 
@@ -23740,15 +23785,15 @@ function WeekReviewTable({ entries, printMode }) {
             <th style={th}>Worked thru break</th>
             <th style={th}>Paid hrs</th>
             <th style={th}>Signed</th>
-            <th style={th}>Jobs</th>
+            <th style={th}>Jobs / Machine</th>
           </tr>
         </thead>
         <tbody>
           {groups.map((g) => (
-            <React.Fragment key={g.mechanic}>
+            <React.Fragment key={g.person}>
               <tr>
                 <td colSpan={8} style={{ padding: '8px 12px', fontWeight: 700, color: pal.accent, background: pal.surface, borderBottom: `1px solid ${pal.line}` }}>
-                  {g.mechanic}
+                  {g.person}
                 </td>
               </tr>
               {g.entries.map((e) => (
@@ -23756,11 +23801,11 @@ function WeekReviewTable({ entries, printMode }) {
                   <td style={td}>{fmtDate(e.date)}</td>
                   <td style={td}>{fmtTime(e.clockIn)}</td>
                   <td style={td}>{e.clockOut ? fmtTime(e.clockOut) : '—'}</td>
-                  <td style={td}>{!e.skippedLunch && e.lunchStart && e.lunchEnd ? `${fmtTime(e.lunchStart)}–${fmtTime(e.lunchEnd)}` : '—'}</td>
-                  <td style={td}>{e.skippedLunch ? 'Yes' : 'No'}</td>
-                  <td style={{ ...td, color: pal.accent, fontWeight: 700 }}>{fmtHoursDecimal(entryHours(e))}</td>
-                  <td style={{ ...td, color: e.signature ? pal.done : pal.line }}>{e.signature ? '✓' : '—'}</td>
-                  <td style={td}>{(e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`).join(' | ') || '—'}</td>
+                  <td style={td}>{e.breakLabel}</td>
+                  <td style={td}>{e.workedThruBreak}</td>
+                  <td style={{ ...td, color: pal.accent, fontWeight: 700 }}>{fmtHoursDecimal(e.paidHours)}</td>
+                  <td style={{ ...td, color: e.signed ? pal.done : pal.line }}>{e.signed ? '✓' : '—'}</td>
+                  <td style={td}>{e.detail}</td>
                 </tr>
               ))}
             </React.Fragment>
