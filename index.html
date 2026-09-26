@@ -23726,6 +23726,12 @@ function WeekReviewTable({ entries, productionEntries, printMode }) {
   // otherwise this table only ever showed mechanics, never production
   // employees' actual day-by-day shifts (just their weekly total showed
   // up elsewhere).
+  // Same person can legitimately show up twice on the same calendar day —
+  // e.g. a mechanic timesheet entry AND a separate production shift, if
+  // someone split their day between roles, or two distinct production
+  // shifts (a double shift). That's not a duplicate, but two rows with the
+  // same date sitting right next to each other look like one at a glance,
+  // so each row is tagged with where it came from to make that obvious.
   const mechanicRows = (entries || []).map((e) => ({
     id: e.id,
     person: e.mechanic,
@@ -23736,7 +23742,7 @@ function WeekReviewTable({ entries, productionEntries, printMode }) {
     workedThruBreak: e.skippedLunch ? 'Yes' : 'No',
     paidHours: entryHours(e),
     signed: !!e.signature,
-    detail: (e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`).join(' | ') || '—',
+    detail: '🔧 ' + ((e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`).join(' | ') || 'Mechanic'),
   }));
   const productionRows = (productionEntries || []).map((s) => ({
     id: s.id,
@@ -23748,7 +23754,7 @@ function WeekReviewTable({ entries, productionEntries, printMode }) {
     workedThruBreak: '—',
     paidHours: s.end ? Math.max(0, (new Date(s.end) - new Date(s.start)) / 1000 / 60 / 60) : 0,
     signed: !!s.signature,
-    detail: s.machine + (s.block ? ` — Block ${s.block}` : ''),
+    detail: '🌲 ' + (s.machine + (s.block ? ` — Block ${s.block}` : '')),
   }));
   const sorted = [...mechanicRows, ...productionRows].sort((a, b) => (a.person || '').localeCompare(b.person || '') || (a.date || '').localeCompare(b.date || ''));
   const groups = [];
