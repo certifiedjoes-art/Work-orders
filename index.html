@@ -13681,7 +13681,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             localStorage.setItem('deviceMechanic', name);
             addDeviceUser(name);
             setCurrentMechanic(name);
-            setScreen(landingScreenFor(name));
+            setScreen(await freshLandingScreenFor(name));
             checkAndPromptEmail(name);
             checkAndPromptPush(name);
             return;
@@ -13696,7 +13696,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           localStorage.setItem('deviceMechanic', name);
           addDeviceUser(name);
           setCurrentMechanic(name);
-          setScreen(landingScreenFor(name));
+          setScreen(await freshLandingScreenFor(name));
           checkAndPromptEmail(name);
           checkAndPromptPush(name);
           return;
@@ -13731,7 +13731,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         setPinInput('');
         setPinError('');
         setCurrentMechanic(mechanic);
-        setScreen(landingScreenFor(mechanic));
+        setScreen(await freshLandingScreenFor(mechanic));
         checkAndPromptEmail(mechanic);
         checkAndPromptPush(mechanic);
         return;
@@ -13745,7 +13745,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         setPinInput('');
         setPinError('');
         setCurrentMechanic(mechanic);
-        setScreen(landingScreenFor(mechanic));
+        setScreen(await freshLandingScreenFor(mechanic));
         maybeOfferBiometric(mechanic);
         checkAndPromptEmail(mechanic);
         checkAndPromptPush(mechanic);
@@ -14499,6 +14499,37 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const landingScreenFor = (name) => {
     if (admins.includes(name)) return 'admin';
     return jobTypeFor(name) === 'production' ? 'shift' : 'dashboard';
+  };
+  // Same fresh-page-load risk as checkAndPromptEmail above, but higher
+  // stakes: right after a fresh login (new device, or cache cleared),
+  // unitAssignments/unitTypes may still be empty because their Firebase
+  // listeners haven't delivered a first snapshot yet. jobTypeFor() falls
+  // back to 'mechanic' whenever it can't see a real unit assignment — a
+  // safe default in general, but it means a production employee logging in
+  // during that narrow window gets routed to the mechanic dashboard instead
+  // of their Shift screen, and if they clock in there, the wrong-typed
+  // timesheet entry that creates is permanent (job type is only decided at
+  // the moment of clocking in, never re-checked afterward). A direct,
+  // current read right before routing avoids that.
+  const freshLandingScreenFor = async (name) => {
+    if (admins.includes(name)) return 'admin';
+    try {
+      const [uaSnap, utSnap] = await Promise.all([
+        firebase.database().ref('unitAssignments').once('value'),
+        firebase.database().ref('unitTypes').once('value'),
+      ]);
+      const ua = uaSnap.val() || {};
+      const ut = utSnap.val() || {};
+      setUnitAssignments(ua);
+      setUnitTypes(ut);
+      cacheSet('unitAssignments', ua);
+      cacheSet('unitTypes', ut);
+      const unit = ua[slugForMechanic(name)] || '';
+      return MACHINE_TYPE_LABELS[machineType(unit, ut)] ? 'shift' : 'dashboard';
+    } catch (e) {
+      // Offline — nothing fresher available than what's already loaded.
+      return jobTypeFor(name) === 'production' ? 'shift' : 'dashboard';
+    }
   };
 
   // Groups the crew by job/machine type for any dropdown that needs to show
