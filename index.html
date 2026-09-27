@@ -12046,6 +12046,14 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
   const [topPileCount, setTopPileCount] = useState(shift.topPileCount || '');
   const [fuelLog, setFuelLog] = useState(shift.fuelLog || {});
   const [notes, setNotes] = useState(shift.notes || '');
+  // Extra/billable tasks — this edit card is admin's only way to see or
+  // fix these once a shift is closed out, since the operator's own
+  // ExtraTasksEditor only ever shows up on their CURRENTLY open shift.
+  // Without this, an extra task logged by mistake (or one that needs a
+  // correction) was invisible here and impossible to remove.
+  const [extraTasks, setExtraTasks] = useState(shift.extraTasks || []);
+  const [newTaskDesc, setNewTaskDesc] = useState('');
+  const [newTaskHours, setNewTaskHours] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const activeType = machineType(shift.machine, unitTypes);
   // Clock in/out — same time-only-input approach as the mechanic
@@ -12111,23 +12119,30 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
           <PrintableProductionShift shift={shift} unitTypes={unitTypes} />
         </PrintPortal>
       )}
-      <div className="grid grid-cols-2 gap-3 mb-3">
+      {/* For admins, who also get a date picker on each row, this stacks
+          Clock in above Clock out full-width instead of squeezing both
+          into a 2-column grid — a date input needs real room to show
+          "Sep 26, 2026" without truncating, and halving it again to fit
+          next to the time input made it unreadably cramped. Non-admins
+          (no date field, just a time) keep the original side-by-side
+          layout since there's nothing to squeeze there. */}
+      <div className={isAdmin ? 'space-y-3 mb-3' : 'grid grid-cols-2 gap-3 mb-3'}>
         <label className="block">
           <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock in</span>
-          <div className="flex gap-1">
+          <div className={isAdmin ? 'grid grid-cols-2 gap-2' : 'flex gap-1'}>
             {isAdmin && (
-              <input type="date" value={clockInDate} onChange={(e) => setClockInDate(e.target.value)} className="w-1/2 rounded-lg px-2 py-2 text-xs font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+              <input type="date" value={clockInDate} onChange={(e) => setClockInDate(e.target.value)} className="rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
             )}
-            <input type="time" value={clockInTime} onChange={(e) => setClockInTime(e.target.value)} className={isAdmin ? 'w-1/2 rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2' : 'w-full rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2'} style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            <input type="time" value={clockInTime} onChange={(e) => setClockInTime(e.target.value)} className={isAdmin ? 'rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2' : 'w-full rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2'} style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
           </div>
         </label>
         <label className="block">
           <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock out</span>
-          <div className="flex gap-1">
+          <div className={isAdmin ? 'grid grid-cols-2 gap-2' : 'flex gap-1'}>
             {isAdmin && (
-              <input type="date" value={clockOutDate} onChange={(e) => setClockOutDate(e.target.value)} className="w-1/2 rounded-lg px-2 py-2 text-xs font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+              <input type="date" value={clockOutDate} onChange={(e) => setClockOutDate(e.target.value)} className="rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
             )}
-            <input type="time" value={clockOutTime} onChange={(e) => setClockOutTime(e.target.value)} className={isAdmin ? 'w-1/2 rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2' : 'w-full rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2'} style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            <input type="time" value={clockOutTime} onChange={(e) => setClockOutTime(e.target.value)} className={isAdmin ? 'rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2' : 'w-full rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2'} style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
           </div>
         </label>
       </div>
@@ -12208,6 +12223,39 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
         <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Notes</span>
         <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
       </label>
+      <div className="mb-3">
+        <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Extra tasks (billable)</span>
+        {extraTasks.length > 0 && (
+          <div className="space-y-2 mb-2">
+            {extraTasks.map((t) => (
+              <div key={t.id} className="rounded-lg p-3 flex items-center justify-between" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+                <span className="text-sm">{t.desc}</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm" style={{ color: COLORS.inkDim }}>{t.hours}h</span>
+                  <button onClick={() => setExtraTasks(extraTasks.filter((x) => x.id !== t.id))} style={{ color: '#E07A5F' }}>✕</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+          <TextInput value={newTaskDesc} onChange={(e) => setNewTaskDesc(e.target.value)} placeholder="Job/crossing # or description" className="mb-2" />
+          <div className="flex gap-2">
+            <TextInput type="number" inputMode="decimal" value={newTaskHours} onChange={(e) => setNewTaskHours(e.target.value)} placeholder="Hours" className="flex-1" />
+            <Btn
+              onClick={() => {
+                if (!newTaskDesc.trim() || !newTaskHours) return;
+                setExtraTasks([...extraTasks, { id: uid(), desc: newTaskDesc.trim(), hours: parseFloat(newTaskHours) }]);
+                setNewTaskDesc('');
+                setNewTaskHours('');
+              }}
+              disabled={!newTaskDesc.trim() || !newTaskHours}
+            >
+              Add
+            </Btn>
+          </div>
+        </div>
+      </div>
       {confirmDelete ? (
         <div className="rounded-lg p-3 mb-3" style={{ background: COLORS.surfaceRaised }}>
           <p className="text-sm mb-2" style={{ color: COLORS.inkDim }}>Delete this whole shift? This can't be undone.</p>
@@ -12218,7 +12266,7 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
         </div>
       ) : (
         <div className="flex gap-2 flex-wrap">
-          <Btn onClick={() => onSave({ start: combineDateTime(clockInDate, clockInTime), end: combineDateTime(clockOutDate, clockOutTime), block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes })}>Save changes</Btn>
+          <Btn onClick={() => onSave({ start: combineDateTime(clockInDate, clockInTime), end: combineDateTime(clockOutDate, clockOutTime), block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes, extraTasks })}>Save changes</Btn>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
           <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>Delete shift</button>
         </div>
@@ -24102,6 +24150,11 @@ function ProductionShiftCard({ shift, unitTypes, isAdmin, onEdit, onConfirmHours
           ⛽ {fuelLiters} L across {Object.keys(shift.fuelLog).length} unit{Object.keys(shift.fuelLog).length > 1 ? 's' : ''}
         </p>
       )}
+      {shift.extraTasks && shift.extraTasks.length > 0 && (
+        <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>
+          💵 Extra (billable): {shift.extraTasks.map((t) => `${t.desc} — ${t.hours}h`).join(', ')}
+        </p>
+      )}
       {shift.downtimeLog && shift.downtimeLog.length > 0 && (() => {
         const downtimeHours = shift.downtimeLog.reduce((sum, d) => sum + (d.start && d.end ? (new Date(d.end) - new Date(d.start)) / 1000 / 60 / 60 : 0), 0);
         return (
@@ -24189,33 +24242,41 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
     return (
       <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
         <p className="font-display font-semibold mb-4">{fmtDate(entry.date)}</p>
-        <div className="grid grid-cols-2 gap-3 mb-3">
+        {/* Stacked full-width for admins (who also get a date picker on
+            each row) instead of squeezed into a 2-column grid — a date
+            input needs real room to show "Sep 26, 2026" without
+            truncating, and halving it again to fit next to the time input
+            made it unreadably cramped. Non-admins (no date field, just a
+            time) keep the compact side-by-side layout. */}
+        <div className={isAdmin ? 'space-y-3 mb-3' : 'grid grid-cols-2 gap-3 mb-3'}>
           <label className="block">
             <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock in</span>
-            <div className="flex gap-1">
+            <div className={isAdmin ? 'grid grid-cols-2 gap-2' : 'flex gap-1'}>
               {isAdmin && (
-                <input type="date" value={clockInDate} onChange={(e) => setClockInDate(e.target.value)} className="w-1/2 rounded-lg px-2 py-2 text-xs font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+                <input type="date" value={clockInDate} onChange={(e) => setClockInDate(e.target.value)} className="rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
               )}
-              <input type="time" value={clockInTime} onChange={(e) => setClockInTime(e.target.value)} className={isAdmin ? 'w-1/2 rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2' : 'w-full rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2'} style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+              <input type="time" value={clockInTime} onChange={(e) => setClockInTime(e.target.value)} className={isAdmin ? 'rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2' : 'w-full rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2'} style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
             </div>
           </label>
           <label className="block">
             <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Clock out</span>
-            <div className="flex gap-1">
+            <div className={isAdmin ? 'grid grid-cols-2 gap-2' : 'flex gap-1'}>
               {isAdmin && (
-                <input type="date" value={clockOutDate} onChange={(e) => setClockOutDate(e.target.value)} className="w-1/2 rounded-lg px-2 py-2 text-xs font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+                <input type="date" value={clockOutDate} onChange={(e) => setClockOutDate(e.target.value)} className="rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
               )}
-              <input type="time" value={clockOutTime} onChange={(e) => setClockOutTime(e.target.value)} className={isAdmin ? 'w-1/2 rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2' : 'w-full rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2'} style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+              <input type="time" value={clockOutTime} onChange={(e) => setClockOutTime(e.target.value)} className={isAdmin ? 'rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2' : 'w-full rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2'} style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
             </div>
           </label>
-          <label className="block">
-            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Break start</span>
-            <input type="time" value={lunchStartTime} onChange={(e) => setLunchStartTime(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
-          </label>
-          <label className="block">
-            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Break end</span>
-            <input type="time" value={lunchEndTime} onChange={(e) => setLunchEndTime(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
-          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Break start</span>
+              <input type="time" value={lunchStartTime} onChange={(e) => setLunchStartTime(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            </label>
+            <label className="block">
+              <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Break end</span>
+              <input type="time" value={lunchEndTime} onChange={(e) => setLunchEndTime(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            </label>
+          </div>
         </div>
         <TimesheetJobsEditor entry={entry} onAdd={onAddJob} onRemove={onRemoveJob} />
         {confirmDelete ? (
