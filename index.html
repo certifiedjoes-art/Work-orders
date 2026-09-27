@@ -18697,12 +18697,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             <p className="text-sm mb-8" style={{ color: COLORS.line }}>No shifts in this range.</p>
           ) : (
             <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-              {Object.entries(totalsByMechanic).map(([name, hours]) => (
-                <div key={name} className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-                  <span className="font-display font-semibold">{name}</span>
-                  <span className="font-mono">{fmtHours(hours)}</span>
-                </div>
-              ))}
+              {Object.entries(totalsByMechanic).map(([name, hours]) => {
+                // Same "undefined" data-integrity guard as the combined
+                // admin totals below — an entry saved with no mechanic name
+                // groups under the literal string "undefined" otherwise.
+                const isMissing = !name || name === 'undefined';
+                return (
+                  <div key={name || '__missing__'} className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                    <span className="font-display font-semibold" style={isMissing ? { color: '#E07A5F' } : undefined}>{isMissing ? '⚠ (missing name — corrupted entry)' : name}</span>
+                    <span className="font-mono">{fmtHours(hours)}</span>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -19636,25 +19642,30 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             <p className="text-sm mb-8" style={{ color: COLORS.line }}>No shifts in this range.</p>
           ) : (
             <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-              {Object.entries(totalsByMechanic).map(([name, hours]) => (
-                <div key={name} className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-                  <span className="font-display font-semibold">{name}</span>
-                  <span className="font-mono">{fmtHours(hours)}</span>
-                </div>
-              ))}
-              {(() => {
-                const prodTotals = {};
-                filteredProduction.forEach((s) => {
-                  const hrs = s.start && s.end ? (new Date(s.end) - new Date(s.start)) / 1000 / 60 / 60 : 0;
-                  prodTotals[s.employee] = (prodTotals[s.employee] || 0) + hrs;
-                });
-                return Object.entries(prodTotals).map(([name, hours]) => (
-                  <div key={name} className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-                    <span className="font-display font-semibold">{name}</span>
-                    <span className="font-mono">{fmtHours(hours)}</span>
+              {/* One row per person, mechanic + production hours combined —
+                  previously these were two separate un-merged lists, so
+                  anyone with both mechanic and production shifts (or who'd
+                  briefly been mis-typed as the wrong one) showed up twice
+                  with two different partial totals instead of one real
+                  total. A blank/missing name (a corrupted entry with no
+                  mechanic/employee field saved) is called out explicitly
+                  instead of silently showing as "undefined", so it's
+                  obviously something to go track down rather than a real
+                  person. */}
+              {combinedNames.map((name) => {
+                // Object keys are always strings, so a timesheet/shift saved
+                // with no mechanic/employee name at all doesn't disappear —
+                // it groups under the literal string "undefined" (from
+                // JS coercing an undefined key), which is what showed up as
+                // a bare "undefined" row here instead of a real person.
+                const isMissing = !name || name === 'undefined';
+                return (
+                  <div key={name || '__missing__'} className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+                    <span className="font-display font-semibold" style={isMissing ? { color: '#E07A5F' } : undefined}>{isMissing ? '⚠ (missing name — corrupted entry)' : name}</span>
+                    <span className="font-mono">{fmtHours((totalsByMechanic[name] || 0) + (productionHoursByEmployee[name] || 0))}</span>
                   </div>
-                ));
-              })()}
+                );
+              })}
             </div>
           )}
 
