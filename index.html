@@ -6513,9 +6513,26 @@ function ExtraTasksEditor({ shift, onAdd, onRemove }) {
   );
 }
 
-function DowntimeButton({ onLog }) {
+// Mirrors the mechanic's Start/End Break toggle instead of just firing a
+// one-shot report: hitting "Report downtime" starts a clock (same as
+// starting a break), and the machine stays flagged down — with a running
+// "down since" timer — until the operator taps "Back up" to close it out.
+// That gives an actual downtime DURATION instead of just a timestamped
+// note, which is what actually matters for tracking machine reliability.
+function DowntimeButton({ activeDowntime, onStart, onEnd, actionPending }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
+
+  if (activeDowntime) {
+    return (
+      <div className="mb-2 rounded-lg p-4" style={{ background: COLORS.surface, border: `2px solid #C1521A` }}>
+        <p className="text-sm font-semibold mb-1" style={{ color: '#C1521A' }}>⚠ Down since {fmtTime(activeDowntime.start)}</p>
+        <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>{activeDowntime.reason}</p>
+        <Btn onClick={onEnd} disabled={actionPending}>{actionPending ? '…' : '✅ Back up'}</Btn>
+      </div>
+    );
+  }
+
   return (
     <div className="mb-2">
       {!open ? (
@@ -6524,7 +6541,7 @@ function DowntimeButton({ onLog }) {
         </button>
       ) : (
         <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `2px solid #C1521A` }}>
-          <p className="text-sm mb-2" style={{ color: COLORS.inkDim }}>This creates a new work order on the board right away.</p>
+          <p className="text-sm mb-2" style={{ color: COLORS.inkDim }}>This creates a new work order on the board right away, and keeps the machine flagged down until you tap "Back up".</p>
           <textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -6533,9 +6550,8 @@ function DowntimeButton({ onLog }) {
             className="w-full rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 mb-3"
             style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
           />
-          <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>Photo attachment and push alerts to mechanics are coming once Storage/Messaging are wired in — for now this creates the work order and logs the report.</p>
           <div className="flex gap-2">
-            <Btn onClick={() => { onLog(reason); setReason(''); setOpen(false); }} disabled={!reason.trim()}>Send report</Btn>
+            <Btn onClick={() => { onStart(reason); setReason(''); setOpen(false); }} disabled={!reason.trim() || actionPending}>{actionPending ? '…' : 'Send report'}</Btn>
             <Btn variant="ghost" onClick={() => { setOpen(false); setReason(''); }}>Cancel</Btn>
           </div>
         </div>
@@ -11908,7 +11924,9 @@ function PrintableProductionShift({ shift, unitTypes }) {
         <div style={{ marginBottom: 12 }}>
           <p style={{ fontSize: 11, fontWeight: 600, color: '#555', marginBottom: 4 }}>Downtime</p>
           {shift.downtimeLog.map((d, i) => (
-            <p key={i} style={{ fontSize: 12 }}>{fmtTime(d.time)} — {d.reason || d.note || ''}</p>
+            <p key={i} style={{ fontSize: 12 }}>
+              {fmtTime(d.start || d.time)} – {d.end ? fmtTime(d.end) : 'ongoing'} — {d.reason || d.note || ''}
+            </p>
           ))}
         </div>
       )}
@@ -16197,29 +16215,50 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await patchOpenProductionShift({ extraTasks: (openProductionShift.extraTasks || []).filter((t) => t.id !== taskId) });
   };
 
-  const logDowntime = async (reason) => {
+  const [downtimeActionPending, setDowntimeActionPending] = useState(false);
+  const startDowntime = async (reason) => {
     if (!openProductionShift || !reason.trim()) return;
-    const entry = { id: uid(), reason: reason.trim(), ts: new Date().toISOString() };
-    await patchOpenProductionShift({ downtimeLog: [...(openProductionShift.downtimeLog || []), entry] });
-    // Also creates a real Open work order on the board, tagged to the
-    // machine, so it doesn't just sit as a log entry nobody sees.
-    if (!units.includes(openProductionShift.machine)) {
-      await persistMeta(mechanics, [...units, openProductionShift.machine]);
+    setDowntimeActionPending(true);
+    try {
+      const entry = { id: uid(), reason: reason.trim(), start: new Date().toISOString(), end: null };
+      await patchOpenProductionShift({ downtimeLog: [...(openProductionShift.downtimeLog || []), entry] });
+      // Also creates a real Open work order on the board, tagged to the
+      // machine, so it doesn't just sit as a log entry nobody sees.
+      if (!units.includes(openProductionShift.machine)) {
+        await persistMeta(mechanics, [...units, openProductionShift.machine]);
+      }
+      const order = {
+        id: uid(),
+        unit: openProductionShift.machine,
+        description: await buildLocalizedField('⚠ Downtime: ' + reason.trim(), lang),
+        workedOnBy: [],
+        hours: '',
+        dueDate: '',
+        dateCreated: localDateStr(),
+        status: 'Open',
+        notes: [],
+        createdBy: currentMechanic,
+        media: [],
+      };
+      await saveOneOrder(order);
+    } finally {
+      setDowntimeActionPending(false);
     }
-    const order = {
-      id: uid(),
-      unit: openProductionShift.machine,
-      description: await buildLocalizedField('⚠ Downtime: ' + reason.trim(), lang),
-      workedOnBy: [],
-      hours: '',
-      dueDate: '',
-      dateCreated: localDateStr(),
-      status: 'Open',
-      notes: [],
-      createdBy: currentMechanic,
-      media: [],
-    };
-    await saveOneOrder(order);
+  };
+  // Closes out whichever downtime entry is still open (no end time yet) —
+  // same "one active thing at a time" shape as startLunch/endLunch.
+  const endDowntime = async () => {
+    if (!openProductionShift) return;
+    const log = openProductionShift.downtimeLog || [];
+    const openIndex = log.findIndex((d) => !d.end);
+    if (openIndex === -1) return;
+    setDowntimeActionPending(true);
+    try {
+      const nextLog = log.map((d, i) => (i === openIndex ? { ...d, end: new Date().toISOString() } : d));
+      await patchOpenProductionShift({ downtimeLog: nextLog });
+    } finally {
+      setDowntimeActionPending(false);
+    }
   };
 
   const addBlock = async (name) => {
@@ -16642,7 +16681,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (productionEntries && productionEntries.length > 0) {
       if (entries.length > 0) { rows.push([]); rows.push([]); }
       rows.push(['═══ PRODUCTION ═══']);
-      rows.push(['Employee', 'Date', 'Machine', 'Block', 'Start', 'End', 'Paid Hours', 'Extra Hours (billing only)', 'Production', 'Downtime Reports']);
+      rows.push(['Employee', 'Date', 'Machine', 'Block', 'Start', 'End', 'Paid Hours', 'Extra Hours (billing only)', 'Production', 'Downtime Reports', 'Downtime Duration', 'Downtime Detail']);
       const sortedProd = [...productionEntries].sort((a, b) => (a.employee || '').localeCompare(b.employee || '') || (a.end || '').localeCompare(b.end || ''));
       let lastEmployee = null;
       sortedProd.forEach((s) => {
@@ -16653,6 +16692,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         lastEmployee = s.employee;
         const hours = s.start && s.end ? (new Date(s.end) - new Date(s.start)) / 1000 / 60 / 60 : 0;
         const extraHours = (s.extraTasks || []).reduce((sum, t) => sum + (parseFloat(t.hours) || 0), 0);
+        const downtimeLog = s.downtimeLog || [];
+        const downtimeHours = downtimeLog.reduce((sum, d) => sum + (d.start && d.end ? (new Date(d.end) - new Date(d.start)) / 1000 / 60 / 60 : 0), 0);
+        const downtimeDetail = downtimeLog
+          .map((d) => `${fmtTime(d.start || d.time)}–${d.end ? fmtTime(d.end) : 'ongoing'}: ${d.reason || d.note || ''}`)
+          .join(' | ');
         rows.push([
           s.employee,
           localDateFromIso(s.end || s.start),
@@ -16663,7 +16707,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           fmtHoursDecimal(hours),
           extraHours > 0 ? fmtHoursDecimal(extraHours) : '',
           productionSummary(s, unitTypes),
-          (s.downtimeLog || []).length || '',
+          downtimeLog.length || '',
+          downtimeHours > 0 ? fmtHoursDecimal(downtimeHours) : '',
+          downtimeDetail,
         ]);
       });
     }
@@ -18054,7 +18100,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 />
               </Section>
 
-              <DowntimeButton onLog={logDowntime} />
+              <DowntimeButton
+                activeDowntime={(openProductionShift.downtimeLog || []).find((d) => !d.end)}
+                onStart={startDowntime}
+                onEnd={endDowntime}
+                actionPending={downtimeActionPending}
+              />
 
               <div className="mt-6 flex gap-2">
                 {altOptionsFor(currentMechanic).length > 1 && (
@@ -23796,7 +23847,12 @@ function WeekReviewTable({ entries, productionEntries, printMode }) {
     workedThruBreak: '—',
     paidHours: s.end ? Math.max(0, (new Date(s.end) - new Date(s.start)) / 1000 / 60 / 60) : 0,
     signed: !!s.signature,
-    detail: '🌲 ' + (s.machine + (s.block ? ` — Block ${s.block}` : '')),
+    detail: '🌲 ' + (s.machine + (s.block ? ` — Block ${s.block}` : '')) + (() => {
+      const downtimeHours = (s.downtimeLog || []).reduce((sum, d) => sum + (d.start && d.end ? (new Date(d.end) - new Date(d.start)) / 1000 / 60 / 60 : 0), 0);
+      if (downtimeHours > 0) return ` (⚠ ${fmtHours(downtimeHours)} down)`;
+      if ((s.downtimeLog || []).some((d) => !d.end)) return ' (⚠ currently down)';
+      return '';
+    })(),
   }));
   const sorted = [...mechanicRows, ...productionRows].sort((a, b) => (a.person || '').localeCompare(b.person || '') || (a.date || '').localeCompare(b.date || ''));
   const groups = [];
@@ -24035,9 +24091,16 @@ function ProductionShiftCard({ shift, unitTypes, isAdmin, onEdit, onConfirmHours
           ⛽ {fuelLiters} L across {Object.keys(shift.fuelLog).length} unit{Object.keys(shift.fuelLog).length > 1 ? 's' : ''}
         </p>
       )}
-      {shift.downtimeLog && shift.downtimeLog.length > 0 && (
-        <p className="text-xs mb-2" style={{ color: '#E07A5F' }}>⚠ {shift.downtimeLog.length} downtime report{shift.downtimeLog.length > 1 ? 's' : ''}</p>
-      )}
+      {shift.downtimeLog && shift.downtimeLog.length > 0 && (() => {
+        const downtimeHours = shift.downtimeLog.reduce((sum, d) => sum + (d.start && d.end ? (new Date(d.end) - new Date(d.start)) / 1000 / 60 / 60 : 0), 0);
+        return (
+          <p className="text-xs mb-2" style={{ color: '#E07A5F' }}>
+            ⚠ {shift.downtimeLog.length} downtime report{shift.downtimeLog.length > 1 ? 's' : ''}
+            {downtimeHours > 0 && ` — ${fmtHours(downtimeHours)} down`}
+            {shift.downtimeLog.some((d) => !d.end) && ' — currently down'}
+          </p>
+        );
+      })()}
       {isAdmin && (
         <div className="mb-2">
           <button onClick={() => setShowRawData((s) => !s)} className="text-xs underline" style={{ color: COLORS.line }}>
