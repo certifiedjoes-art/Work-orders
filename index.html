@@ -3489,7 +3489,7 @@ const GestureMapViewport = React.forwardRef(function GestureMapViewport({ childr
         onClick={resetView}
         title="Tap to reset to north-up"
         style={{
-          position: 'absolute', top: 10, right: 10, width: 40, height: 40, borderRadius: '50%',
+          position: 'absolute', top: 'calc(max(env(safe-area-inset-top, 0px), 44px) + 10px)', right: 10, width: 40, height: 40, borderRadius: '50%',
           background: 'rgba(255,255,255,0.92)', border: `2px solid ${isAdjusted ? COLORS.accent : '#333'}`,
           display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5, touchAction: 'none',
           boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
@@ -3523,7 +3523,7 @@ const GestureMapViewport = React.forwardRef(function GestureMapViewport({ childr
         </button>
       )}
       {findUnits && findUnits.length > 0 && (
-        <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 6, maxWidth: 'calc(100% - 70px)' }}>
+        <div style={{ position: 'absolute', top: 'calc(max(env(safe-area-inset-top, 0px), 44px) + 10px)', right: 60, zIndex: 6, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', maxWidth: 'calc(100% - 130px)' }}>
           <button
             onClick={() => setFindOpen((o) => !o)}
             style={{
