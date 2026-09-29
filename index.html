@@ -14598,6 +14598,33 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     }
   };
 
+  // Same race as freshLandingScreenFor above, different symptom: opening
+  // the pre-trip form reads assignedUnitFor() from React state, which can
+  // still be showing stale/cached unitAssignments if this is called soon
+  // after login/reload, before the live Firebase listener has delivered
+  // the real values. That mistags the whole inspection under the wrong
+  // (or an empty) unit name, so it silently never shows up under the
+  // truck it was actually done on. Re-fetching fresh right before opening
+  // the form — same pattern as login — closes that window.
+  const openPreTripForm = async () => {
+    try {
+      const [uaSnap, utSnap] = await Promise.all([
+        firebase.database().ref('unitAssignments').once('value'),
+        firebase.database().ref('unitTypes').once('value'),
+      ]);
+      const ua = uaSnap.val() || {};
+      const ut = utSnap.val() || {};
+      setUnitAssignments(ua);
+      setUnitTypes(ut);
+      cacheSet('unitAssignments', ua);
+      cacheSet('unitTypes', ut);
+    } catch (e) {
+      // Offline — nothing fresher available than what's already loaded;
+      // fall back to whatever's currently in state/cache.
+    }
+    setShowPreTripForm(true);
+  };
+
   // Groups the crew by job/machine type for any dropdown that needs to show
   // everyone together but organized — Mechanics first, then one group per
   // machine type, only including types that actually have someone on them.
@@ -16410,6 +16437,21 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
   const todayStr = () => localDateStr();
 
+  // "Clocked in now" only ever shows a time (e.g. "since 9:28 AM"), which
+  // silently assumes the shift started today. A shift that never got
+  // clocked out — a missed clock-out, an interrupted machine switch, a
+  // dropped connection — stays "open" forever, and its old start time
+  // then reads like it's from today, sometimes even later than the
+  // current time, which is exactly what "showing into the future" looks
+  // like: it's not actually in the future, it's stale by a day or more.
+  // Anything not from today gets its date spelled out and a flag, so a
+  // leftover open shift is obvious instead of mistaken for a live one.
+  const sinceLabel = (iso) => {
+    if (!iso) return '';
+    if (localDateFromIso(iso) === todayStr()) return `since ${fmtTime(iso)}`;
+    return `⚠ open since ${fmtDate(iso)} ${fmtTime(iso)} — never clocked out`;
+  };
+
   // The "open" entry for the current mechanic today: clocked in but not yet clocked out.
   // Find the mechanic's most recent still-open shift, regardless of what
   // calendar date it is right now — a shift that started before midnight and
@@ -18203,7 +18245,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 const elapsedHrs = (Date.now() - new Date(latest.time).getTime()) / (1000 * 60 * 60);
                 return 24 - elapsedHrs;
               })()}
-              onOpenPreTrip={() => setShowPreTripForm(true)}
+              onOpenPreTrip={openPreTripForm}
               onOpenInspectionMode={() => setShowInspectionMode(true)}
               isAdmin={isAdmin}
               documents={driverDocuments}
@@ -18556,7 +18598,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   <div key={t.id} className="flex items-center justify-between">
                     <span className="font-display font-semibold">🟢 {t.mechanic}</span>
                     <span className="font-mono text-sm" style={{ color: COLORS.inkDim }}>
-                      since {fmtTime(t.clockIn)}{t.lunchStart && !t.lunchEnd ? ' (on break)' : ''}
+                      {sinceLabel(t.clockIn)}{t.lunchStart && !t.lunchEnd ? ' (on break)' : ''}
                     </span>
                   </div>
                 ))}
@@ -18840,9 +18882,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       if (tsFilterEnd && t.date > tsFilterEnd) return false;
       return true;
     });
+    // Still-open shifts (clocked in, not yet out) used to be excluded here
+    // entirely — that made an in-progress shift invisible in "All Shifts"
+    // even though "Clocked In Now" showed the person as on the clock, which
+    // looked like the shift (and its timesheet) simply didn't exist. Now an
+    // open shift is bucketed by its start date instead of its (nonexistent)
+    // end date, so it shows up right away and can be reviewed/edited —
+    // e.g. to fix a bad start time — without waiting for it to be closed out.
     const filteredProduction = productionShifts.filter((s) => {
-      if (!s.end) return false;
-      const d = localDateFromIso(s.end);
+      const d = localDateFromIso(s.end || s.start);
       if (tsFilterMechanic && s.employee !== tsFilterMechanic) return false;
       if (tsFilterStart && d < tsFilterStart) return false;
       if (tsFilterEnd && d > tsFilterEnd) return false;
@@ -19492,14 +19540,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   <div key={t.id} className="flex items-center justify-between">
                     <span className="font-display font-semibold">🟢 {t.mechanic}</span>
                     <span className="font-mono text-sm" style={{ color: COLORS.inkDim }}>
-                      since {fmtTime(t.clockIn)}{t.lunchStart && !t.lunchEnd ? ' (on break)' : ''}
+                      {sinceLabel(t.clockIn)}{t.lunchStart && !t.lunchEnd ? ' (on break)' : ''}
                     </span>
                   </div>
                 ))}
                 {productionClockedInNow.map((s) => (
                   <div key={s.id} className="flex items-center justify-between">
                     <span className="font-display font-semibold">🟢 {s.employee}</span>
-                    <span className="font-mono text-sm" style={{ color: COLORS.inkDim }}>{s.machine} · since {fmtTime(s.start)}</span>
+                    <span className="font-mono text-sm" style={{ color: COLORS.inkDim }}>{s.machine} · {sinceLabel(s.start)}</span>
                   </div>
                 ))}
               </div>
@@ -24091,7 +24139,9 @@ function ProductionShiftCard({ shift, unitTypes, isAdmin, onEdit, onConfirmHours
   const [showSignature, setShowSignature] = useState(false);
   const [showRawData, setShowRawData] = useState(false);
   const hours = shift.start && shift.end ? (new Date(shift.end) - new Date(shift.start)) / 1000 / 60 / 60 : null;
-  const dateLabel = fmtDate(shift.end);
+  // Falls back to the start date so a still-open shift (no end yet) gets a
+  // real date header instead of a blank one.
+  const dateLabel = fmtDate(shift.end || shift.start);
   const fuelLiters = shift.fuelLog ? Object.values(shift.fuelLog).flat().reduce((sum, v) => sum + (parseFloat(v) || 0), 0) : 0;
 
   return (
@@ -24109,6 +24159,9 @@ function ProductionShiftCard({ shift, unitTypes, isAdmin, onEdit, onConfirmHours
         <span>In {fmtTime(shift.start)}</span>
         <span>Out {shift.end ? fmtTime(shift.end) : '—'}</span>
       </div>
+      {!shift.end && (
+        <p className="text-xs font-mono mb-2" style={{ color: COLORS.accent }}>🟢 Still clocked in</p>
+      )}
       {hours != null && (
         <p className="text-xs font-mono mb-2 flex flex-wrap items-center gap-2" style={{ color: hours > 24 && !shift.hoursConfirmedGood ? '#E07A5F' : hours > 16 && !shift.hoursConfirmedGood ? COLORS.progress : COLORS.accent }}>
           <span>
