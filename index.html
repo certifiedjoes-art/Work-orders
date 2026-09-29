@@ -3114,7 +3114,11 @@ function pixelToLatLng(map, px, py) {
     const fx = px / map.imageWidth;
     const fy = py / map.imageHeight;
     const u = (fx - bf.left) / (bf.right - bf.left);
-    const v = 1 - (fy - bf.top) / (bf.bottom - bf.top);
+    // v tracks fy directly (top of image = v 0, bottom = v 1): real mill
+    // exports have LPTS corners that already run top-to-bottom like the
+    // rendered image (v 0 = north/higher-latitude corners). An extra flip
+    // here mirrored the map north/south.
+    const v = (fy - bf.top) / (bf.bottom - bf.top);
     const result = bilinearGeoInterp(map.geoCorners, u, v);
     if (result) return result;
   }
@@ -3151,7 +3155,7 @@ function latLngToPixel(map, lat, lng) {
       if (best) { u = best.tu; v = best.tv; }
     }
     const fx = bf.left + u * (bf.right - bf.left);
-    const fy = bf.top + (1 - v) * (bf.bottom - bf.top);
+    const fy = bf.top + v * (bf.bottom - bf.top); // matches pixelToLatLng (no flip)
     return { px: fx * map.imageWidth, py: fy * map.imageHeight };
   }
   const pts = map && map.refPoints;
