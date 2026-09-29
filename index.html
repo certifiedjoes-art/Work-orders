@@ -4070,7 +4070,9 @@ function FindUnitDropdown({ units, onPick, style }) {
 // cutblocks, fuel depot, etc.) plus live machine position markers, icon
 // chosen per machine type via MACHINE_ICONS. Loads the Maps JS API script
 // itself, once, the first time this screen is visited.
-const HighwayMap = React.forwardRef(function HighwayMap({ knownLocations, machinePositions, openTracks, placingPin, myLocation, savedLines, liveTrackPoints, pickingDestination, onPickDestination, directionsDestination, onRouteCalculated, onMapClick, onLocationTap, onMachineTap, onLineTap }, ref) {
+const HighwayMap = React.forwardRef(function HighwayMap({ knownLocations, machinePositions, openTracks, placingPin, myLocation, savedLines, liveTrackPoints, pickingDestination, onPickDestination, directionsDestination, onRouteCalculated, onMapClick, onLocationTap, onMachineTap, onLineTap, following, onFollowStop }, ref) {
+  const onFollowStopRef = useRef(onFollowStop);
+  useEffect(() => { onFollowStopRef.current = onFollowStop; }, [onFollowStop]);
   const mapDivRef = useRef(null);
   const mapObjRef = useRef(null);
   const markersRef = useRef([]);
@@ -4124,6 +4126,8 @@ const HighwayMap = React.forwardRef(function HighwayMap({ knownLocations, machin
       zoom: knownLocations.length > 0 ? 10 : 6,
       mapId: GOOGLE_MAPS_MAP_ID,
     });
+    // A drag by the user ends follow mode (programmatic panTo doesn't fire this).
+    mapObjRef.current.addListener('dragstart', () => { if (onFollowStopRef.current) onFollowStopRef.current(); });
     mapObjRef.current.addListener('click', (e) => {
       if (pickingDestinationRef.current) { onPickDestinationRef.current(e.latLng.lat(), e.latLng.lng()); return; }
       if (placingPinRef.current) onMapClickRef.current(e.latLng.lat(), e.latLng.lng());
@@ -4154,31 +4158,36 @@ const HighwayMap = React.forwardRef(function HighwayMap({ knownLocations, machin
     // into it. Tapping reports the machine name; the parent looks up
     // whether it's currently on an open shift to show who's driving it.
     machinePositions.forEach((pos) => {
-      // Same look as the unit icons on the internal maps: white circle,
-      // accent-colored ring, icon image (or emoji) in the middle.
-      const content = document.createElement('div');
-      content.style.width = '34px';
-      content.style.height = '34px';
-      content.style.borderRadius = '50%';
-      content.style.background = '#fff';
-      content.style.border = `2px solid ${COLORS.accent}`;
-      content.style.boxShadow = '0 1px 3px rgba(0,0,0,0.6)';
-      content.style.display = 'flex';
-      content.style.alignItems = 'center';
-      content.style.justifyContent = 'center';
-      content.style.boxSizing = 'border-box';
-      content.style.cursor = 'pointer';
+      let content;
       if (pos.iconImage) {
+        content = document.createElement('div');
+        content.style.width = '36px';
+        content.style.lineHeight = '0';
+        content.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))';
         const img = document.createElement('img');
         img.src = pos.iconImage;
-        img.style.width = '22px';
-        img.style.height = '22px';
-        img.style.objectFit = 'contain';
+        img.style.width = '100%';
         img.style.display = 'block';
         content.appendChild(img);
+      } else if (pos.iconSvg) {
+        content = document.createElement('div');
+        content.style.width = '34px';
+        content.style.height = '34px';
+        content.style.borderRadius = '50%';
+        content.style.background = '#fff';
+        content.style.border = '2px solid #fff';
+        content.style.boxShadow = '0 1px 3px rgba(0,0,0,0.6)';
+        content.style.display = 'flex';
+        content.style.alignItems = 'center';
+        content.style.justifyContent = 'center';
+        content.style.padding = '4px';
+        content.style.boxSizing = 'border-box';
+        content.innerHTML = pos.iconSvg;
       } else {
-        content.style.fontSize = '18px';
+        content = document.createElement('div');
+        content.style.fontSize = '26px';
         content.style.lineHeight = '1';
+        content.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,0.6))';
         content.textContent = pos.icon;
       }
       const marker = new AdvancedMarkerElement({
@@ -4229,6 +4238,12 @@ const HighwayMap = React.forwardRef(function HighwayMap({ knownLocations, machin
       zIndex: 1000, // always on top of machine icons
     });
   }, [apiReady, myLocation]);
+
+  // While following, keep the map centered on this device's position.
+  useEffect(() => {
+    if (!following || !apiReady || !mapObjRef.current || !myLocation) return;
+    mapObjRef.current.panTo({ lat: myLocation.lat, lng: myLocation.lng });
+  }, [following, apiReady, myLocation]);
 
   useImperativeHandle(ref, () => ({
     centerOnLatLng: (lat, lng) => {
@@ -12843,6 +12858,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [viewingHighwayLineId, setViewingHighwayLineId] = useState(null);
   const [personalTrackPoints, setPersonalTrackPoints] = useState(() => cacheGet('personalTrackPoints', [])); // raw {lat,lng} points while tracking — converted to one map's pixel space only once tracking stops. Persisted continuously as it grows, not just on save, so a walk in progress survives the app being closed or killed mid-walk.
   const highwayMapRef = useRef(null);
+  const [highwayFollowing, setHighwayFollowing] = useState(false); // recenter button keeps the map on you until you drag it
   const gestureMapViewportRef = useRef(null);
   const pinLongPressTimerRef = useRef(null);
   const pinLongPressFiredRef = useRef(false);
@@ -21436,6 +21452,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             knownLocations={highwayLocations}
             machinePositions={machinePositions}
             openTracks={[]}
+            following={highwayFollowing}
+            onFollowStop={() => setHighwayFollowing(false)}
             placingPin={placingHighwayPin}
             myLocation={myLiveLocation}
             savedLines={highwayLines.filter(canSeeHighwayLine)}
@@ -21467,28 +21485,32 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           />
           {myLiveLocation && (
             <button
-              onClick={() => highwayMapRef.current && highwayMapRef.current.centerOnMe()}
-              title="Center on me"
+              onClick={() => { setHighwayFollowing(true); highwayMapRef.current && highwayMapRef.current.centerOnMe(); }}
+              title={highwayFollowing ? 'Following your location' : 'Center on me'}
+              aria-label="Center on my location"
               style={{
-                position: 'absolute', bottom: 16, right: 16, width: 44, height: 44, borderRadius: '50%',
-                background: 'rgba(255,255,255,0.92)', border: `2px solid #333`,
+                position: 'absolute', bottom: 10, right: 10, width: 44, height: 44, borderRadius: 10,
+                background: 'rgba(250,250,252,0.95)', border: 'none', padding: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5,
-                boxShadow: '0 1px 4px rgba(0,0,0,0.35)', fontSize: 20,
+                boxShadow: '0 1px 6px rgba(0,0,0,0.35)',
               }}
             >
-              🎯
+              {/* iPhone Maps-style location arrow, same as the internal maps */}
+              <svg width="24" height="24" viewBox="0 0 24 24" style={{ display: 'block' }}>
+                <path d="M3.5 11.2 L20.5 3.5 L12.8 20.5 L11 13 Z" fill={highwayFollowing ? '#0a84ff' : 'none'} stroke="#0a84ff" strokeWidth="2" strokeLinejoin="round" />
+              </svg>
             </button>
           )}
           <button
             onClick={() => (personalTrackingOn ? stopHighwayTrackingAndSave() : setPersonalTrackingOn(true))}
             title={personalTrackingOn ? 'Stop tracking me' : 'Track me'}
             style={{
-              position: 'absolute', bottom: 68, right: 16, width: 44, height: 44, borderRadius: '50%',
+              position: 'absolute', bottom: 62, right: 12, width: 40, height: 40, borderRadius: '50%',
               background: personalTrackingOn ? COLORS.accent : 'rgba(255,255,255,0.92)',
               color: personalTrackingOn ? '#fff' : '#333',
               border: `2px solid ${personalTrackingOn ? COLORS.accent : '#333'}`,
               display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5,
-              boxShadow: '0 1px 4px rgba(0,0,0,0.35)', fontSize: 20,
+              boxShadow: '0 1px 4px rgba(0,0,0,0.35)', fontSize: 18,
             }}
           >
             {personalTrackingOn ? '⏹️' : '🚶'}
