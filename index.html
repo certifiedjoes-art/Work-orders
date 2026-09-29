@@ -4019,6 +4019,53 @@ const GOOGLE_MAPS_API_KEY = 'AIzaSyDQfkvpeYVkJEVAsC4KxRzWIAIKHQp3JiQ';
 // Markers work fine with the default 'DEMO_MAP_ID' for now.
 const GOOGLE_MAPS_MAP_ID = 'DEMO_MAP_ID';
 
+// Small "Find unit" dropdown (search box + list) used on the Highway Map.
+// units: [{name, lat, lng}]. Calls onPick(unit) when one is chosen.
+function FindUnitDropdown({ units, onPick, style }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  if (!units || units.length === 0) return null;
+  const q = query.trim().toLowerCase();
+  const filtered = units.filter((u) => u.name.toLowerCase().includes(q));
+  return (
+    <div style={{ position: 'absolute', zIndex: 6, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', ...style }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          height: 40, padding: '0 12px', borderRadius: 10, background: 'rgba(255,255,255,0.95)',
+          border: `2px solid ${open ? COLORS.accent : '#333'}`, boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+          fontWeight: 600, fontSize: 14, color: '#222', display: 'flex', alignItems: 'center', gap: 6,
+        }}
+      >
+        🔍 Find unit {open ? '▴' : '▾'}
+      </button>
+      {open && (
+        <div style={{ marginTop: 6, width: 220, background: '#fff', border: '2px solid #333', borderRadius: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.4)', overflow: 'hidden' }}>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Type a unit number…"
+            style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: 16, border: 'none', borderBottom: '1px solid #ccc', outline: 'none', color: '#222' }}
+          />
+          <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {filtered.map((u) => (
+              <button
+                key={u.name}
+                onClick={() => { onPick(u); setOpen(false); setQuery(''); }}
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', fontSize: 15, background: '#fff', color: '#222', border: 'none', borderBottom: '1px solid #eee' }}
+              >
+                {u.name}
+              </button>
+            ))}
+            {filtered.length === 0 && <div style={{ padding: '10px 12px', fontSize: 14, color: '#777' }}>No matching unit</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Real interactive Google Maps view — admin-managed known site pins (mill,
 // cutblocks, fuel depot, etc.) plus live machine position markers, icon
 // chosen per machine type via MACHINE_ICONS. Loads the Maps JS API script
@@ -4107,36 +4154,31 @@ const HighwayMap = React.forwardRef(function HighwayMap({ knownLocations, machin
     // into it. Tapping reports the machine name; the parent looks up
     // whether it's currently on an open shift to show who's driving it.
     machinePositions.forEach((pos) => {
-      let content;
+      // Same look as the unit icons on the internal maps: white circle,
+      // accent-colored ring, icon image (or emoji) in the middle.
+      const content = document.createElement('div');
+      content.style.width = '34px';
+      content.style.height = '34px';
+      content.style.borderRadius = '50%';
+      content.style.background = '#fff';
+      content.style.border = `2px solid ${COLORS.accent}`;
+      content.style.boxShadow = '0 1px 3px rgba(0,0,0,0.6)';
+      content.style.display = 'flex';
+      content.style.alignItems = 'center';
+      content.style.justifyContent = 'center';
+      content.style.boxSizing = 'border-box';
+      content.style.cursor = 'pointer';
       if (pos.iconImage) {
-        content = document.createElement('div');
-        content.style.width = '36px';
-        content.style.lineHeight = '0';
-        content.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))';
         const img = document.createElement('img');
         img.src = pos.iconImage;
-        img.style.width = '100%';
+        img.style.width = '22px';
+        img.style.height = '22px';
+        img.style.objectFit = 'contain';
         img.style.display = 'block';
         content.appendChild(img);
-      } else if (pos.iconSvg) {
-        content = document.createElement('div');
-        content.style.width = '34px';
-        content.style.height = '34px';
-        content.style.borderRadius = '50%';
-        content.style.background = '#fff';
-        content.style.border = '2px solid #fff';
-        content.style.boxShadow = '0 1px 3px rgba(0,0,0,0.6)';
-        content.style.display = 'flex';
-        content.style.alignItems = 'center';
-        content.style.justifyContent = 'center';
-        content.style.padding = '4px';
-        content.style.boxSizing = 'border-box';
-        content.innerHTML = pos.iconSvg;
       } else {
-        content = document.createElement('div');
-        content.style.fontSize = '26px';
+        content.style.fontSize = '18px';
         content.style.lineHeight = '1';
-        content.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,0.6))';
         content.textContent = pos.icon;
       }
       const marker = new AdvancedMarkerElement({
@@ -4189,6 +4231,11 @@ const HighwayMap = React.forwardRef(function HighwayMap({ knownLocations, machin
   }, [apiReady, myLocation]);
 
   useImperativeHandle(ref, () => ({
+    centerOnLatLng: (lat, lng) => {
+      if (!mapObjRef.current) return;
+      mapObjRef.current.panTo({ lat, lng });
+      mapObjRef.current.setZoom(Math.max(mapObjRef.current.getZoom(), 15));
+    },
     centerOnMe: () => {
       if (!mapObjRef.current || !myLocation) return;
       mapObjRef.current.panTo({ lat: myLocation.lat, lng: myLocation.lng });
@@ -21388,7 +21435,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             ref={highwayMapRef}
             knownLocations={highwayLocations}
             machinePositions={machinePositions}
-            openTracks={openTracks}
+            openTracks={[]}
             placingPin={placingHighwayPin}
             myLocation={myLiveLocation}
             savedLines={highwayLines.filter(canSeeHighwayLine)}
@@ -21408,6 +21455,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             }}
             onMachineTap={(name) => { setViewingHighwayLocationId(null); setViewingMachineName(name); }}
             onLineTap={(id) => setViewingHighwayLineId(id)}
+          />
+          <FindUnitDropdown
+            units={[...machinePositions].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))}
+            style={{ top: 10, right: 60 }}
+            onPick={(u) => {
+              if (highwayMapRef.current) highwayMapRef.current.centerOnLatLng(u.lat, u.lng);
+              setViewingHighwayLocationId(null);
+              setViewingMachineName(u.name);
+            }}
           />
           {myLiveLocation && (
             <button
