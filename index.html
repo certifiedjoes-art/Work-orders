@@ -15868,10 +15868,24 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (!track) return;
     await patchOneMachineTrack(track.id, { endedAt: new Date().toISOString() });
   };
+  // The polling interval below is created once and keeps running across
+  // renders, so it must read the LATEST tracks from a ref. Reading the
+  // machineTracks captured when the interval started meant each new point
+  // was appended to an old copy of the list and overwrote the newer points,
+  // leaving trails with only a couple of far-apart points.
+  const machineTracksRef = useRef(machineTracks);
+  machineTracksRef.current = machineTracks;
   const appendTrackPoint = async (trackId, lat, lng) => {
-    const track = machineTracks.find((t) => t.id === trackId);
+    const track = machineTracksRef.current.find((t) => t.id === trackId);
     if (!track) return;
-    await patchOneMachineTrack(trackId, { points: [...(track.points || []), { lat, lng, time: new Date().toISOString() }] });
+    const pts = track.points || [];
+    const last = pts[pts.length - 1];
+    // Skip if the machine hasn't moved (keeps parked machines from bloating the trail)
+    if (last && haversineMeters(last.lat, last.lng, lat, lng) < 4) return;
+    const updated = [...pts, { lat, lng, time: new Date().toISOString() }];
+    // Keep the ref current right away so the next poll builds on this point
+    machineTracksRef.current = machineTracksRef.current.map((t) => (t.id === trackId ? { ...t, points: updated } : t));
+    await patchOneMachineTrack(trackId, { points: updated });
   };
 
   // Calls our Cloud Run backend (never Samsara directly — the token can't
@@ -15882,7 +15896,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const samsaraCacheRef = useRef({ time: 0, positions: null });
   const fetchAllSamsaraPositions = async () => {
     const cache = samsaraCacheRef.current;
-    if (cache.positions && Date.now() - cache.time < 30000) return cache.positions;
+    if (cache.positions && Date.now() - cache.time < 4000) return cache.positions;
     try {
       const res = await fetch(CLOUD_FUNCTION_URL, {
         method: 'POST',
@@ -15904,8 +15918,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return match ? { lat: match.lat, lng: match.lng } : null;
   };
 
-  // While any track session is open, check for a new position every couple
-  // minutes. Safe to leave running even with pollSamsaraLocation stubbed
+  // While any track session is open, check for a new position every 10
+  // seconds. Safe to leave running even with pollSamsaraLocation stubbed
   // out — it just resolves to null and nothing happens.
   useEffect(() => {
     const openTracks = machineTracks.filter((t) => !t.endedAt);
@@ -15915,7 +15929,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         const pos = await pollSamsaraLocation(track.machine);
         if (pos) await appendTrackPoint(track.id, pos.lat, pos.lng);
       }
-    }, 120000);
+    }, 10000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machineTracks.filter((t) => !t.endedAt).map((t) => t.id).join(',')]);
@@ -15933,7 +15947,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       if (!cancelled) setLiveFleetPositions(positions);
     };
     poll();
-    const interval = setInterval(poll, 30000);
+    const interval = setInterval(poll, 5000);
     return () => { cancelled = true; clearInterval(interval); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen]);
