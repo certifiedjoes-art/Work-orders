@@ -12862,6 +12862,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [pendingCalibrationPixel, setPendingCalibrationPixel] = useState(null); // {px, py} just tapped, awaiting lat/lng entry
   const [uploadingMapPdf, setUploadingMapPdf] = useState(null); // mapId currently uploading, for a loading indicator
   const [showMachineTracksPanel, setShowMachineTracksPanel] = useState(false);
+  const [shownTrackIds, setShownTrackIds] = useState([]); // closed tracks the admin chose to draw on the map (open ones always show)
   const [highwayLocations, setHighwayLocations] = useState(() => cacheGet('highwayLocations', [])); // [{id, name, lat, lng, addedBy, time}]
   const [highwayLines, setHighwayLines] = useState(() => cacheGet('highwayLines', [])); // [{id, points: [{lat,lng}], type, color, strokeWidth, note, addedBy, isPublic, time}]
   const [placingHighwayPin, setPlacingHighwayPin] = useState(false);
@@ -20813,7 +20814,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       : [];
     const currentMapLiveTrails = (currentMap && currentMapGeoreferenced && isAdmin)
       ? machineTracks
-          .filter((tr) => !tr.endedAt && tr.points && tr.points.length > 1)
+          .filter((tr) => (!tr.endedAt || shownTrackIds.includes(tr.id)) && tr.points && tr.points.length > 1)
           .map((tr) => {
             const pts = tr.points.map((p) => latLngToPixel(currentMap, p.lat, p.lng)).filter(Boolean);
             return pts.length > 1 ? { points: pts.map((p) => ({ x: p.px, y: p.py })), color: colorForOperator(tr.employee) } : null;
@@ -21273,8 +21274,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 <h2 className="font-display text-lg font-bold">🛰️ Machine Tracks</h2>
                 <button onClick={() => setShowMachineTracksPanel(false)} className="text-2xl" style={{ color: COLORS.inkDim }}>✕</button>
               </div>
+              <div className="flex items-center justify-between mb-3 gap-2">
+                <p className="text-xs" style={{ color: COLORS.inkDim }}>Open shifts always show on the map. Tap "Show on map" to draw a finished track too.</p>
+                {shownTrackIds.length > 0 && (
+                  <button onClick={() => setShownTrackIds([])} className="text-xs underline whitespace-nowrap" style={{ color: COLORS.accent }}>Hide all</button>
+                )}
+              </div>
               <div className="space-y-2">
-                {[...machineTracks].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, 10).map((track) => (
+                {[...machineTracks].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, 40).map((track) => (
                   <div key={track.id} className="rounded-lg p-3 text-xs" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
                     <div className="flex items-center justify-between">
                       <span className="font-semibold">{track.machine || '(no unit)'} — {track.employee}</span>
@@ -21283,6 +21290,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     <p style={{ color: COLORS.inkDim }}>
                       {fmtDate(track.startedAt)} {fmtTime(track.startedAt)} → {track.endedAt ? fmtTime(track.endedAt) : 'now'} · {(track.points || []).length} point{(track.points || []).length === 1 ? '' : 's'} recorded
                     </p>
+                    {track.endedAt && (track.points || []).length > 1 && (
+                      <button
+                        onClick={() => setShownTrackIds((ids) => (ids.includes(track.id) ? ids.filter((i) => i !== track.id) : [...ids, track.id]))}
+                        className="text-xs underline mt-1"
+                        style={{ color: COLORS.accent }}
+                      >
+                        {shownTrackIds.includes(track.id) ? '🙈 Hide from map' : '🗺️ Show on map'}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
