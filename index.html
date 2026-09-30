@@ -4579,7 +4579,8 @@ function MachineMarkerDetail({ position, assignedDrivers, diagnostics, isVehicle
   );
 }
 
-function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete, onUploadPdf, uploadingMapId, onSharePdf, localMaps, onAddLocalMap, onDeleteLocalMap, addingLocalMap, onClose }) {
+function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete, onUploadPdf, uploadingMapId, onSharePdf, localMaps, onAddLocalMap, onDeleteLocalMap, onShareLocalMap, addingLocalMap, onClose }) {
+  const [sharingLocalId, setSharingLocalId] = useState(null);
   const [newMapName, setNewMapName] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [confirmDeleteLocalId, setConfirmDeleteLocalId] = useState(null);
@@ -4662,6 +4663,13 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
                   {m.geoCorners ? '🛰️ Georeferenced automatically from the PDF' : '🗺️ Not georeferenced yet — use "📍 Calibrate" on the map screen'}
                 </p>
                 <div className="flex gap-2 flex-wrap items-center">
+                  <Btn
+                    variant="ghost"
+                    disabled={sharingLocalId === m.id}
+                    onClick={async () => { setSharingLocalId(m.id); await onShareLocalMap(m.id); setSharingLocalId(null); }}
+                  >
+                    {sharingLocalId === m.id ? 'Uploading…' : '🌐 Make public (share with crew)'}
+                  </Btn>
                   {confirmDeleteLocalId === m.id ? (
                     <React.Fragment>
                       <Btn variant="danger" onClick={() => { onDeleteLocalMap(m.id); setConfirmDeleteLocalId(null); }}>Confirm delete</Btn>
@@ -15801,6 +15809,38 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     cacheSet('localMaps', next);
     if (selectedMapId === mapId) setSelectedMapId(null);
   };
+  // Turns a "this device only" map (loaded from Files) into a normal shared
+  // map: uploads its image to Firebase Storage, creates a public map record
+  // with the same georeferencing, then removes the local-only copy so it
+  // doesn't show up twice on this device.
+  const shareLocalMapWithCrew = async (localId) => {
+    const local = localMaps.find((m) => m.id === localId);
+    if (!local) return;
+    try {
+      const blob = await idbGetMapImageBlob(localId);
+      if (!blob) { alert("This map's image isn't saved on this device anymore — try adding it from Files again."); return; }
+      const newId = uid();
+      const storageRef = firebase.storage().ref(`mapImages/${newId}-${Date.now()}.png`);
+      await storageRef.put(blob);
+      const url = await storageRef.getDownloadURL();
+      await saveOneMap({
+        id: newId,
+        name: local.name,
+        isPublic: true,
+        isDefault: false,
+        addedBy: currentMechanic,
+        imageUrl: url,
+        imageWidth: local.imageWidth,
+        imageHeight: local.imageHeight,
+        geoCorners: local.geoCorners || null,
+        geoBBoxFraction: local.geoBBoxFraction || null,
+        refPoints: local.refPoints || [],
+      });
+      await deleteLocalMap(localId);
+    } catch (e) {
+      alert("Couldn't share that map — " + (e.message || 'check your signal and try again.'));
+    }
+  };
   const setMapRefPoint = async (mapId, index, point) => {
     const map = maps.find((m) => m.id === mapId);
     if (!map) return;
@@ -21277,6 +21317,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             localMaps={localMaps}
             onAddLocalMap={addLocalMapFromFile}
             onDeleteLocalMap={deleteLocalMap}
+            onShareLocalMap={shareLocalMapWithCrew}
             addingLocalMap={addingLocalMap}
             onClose={() => setShowManageMaps(false)}
           />
