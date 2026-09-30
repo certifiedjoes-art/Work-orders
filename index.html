@@ -4579,7 +4579,24 @@ function MachineMarkerDetail({ position, assignedDrivers, diagnostics, isVehicle
   );
 }
 
-function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete, onUploadPdf, uploadingMapId, onSharePdf, localMaps, onAddLocalMap, onDeleteLocalMap, onShareLocalMap, addingLocalMap, onClose }) {
+function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete, onUploadPdf, uploadingMapId, onSharePdf, localMaps, onAddLocalMap, onDeleteLocalMap, onShareLocalMap, onRename, addingLocalMap, onClose }) {
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  // Shared name row: shows the name with a Rename link, or an inline editor.
+  const renderNameRow = (m, extra) => (
+    renamingId === m.id ? (
+      <div className="flex gap-2 mb-2 items-center">
+        <TextInput value={renameValue} onChange={(e) => setRenameValue(e.target.value)} className="flex-1" />
+        <Btn onClick={() => { if (renameValue.trim()) onRename(m.id, renameValue.trim()); setRenamingId(null); }} disabled={!renameValue.trim()}>Save</Btn>
+        <Btn variant="ghost" onClick={() => setRenamingId(null)}>Cancel</Btn>
+      </div>
+    ) : (
+      <div className="flex items-center justify-between mb-2 gap-2">
+        <span className="text-sm font-semibold">{m.name}{m.isDefault ? ' ⭐' : ''} <button onClick={() => { setRenamingId(m.id); setRenameValue(m.name || ''); }} className="text-xs underline ml-1" style={{ color: COLORS.accent, fontWeight: 400 }}>✏️ Rename</button></span>
+        {extra}
+      </div>
+    )
+  );
   const [sharingLocalId, setSharingLocalId] = useState(null);
   const [newMapName, setNewMapName] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -4597,10 +4614,7 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
         <div className="space-y-2 mb-4">
           {maps.map((m) => (
             <div key={m.id} className="rounded-lg p-3" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-semibold">{m.name}{m.isDefault ? ' ⭐' : ''}</span>
-                <span className="text-xs" style={{ color: m.isPublic ? COLORS.done : COLORS.inkDim }}>{m.isPublic ? 'Public' : 'Private'}</span>
-              </div>
+              {renderNameRow(m, <span className="text-xs" style={{ color: m.isPublic ? COLORS.done : COLORS.inkDim }}>{m.isPublic ? 'Public' : 'Private'}</span>)}
               <p className="text-xs mb-2" style={{ color: m.imageUrl ? COLORS.accent : COLORS.line }}>
                 {m.imageUrl
                   ? (m.geoCorners
@@ -4655,10 +4669,7 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
           <div className="space-y-2 mb-4">
             {localMaps.map((m) => (
               <div key={m.id} className="rounded-lg p-3" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-semibold">{m.name}</span>
-                  <span className="text-xs" style={{ color: COLORS.accent }}>This device only</span>
-                </div>
+                {renderNameRow(m, <span className="text-xs" style={{ color: COLORS.accent }}>This device only</span>)}
                 <p className="text-xs mb-2" style={{ color: COLORS.accent }}>
                   {m.geoCorners ? '🛰️ Georeferenced automatically from the PDF' : '🗺️ Not georeferenced yet — use "📍 Calibrate" on the map screen'}
                 </p>
@@ -21318,6 +21329,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             onAddLocalMap={addLocalMapFromFile}
             onDeleteLocalMap={deleteLocalMap}
             onShareLocalMap={shareLocalMapWithCrew}
+            onRename={(id, name) => patchOneMap(id, { name })}
             addingLocalMap={addingLocalMap}
             onClose={() => setShowManageMaps(false)}
           />
