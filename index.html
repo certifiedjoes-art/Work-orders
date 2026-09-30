@@ -20133,7 +20133,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   <div key={name} className="flex items-center justify-between text-sm rounded-lg p-2" style={{ background: COLORS.surfaceRaised }}>
                     <span>{name}</span>
                     <button
-                      onClick={() => { if (confirm(`Remove ${name} entirely — all their logs? This can't be undone.`)) removeDriverEntirely(name); }}
+                      onClick={() => {
+                        const count = driverLogs.filter((l) => l.driver === name).length;
+                        const typed = prompt(`This permanently deletes ALL ${count} log${count !== 1 ? 's' : ''} for ${name}, from every week. It can't be undone.\n\nTo confirm, type their name exactly:\n${name}`);
+                        if (typed === null) return;
+                        if (typed.trim().toLowerCase() !== name.trim().toLowerCase()) { alert('Name did not match — nothing was deleted.'); return; }
+                        removeDriverEntirely(name);
+                      }}
                       className="text-xs underline"
                       style={{ color: '#E07A5F' }}
                     >
