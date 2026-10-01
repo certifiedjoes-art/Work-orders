@@ -3604,7 +3604,7 @@ function MapCanvas({
   viewBoxWidth, viewBoxHeight, backgroundImageUrl,
   pinsToShow, linesToShow, placingPin, measureMode, pencilMode, drawingPoints,
   calibrating, refPoints, livePositions, liveTrails, myPosition,
-  onMapTap, onFreehandPoint, onFreehandEnd, onPinTap, onLineTap, onLiveTap,
+  onMapTap, onFreehandPoint, onFreehandEnd, onPinTap, onLineTap, onLiveTap, onTrailTap,
 
 }) {
   const svgRef = useRef(null);
@@ -3673,8 +3673,21 @@ function MapCanvas({
       )}
 
       {(liveTrails || []).map((trail, i) => (
+        <React.Fragment key={i}>
+        {/* Wide invisible line on top so a track is easy to tap with a finger */}
+        {onTrailTap && trail.trackId && (
+          <polyline
+            points={trail.points.map((p) => `${p.x},${p.y}`).join(' ')}
+            fill="none"
+            stroke="transparent"
+            strokeWidth="16"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ pointerEvents: anyDrawMode ? 'none' : 'stroke', cursor: 'pointer' }}
+            onClick={(e) => { e.stopPropagation(); onTrailTap(trail.trackId); }}
+          />
+        )}
         <polyline
-          key={i}
           points={trail.points.map((p) => `${p.x},${p.y}`).join(' ')}
           fill="none"
           stroke={trail.color}
@@ -3684,6 +3697,7 @@ function MapCanvas({
           strokeLinejoin="round"
           style={{ pointerEvents: 'none' }}
         />
+        </React.Fragment>
       ))}
 
       {(linesToShow || []).map((line) => {
@@ -4574,6 +4588,54 @@ function MachineMarkerDetail({ position, assignedDrivers, diagnostics, isVehicle
             )}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Bottom sheet shown when a machine track is tapped on the map: the
+// production numbers for that machine on the track's day (every shift that
+// machine worked that day, not just the one tapped).
+function TrackProductionDetail({ track, shifts, unitTypes, onClose }) {
+  const dayKey = localDateStr(new Date(track.startedAt));
+  const dayShifts = shifts
+    .filter((sh) => sh.machine === track.machine && sh.start && localDateStr(new Date(sh.start)) === dayKey)
+    .sort((a, b) => a.start.localeCompare(b.start));
+  const type = machineType(track.machine, unitTypes);
+  const row = (label, value) => (
+    <div className="flex justify-between text-sm py-1" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+      <span style={{ color: COLORS.inkDim }}>{label}</span><span className="font-semibold text-right">{value}</span>
+    </div>
+  );
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 150, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'flex-end' }} onClick={onClose}>
+      <div className="w-full p-5" style={{ background: COLORS.bg, borderRadius: '16px 16px 0 0', maxHeight: '75vh', overflowY: 'auto', border: `2px solid ${COLORS.line}`, borderBottom: 'none' }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="font-display text-lg font-bold">{track.machine || '(no unit)'}</h2>
+          <button onClick={onClose} className="text-2xl" style={{ color: COLORS.inkDim }}>✕</button>
+        </div>
+        <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>{fmtDate(track.startedAt)} · {(track.points || []).length} track points</p>
+        {dayShifts.length === 0 && <p className="text-sm" style={{ color: COLORS.inkDim }}>No production shift found for this machine on this day.</p>}
+        {dayShifts.map((sh) => {
+          const hrs = sh.start && sh.end ? (new Date(sh.end) - new Date(sh.start)) / 3600000 : null;
+          const downMin = (sh.downtimeLog || []).reduce((sum, d) => {
+            const st = d.start || d.time; const en = d.end;
+            return st && en ? sum + (new Date(en) - new Date(st)) / 60000 : sum;
+          }, 0);
+          return (
+            <div key={sh.id} className="rounded-lg p-3 mb-3" style={{ background: COLORS.surface, border: `1px solid ${sh.id === track.shiftId ? COLORS.accent : COLORS.line}` }}>
+              <p className="font-semibold text-sm mb-1">{sh.employee}{sh.id === track.shiftId ? ' (this track)' : ''}</p>
+              {row('Shift', `${fmtTime(sh.start)} – ${sh.end ? fmtTime(sh.end) : 'still on'}${hrs !== null ? ` (${fmtHours(hrs)})` : ''}`)}
+              {sh.block && row('Block', sh.block)}
+              {(sh.startHours || sh.endHours) && row('Machine hours', `${sh.startHours || '—'} → ${sh.endHours || '—'}`)}
+              {type === 'buncher' && sh.trees && row('Tree count', sh.trees)}
+              {(type === 'skidder' || type === 'processor') && (sh.spruce || sh.aspen) && row('Production', `${sh.spruce || 0} spruce, ${sh.aspen || 0} aspen`)}
+              {type === 'loader' && (sh.loadCount || sh.topPileCount) && row('Loads', `${sh.loadCount || 0} loads, ${sh.topPileCount || 0} top piles`)}
+              {downMin > 0 && row('Downtime', `${Math.round(downMin)} min`)}
+              {sh.notes && <p className="text-xs mt-2" style={{ color: COLORS.inkDim }}>{sh.notes}</p>}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -12862,6 +12924,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [pendingCalibrationPixel, setPendingCalibrationPixel] = useState(null); // {px, py} just tapped, awaiting lat/lng entry
   const [uploadingMapPdf, setUploadingMapPdf] = useState(null); // mapId currently uploading, for a loading indicator
   const [showMachineTracksPanel, setShowMachineTracksPanel] = useState(false);
+  const [viewingTrackId, setViewingTrackId] = useState(null); // tapped track on the map -> shows that day's production
   const [shownTrackIds, setShownTrackIds] = useState([]); // closed tracks the admin chose to draw on the map (open ones always show)
   const [highwayLocations, setHighwayLocations] = useState(() => cacheGet('highwayLocations', [])); // [{id, name, lat, lng, addedBy, time}]
   const [highwayLines, setHighwayLines] = useState(() => cacheGet('highwayLines', [])); // [{id, points: [{lat,lng}], type, color, strokeWidth, note, addedBy, isPublic, time}]
@@ -20817,7 +20880,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           .filter((tr) => (!tr.endedAt || shownTrackIds.includes(tr.id)) && tr.points && tr.points.length > 1)
           .map((tr) => {
             const pts = tr.points.map((p) => latLngToPixel(currentMap, p.lat, p.lng)).filter(Boolean);
-            return pts.length > 1 ? { points: pts.map((p) => ({ x: p.px, y: p.py })), color: colorForOperator(tr.employee) } : null;
+            return pts.length > 1 ? { points: pts.map((p) => ({ x: p.px, y: p.py })), color: colorForOperator(tr.employee), trackId: tr.id } : null;
           })
           .filter(Boolean)
       : [];
@@ -20968,6 +21031,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   onPinTap={(pinId) => setViewingPinId(pinId)}
                   onLineTap={(lineId) => setViewingLineId(lineId)}
                   onLiveTap={(name) => setViewingMachineName(name)}
+                  onTrailTap={isAdmin ? (id) => setViewingTrackId(id) : null}
                 />
               </GestureMapViewport>
             </div>
@@ -21262,6 +21326,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             )}
           </React.Fragment>
         )}
+
+        {viewingTrackId && isAdmin && (() => {
+          const track = machineTracks.find((t) => t.id === viewingTrackId);
+          if (!track) return null;
+          return <TrackProductionDetail track={track} shifts={productionShifts} unitTypes={unitTypes} onClose={() => setViewingTrackId(null)} />;
+        })()}
 
         {showMachineTracksPanel && isAdmin && (
           <div style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-end' }} onClick={() => setShowMachineTracksPanel(false)}>
