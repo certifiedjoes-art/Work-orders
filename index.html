@@ -11823,6 +11823,21 @@ function DriverLogDayGrid({ dayStart, dayEnd, dataEnd, points, startCumDriving, 
               {(statusTotals[status] || 0).toFixed(1)}h
             </text>
           ))}
+          {/* Complete on-duty total under the column: driving + on duty (not driving) */}
+          {(() => {
+            const onDutyTotal = (statusTotals.driving || 0) + (statusTotals.onDuty || 0);
+            return (
+              <text
+                x={viewWidth + 14}
+                y={rowsHeight + 19}
+                fontSize={13}
+                fontWeight="700"
+                fill={onDutyTotal > HOS_LIMITS.onDuty ? '#E07A5F' : '#1B1F19'}
+              >
+                On duty: {onDutyTotal.toFixed(1)}h
+              </text>
+            );
+          })()}
         </g>
       )}
 
@@ -11997,6 +12012,7 @@ function PrintableDriverLog({ log, driverName }) {
         <div><span style={{ color: '#555' }}>Sleeper</span><br /><strong>{fmtHours(totals.sleeper)}</strong></div>
         <div><span style={{ color: '#555' }}>Driving</span><br /><strong>{fmtHours(totals.driving)}</strong></div>
         <div><span style={{ color: '#555' }}>On duty (not driving)</span><br /><strong>{fmtHours(totals.onDuty)}</strong></div>
+        <div className="col-span-4" style={{ borderTop: '1px solid #ccc', paddingTop: 4 }}><span style={{ color: '#555' }}>Total on duty (driving + on duty not driving)</span> <strong>{fmtHours(totals.driving + totals.onDuty)}</strong></div>
       </div>
 
       <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
