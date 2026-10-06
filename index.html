@@ -13294,7 +13294,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       cacheSet('trainingRecords', val);
     });
     return () => ref.off('value', on);
-  }, []);
+  }, [firebaseUser]);
 
   useEffect(() => {
     const ref = firebase.database().ref('trainingMatrixRecords');
@@ -13731,7 +13731,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       cacheSet('roles', val);
     });
     return () => ref.off('value', on);
-  }, []);
+  }, [firebaseUser]);
 
   useEffect(() => {
     const ref = firebase.database().ref('unitAssignments');
@@ -13741,7 +13741,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       cacheSet('unitAssignments', val);
     });
     return () => ref.off('value', on);
-  }, []);
+  }, [firebaseUser]);
 
   useEffect(() => {
     const ref = firebase.database().ref('requiredTraining');
@@ -13751,7 +13751,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       cacheSet('requiredTraining', val);
     });
     return () => ref.off('value', on);
-  }, []);
+  }, [firebaseUser]);
 
   useEffect(() => {
     const ref = firebase.database().ref('assignedTraining');
@@ -13761,7 +13761,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       cacheSet('assignedTraining', val);
     });
     return () => ref.off('value', on);
-  }, []);
+  }, [firebaseUser]);
 
   useEffect(() => {
     const ref = firebase.database().ref('emergencyContacts');
@@ -13822,7 +13822,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       cacheSet('videoWatched', val);
     });
     return () => ref.off('value', on);
-  }, []);
+  }, [firebaseUser]);
 
   useEffect(() => {
     const ref = firebase.database().ref('altUnitAssignments');
@@ -13842,7 +13842,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       cacheSet('unitTypes', val);
     });
     return () => ref.off('value', on);
-  }, []);
+  }, [firebaseUser]);
 
   useEffect(() => {
     const ref = firebase.database().ref('machineIconOverrides');
@@ -14212,6 +14212,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             }
             if (inviteTokenState.requiredTraining && inviteTokenState.requiredTraining.length) {
               await setRequiredTraining(mechanic, inviteTokenState.requiredTraining);
+              // Show the courses right away, without waiting for the listener
+              // (which may not have caught up yet on a brand-new login).
+              setRequiredTrainingState((prev) => ({ ...prev, [slugForMechanic(mechanic)]: inviteTokenState.requiredTraining }));
             }
             firebase.database().ref('inviteTokens/' + inviteTokenState.token).remove().catch(() => {});
             setInviteTokenState(null);
