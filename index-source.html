@@ -18565,6 +18565,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   <p className="font-display text-lg font-bold">{fmtTime(openProductionShift.start)}</p>
                 </div>
               </div>
+              {/* Report downtime lives right under the shift header so it's
+                  reachable without scrolling past every field. */}
+              <div className="mb-5 -mt-2">
+                <DowntimeButton
+                  activeDowntime={(openProductionShift.downtimeLog || []).find((d) => !d.end)}
+                  onStart={startDowntime}
+                  onEnd={endDowntime}
+                  actionPending={downtimeActionPending}
+                />
+              </div>
 
               <Section label="Machine">
                 {roleFor(currentMechanic) === 'employee' ? (
@@ -18657,13 +18667,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
                 />
               </Section>
-
-              <DowntimeButton
-                activeDowntime={(openProductionShift.downtimeLog || []).find((d) => !d.end)}
-                onStart={startDowntime}
-                onEnd={endDowntime}
-                actionPending={downtimeActionPending}
-              />
 
               <div className="mt-6 flex gap-2">
                 {altOptionsFor(currentMechanic).length > 1 && (
