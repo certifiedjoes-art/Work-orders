@@ -2880,6 +2880,11 @@ function ClockOutReviewOverlay({ show, openEntry, skippedLunch, mechanic, onConf
               <span>{fmtDate(effectiveClockOut)}, {fmtTime(effectiveClockOut)}</span>
             )}
           </div>
+          {localDateFromIso(openEntry.clockIn) !== localDateStr() && !fixingDate && (
+            <p className="text-xs font-semibold" style={{ color: '#E5A93B' }}>
+              ⚠ This shift started {fmtDate(openEntry.clockIn)}. Clock-out will be recorded as right now ({fmtDate(effectiveClockOut)}). If you actually finished earlier, tap "Fix the date" below.
+            </p>
+          )}
           {!fixingDate && (
             <button type="button" onClick={() => setFixingDate(true)} className="text-xs underline" style={{ color: COLORS.accent }}>
               Forgot to clock out yesterday or before? Fix the date
@@ -2966,6 +2971,11 @@ function ProductionClockOutReviewOverlay({ show, shift, mechanic, unitTypes, onC
               <span>{fmtDate(effectiveEnd)}, {fmtTime(effectiveEnd)}</span>
             )}
           </div>
+          {!isSwitch && localDateFromIso(shift.start) !== localDateStr() && !fixingDate && (
+            <p className="text-xs font-semibold" style={{ color: '#E5A93B' }}>
+              ⚠ This shift started {fmtDate(shift.start)}. Clock-out will be recorded as right now ({fmtDate(effectiveEnd)}). If you actually finished earlier, tap "Fix the date" below.
+            </p>
+          )}
           {!isSwitch && !fixingDate && (
             <button type="button" onClick={() => setFixingDate(true)} className="text-xs underline" style={{ color: COLORS.accent }}>
               Forgot to clock out yesterday or before? Fix the date
@@ -6174,22 +6184,81 @@ function savePendingWrites(queue) {
 }
 async function queueWrite(collection, op) {
   const queue = loadPendingWrites();
-  queue.push({ ...op, collection });
+  queue.push({ ...op, collection, qid: uid() });
   savePendingWrites(queue);
   await flushPendingWrites();
+}
+
+// Live listeners replace local state with whatever the server has — but on
+// weak signal the server may not have received a just-made change yet (it's
+// still sitting in the queue above). Without this, a clock-out made offline
+// would "un-happen" on screen the moment the next server update arrived,
+// the shift would look still open, and the person would clock out AGAIN on a
+// later day — which then wins and moves the clock-out date forward. This
+// lays any not-yet-confirmed changes for a collection back on top of the
+// server's copy so the screen always shows what the person actually did.
+function applyPendingWrites(collection, list) {
+  const pending = loadPendingWrites().filter((op) => op.collection === collection);
+  if (pending.length === 0) return list;
+  let out = list.slice();
+  for (const op of pending) {
+    if (op.kind === 'save' && op.entry) {
+      const i = out.findIndex((x) => x.id === op.entry.id);
+      if (i >= 0) out[i] = op.entry; else out.push(op.entry);
+    } else if (op.kind === 'patch') {
+      out = out.map((x) => (x.id === op.entryId ? { ...x, ...op.patch } : x));
+    } else if (op.kind === 'delete') {
+      out = out.filter((x) => x.id !== op.entryId);
+    }
+  }
+  return out;
 }
 // Safe to call anytime, as often as needed — does nothing if the queue is
 // already empty, and only removes an item once its write has genuinely
 // been confirmed. An item whose collection isn't recognized (shouldn't
 // normally happen) is left in place rather than silently dropped, so
 // nothing real ever quietly vanishes even in an unexpected case.
-async function flushPendingWrites() {
+//
+// Only ONE flush runs at a time. On weak signal a single write can take
+// longer than the 15-second safety-net timer, and the old version let
+// several flushes overlap — each worked from its own copy of the queue, so
+// they could send the same write twice, replay an older change after a
+// newer one, or save an out-of-date queue over writes added in the
+// meantime (silently losing them). Now an overlapping call just waits for
+// the one already running, then runs once more to catch anything added.
+let flushInFlight = null;
+let flushAgain = false;
+function flushPendingWrites() {
+  if (flushInFlight) { flushAgain = true; return flushInFlight; }
+  flushInFlight = (async () => {
+    try {
+      do {
+        flushAgain = false;
+        await flushPendingWritesOnce();
+      } while (flushAgain);
+    } finally {
+      flushInFlight = null;
+    }
+  })();
+  return flushInFlight;
+}
+async function flushPendingWritesOnce() {
   const queue = loadPendingWrites();
   if (queue.length === 0) return;
-  const stillPending = [];
+  // Give any older queued item (from before ids existed) one too.
+  if (queue.some((op) => !op.qid)) {
+    queue.forEach((op) => { if (!op.qid) op.qid = uid(); });
+    savePendingWrites(queue);
+  }
+  const doneIds = new Set();
+  const blockedCollections = new Set();
   for (const op of queue) {
+    // Once one write in a collection fails, hold the rest of that
+    // collection: later writes may depend on it (a patch needs its save
+    // first, a second edit must land after the first), so keep the order.
+    if (blockedCollections.has(op.collection)) continue;
     const handlers = OFFLINE_QUEUE_HANDLERS[op.collection];
-    if (!handlers) { stillPending.push(op); continue; }
+    if (!handlers) continue;
     try {
       if (op.kind === 'save') await handlers.save(op.entry);
       else if (op.kind === 'patch') await handlers.patch(op.entryId, op.patch);
@@ -6197,11 +6266,15 @@ async function flushPendingWrites() {
       else if (op.kind === 'bulkSave') await handlers.bulkSave(op.entries);
       else if (op.kind === 'bulkPatch') await handlers.bulkPatch(op.patchesById);
       else if (op.kind === 'setWhole') await handlers.setWhole(op.value);
+      doneIds.add(op.qid);
     } catch (e) {
-      stillPending.push(op);
+      blockedCollections.add(op.collection);
     }
   }
-  savePendingWrites(stillPending);
+  // Re-read the queue now rather than trusting the copy from before the
+  // sends — anything added while those writes were in flight must survive.
+  const latest = loadPendingWrites();
+  savePendingWrites(latest.filter((op) => !doneIds.has(op.qid)));
 }
 
 // One-time (but safe to re-run) migration: copies every entry from the
@@ -13172,7 +13245,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     (async () => {
       await selfHealMigration('timesheets', 'timesheetEntries', 'timesheet entries');
       onTs = tsRef.on('value', (snap) => {
-        const val = Object.values(snap.val() || {});
+        const val = applyPendingWrites('timesheets', Object.values(snap.val() || {}));
         setTimesheets(val);
         cacheSet('timesheets', val);
       });
@@ -13186,7 +13259,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     (async () => {
       await selfHealMigration('driverLogs', 'driverLogRecords', 'driver logs');
       on = ref.on('value', (snap) => {
-        const val = Object.values(snap.val() || {});
+        const val = applyPendingWrites('driverLogs', Object.values(snap.val() || {}));
         setDriverLogs(val);
         cacheSet('driverLogs', val);
       });
@@ -13891,7 +13964,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     let on = null;
     (async () => {
       await selfHealMigration('productionShifts', 'productionShiftRecords', 'production shifts');
-      on = ref.on('value', (snap) => setProductionShifts(Object.values(snap.val() || {})));
+      on = ref.on('value', (snap) => setProductionShifts(applyPendingWrites('productionShifts', Object.values(snap.val() || {}))));
     })();
     return () => { if (on) ref.off('value', on); };
   }, []);
