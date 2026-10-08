@@ -4806,7 +4806,7 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
   );
 }
 
-function SidebarMenu({ show, onClose, mechanic, isAdmin, isForeman, isProduction, onNavigate, onLogout, onCheckUpdates, t }) {
+function SidebarMenu({ show, onClose, mechanic, isAdmin, isSafety, isForeman, isProduction, onNavigate, onLogout, onCheckUpdates, t }) {
   if (!show) return null;
   const item = (icon, label, onClick, color) => (
     <button
@@ -4839,7 +4839,7 @@ function SidebarMenu({ show, onClose, mechanic, isAdmin, isForeman, isProduction
           </div>
 
           <div className="space-y-1 mb-4">
-            {isAdmin && item('🛠️', 'Admin', () => onNavigate('admin'))}
+            {(isAdmin || isSafety) && item('🛠️', 'Admin', () => onNavigate('admin'))}
             {item('⏱️', 'Shift', () => onNavigate('shift'))}
             {item('🗺️', 'Maps', () => onNavigate('maps'))}
             {item('🛣️', 'Highway Map', () => onNavigate('highwayMap'))}
@@ -17159,6 +17159,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   };
 
   const removeMechanic = async (name) => {
+    // Only an admin can remove another admin. Removing someone only takes them
+    // off the roster and ends their access — timesheets, production shifts,
+    // driver log books and work orders are never touched.
+    if (!isAdmin && admins.includes(name)) return;
     const nextMechanics = mechanics.filter((m) => m !== name);
     await persistMeta(nextMechanics, units);
     const nextPins = { ...pins };
@@ -18406,7 +18410,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             <div>
               <p className="font-display text-xs uppercase mb-2" style={{ color: COLORS.accent, letterSpacing: '0.3em' }}>Harder Contracting</p>
               <h1 className="font-display text-3xl sm:text-4xl font-bold">{t('board')}</h1>
-              {(isAdmin || isForeman) && (
+              {(isAdmin || isForeman || isSafety) && (
                 <button
                   onClick={() => setScreen('admin')}
                   className="font-display text-xs uppercase tracking-wider mt-2 focus:outline-none hover:opacity-70 transition-opacity"
@@ -18437,6 +18441,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             onClose={() => setShowSidebar(false)}
             mechanic={currentMechanic}
             isAdmin={isAdmin}
+            isSafety={isSafety}
             isForeman={isForeman}
             isProduction={jobTypeFor(currentMechanic) === 'production'}
             onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
@@ -18844,6 +18849,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           isProduction={jobTypeFor(currentMechanic) === 'production'}
           isForeman={isForeman}
           isAdmin={isAdmin}
+            isSafety={isSafety}
           onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
           onCheckUpdates={async () => {
             try {
@@ -19127,6 +19133,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           isProduction={jobTypeFor(currentMechanic) === 'production'}
           isForeman={isForeman}
           isAdmin={isAdmin}
+            isSafety={isSafety}
           onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
           onCheckUpdates={async () => {
             try {
@@ -19570,6 +19577,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             >
               <option value="">Everyone</option>
               {mechanics.map((m) => <option key={m} value={m}>{m}</option>)}
+              {/* Former employees (removed from the roster) still have their timesheets on file — keep them filterable. */}
+              {Array.from(new Set([...timesheets.map((t) => t.mechanic), ...productionShifts.map((x) => x.employee)]))
+                .filter((n) => n && !mechanics.includes(n))
+                .sort((a, b) => a.localeCompare(b))
+                .map((n) => <option key={n} value={n}>{n} (former)</option>)}
             </select>
             <div className="grid grid-cols-2 gap-3 mt-3">
                 <label className="block">
@@ -19692,6 +19704,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         </div>
       );
     }
+
+    // The Safety Coordinator gets the same Admin screen as an admin. Not included: GPS machine tracks (those live on the Maps screen, still admin-only), changing roles, and removing employees.
+    const adminAccess = isAdmin || isSafety;
 
     const filtered = timesheets.filter((t) => {
       if (tsFilterMechanic && t.mechanic !== tsFilterMechanic) return false;
@@ -19855,6 +19870,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           onClose={() => setShowSidebar(false)}
           mechanic={currentMechanic}
           isAdmin={isAdmin}
+            isSafety={isSafety}
           isForeman={isForeman}
           isProduction={jobTypeFor(currentMechanic) === 'production'}
           onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
@@ -19905,7 +19921,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             />
           )}
 
-          {isAdmin && (
+          {adminAccess && (
           <button
             onClick={() => setScreen('pdtTranslations')}
             className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-2 rounded-lg mb-6"
@@ -19915,7 +19931,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </button>
           )}
 
-          {isAdmin && (
+          {adminAccess && (
           <button
             onClick={() => setScreen('dashboard')}
             className="w-full flex items-center justify-between rounded-lg px-4 py-3.5 mb-3 font-display font-semibold text-sm uppercase tracking-wide"
@@ -19926,7 +19942,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </button>
           )}
 
-          {isAdmin && (
+          {adminAccess && (
           <button
             onClick={() => setScreen('maps')}
             className="w-full flex items-center justify-between rounded-lg px-4 py-3.5 mb-3 font-display font-semibold text-sm uppercase tracking-wide"
@@ -19937,7 +19953,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </button>
           )}
 
-          {isAdmin && (
+          {adminAccess && (
           <button
             onClick={() => setScreen('highwayMap')}
             className="w-full flex items-center justify-between rounded-lg px-4 py-3.5 mb-3 font-display font-semibold text-sm uppercase tracking-wide"
@@ -20183,7 +20199,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   </div>
                 </div>
 
-                {isAdmin ? (
+                {adminAccess ? (
                   <select
                     value={assignedUnitFor(m)}
                     onChange={(e) => setAssignedUnit(m, e.target.value)}
@@ -20203,7 +20219,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   </p>
                 )}
 
-                {isAdmin && (
+                {adminAccess && (
                   <div className="mb-3">
                     <span className="text-xs block mb-2" style={{ color: COLORS.inkDim }}>Alternate jobs (optional) — check any others this person regularly switches into</span>
                     <button
@@ -20248,7 +20264,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   </div>
                 )}
 
-                {isAdmin && (
+                {adminAccess && (
                   <EmployeeEmailEditor
                     key={m}
                     name={m}
@@ -20278,9 +20294,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   </div>
                 )}
 
-                {isAdmin && (showRemoveConfirm === m ? (
+                {adminAccess && (isAdmin || !admins.includes(m)) && (showRemoveConfirm === m ? (
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm" style={{ color: COLORS.inkDim }}>Remove {m}? Their past work orders stay on record.</span>
+                    <span className="text-sm" style={{ color: COLORS.inkDim }}>Remove {m}? Their timesheets, log books and past work orders all stay on record.</span>
                     <Btn variant="danger" onClick={() => removeMechanic(m)}>Yes, remove</Btn>
                     <Btn variant="ghost" onClick={() => setShowRemoveConfirm(null)}>Cancel</Btn>
                   </div>
@@ -20462,7 +20478,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 <Btn variant="ghost" onClick={() => exportTimesheets(weekEntries, weekProductionShifts, 'week-review', viewedWeekStart, weekEndOf(viewedWeekStart))} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
                   📊 Open as spreadsheet
                 </Btn>
-                {isAdmin && (
+                {adminAccess && (
                   <Btn variant="ghost" onClick={() => window.print()} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
                     🖨️ Print
                   </Btn>
@@ -20475,7 +20491,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   entries={weekEntries}
                   productionEntries={tsFilterMechanic ? weekProductionShifts.filter((s) => s.employee === tsFilterMechanic) : weekProductionShifts}
                 />
-                {isAdmin && (
+                {adminAccess && (
                   <PrintPortal>
                     <WeekReviewTable
                       entries={tsFilterMechanic ? weekEntries.filter((e) => e.mechanic === tsFilterMechanic) : weekEntries}
@@ -20611,7 +20627,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                               onDelete={() => deleteTimesheetEntry(item.data.id)}
                               onAddJob={addTimesheetJob}
                               onRemoveJob={removeTimesheetJob}
-                              isAdmin={isAdmin}
+                              isAdmin={adminAccess}
                               onConfirmHours={(val) => updateTimesheetEntry(item.data.id, { hoursConfirmedGood: val })}
                             />
                           ) : editingShiftId === item.data.id ? (
@@ -20623,14 +20639,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                               onCancel={() => setEditingShiftId(null)}
                               onSave={(patch) => updateProductionShift(item.data.id, patch)}
                               onDelete={() => deleteProductionShift(item.data.id)}
-                              isAdmin={isAdmin}
+                              isAdmin={adminAccess}
                             />
                           ) : (
                             <ProductionShiftCard
                               key={item.data.id}
                               shift={item.data}
                               unitTypes={unitTypes}
-                              isAdmin={isAdmin}
+                              isAdmin={adminAccess}
                               onEdit={() => setEditingShiftId(item.data.id)}
                               onConfirmHours={(val) => updateProductionShift(item.data.id, { hoursConfirmedGood: val })}
                             />
@@ -20646,7 +20662,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </AdminSection>
           )}
 
-          {isAdmin && (
+          {adminAccess && (
           <AdminSection
             icon="⛽"
             title="Fuel Log"
@@ -20728,6 +20744,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 {driverNames.map((name) => (
                   <div key={name} className="flex items-center justify-between text-sm rounded-lg p-2" style={{ background: COLORS.surfaceRaised }}>
                     <span>{name}</span>
+                    {/* Permanently deleting a log book is admin-only — removing an employee from the roster never touches their logs. */}
+                    {isAdmin && (
                     <button
                       onClick={() => {
                         const count = driverLogs.filter((l) => l.driver === name).length;
@@ -20741,6 +20759,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     >
                       Remove driver
                     </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -20797,7 +20816,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                                     onUpdateChange={(changeId, patch) => updateDriverStatusChange(l.id, changeId, patch)}
                                     onRemoveChange={(changeId) => removeDriverStatusChange(l.id, changeId)}
                                     onCancel={() => setEditingDriverLogId(null)}
-                                    isAdmin={isAdmin}
+                                    isAdmin={adminAccess}
                                   />
                                 ) : (
                                   <button
@@ -20898,7 +20917,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </AdminSection>
           )}
 
-          {isAdmin && (
+          {adminAccess && (
           <AdminSection
             icon="💵"
             title="Extra-Task Billing"
@@ -20913,7 +20932,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </AdminSection>
           )}
 
-          {isAdmin && (
+          {adminAccess && (
           <AdminSection
             icon="🛢️"
             title="Oil Change & Voltage Alerts"
@@ -20968,6 +20987,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           onClose={() => setShowSidebar(false)}
           mechanic={currentMechanic}
           isAdmin={isAdmin}
+            isSafety={isSafety}
           isForeman={isForeman}
           isProduction={jobTypeFor(currentMechanic) === 'production'}
           onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
@@ -21221,6 +21241,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           onClose={() => setShowSidebar(false)}
           mechanic={currentMechanic}
           isAdmin={isAdmin}
+            isSafety={isSafety}
           isForeman={isForeman}
           isProduction={jobTypeFor(currentMechanic) === 'production'}
           onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
@@ -22427,7 +22448,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   }
 
   if (screen === 'pdtTranslations') {
-    if (!isAdmin) {
+    if (!isAdmin && !isSafety) {
       return (
         <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8 flex items-center justify-center">
           <div className="text-center">
