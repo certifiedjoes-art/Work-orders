@@ -859,7 +859,7 @@ const ADMIN_ONLY_SAFETY_CATEGORIES = ['Office Administration', 'Driver Orientati
 // alongside) uploaded documents — shown as a link-out button at the top
 // of that category's section.
 const EXTERNAL_SAFETY_LINKS = {
-  'Woodlands Training': { label: 'Open Woodlands Training Course', url: 'https://coolenforestry.floralms.com/content/421/info/VANDERWELL_WOODLANDS_ORIENTATION_%28Layout%29' },
+  'Woodlands Training': { label: 'Open Woodlands Training Course', url: 'https://coolenforestry.floralms.com/content/448/info/VANDERWELL_WOODLANDS_ORIENTATION_26-27' },
 };
 // Everything except Woodlands Training gets grouped under one "📁
 // Documents" folder in the Safety page, rather than each being its own
@@ -13093,6 +13093,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [editingOilBaselineForUnit, setEditingOilBaselineForUnit] = useState(null);
   // Completion record for watch-only (noQuiz) job-hazard courses, which
   // don't produce a trainingRecords quiz entry — { [slug]: { [courseKey]: timestamp } }.
+  const [woodlandsUrlSetting, setWoodlandsUrlSetting] = useState(() => cacheGet('woodlandsUrl', '')); // admin-editable link to the Woodlands Training course; falls back to the built-in default
+  const [editingWoodlandsUrl, setEditingWoodlandsUrl] = useState(false);
+  const [woodlandsUrlDraft, setWoodlandsUrlDraft] = useState('');
   const [videoWatched, setVideoWatched] = useState(() => cacheGet('videoWatched', {}));
   const [blocks, setBlocks] = useState([]);
   const [productionShifts, setProductionShifts] = useState([]);
@@ -14100,6 +14103,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
 
   useEffect(() => {
+    const ref = firebase.database().ref('appSettings/woodlandsTrainingUrl');
+    const on = ref.on('value', (snap) => {
+      const val = typeof snap.val() === 'string' ? snap.val() : '';
+      setWoodlandsUrlSetting(val);
+      cacheSet('woodlandsUrl', val);
+    });
+    return () => ref.off('value', on);
+  }, [firebaseUser]);
+
+  useEffect(() => {
     const ref = firebase.database().ref('videoWatched');
     const on = ref.on('value', (snap) => {
       const val = snap.val() || {};
@@ -15009,6 +15022,20 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // instead opens the outside course in a new tab and offers a
   // self-report "Mark Complete" button, since there's nothing in-app to
   // track its progress.
+  const woodlandsUrl = woodlandsUrlSetting || EXTERNAL_SAFETY_LINKS['Woodlands Training'].url;
+  const externalCourseUrl = (key) => (key === 'woodlandsTraining' ? woodlandsUrl : (EXTERNAL_TRAINING_COURSES[key] || {}).url);
+  const saveWoodlandsUrl = async (raw) => {
+    const url = (raw || '').trim();
+    if (url && !/^https?:\/\//i.test(url)) { alert('The link needs to start with https://'); return false; }
+    const ref = firebase.database().ref('appSettings/woodlandsTrainingUrl');
+    try {
+      await (url ? ref.set(url) : ref.remove());
+      return true;
+    } catch (e) {
+      alert("Couldn't save the link — check your signal and try again.");
+      return false;
+    }
+  };
   const renderTrainingListItem = (key) => {
     const course = TRAINING_COURSES[key];
     const external = EXTERNAL_TRAINING_COURSES[key];
@@ -15020,7 +15047,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>{external.description}</p>
           <div className="flex gap-2 flex-wrap">
             <a
-              href={external.url}
+              href={externalCourseUrl(key)}
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs font-display uppercase tracking-wider font-semibold px-3 py-2 rounded-lg"
@@ -22805,7 +22832,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 >
                   {EXTERNAL_SAFETY_LINKS[category] && (
                     <a
-                      href={EXTERNAL_SAFETY_LINKS[category].url}
+                      href={category === 'Woodlands Training' ? woodlandsUrl : EXTERNAL_SAFETY_LINKS[category].url}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-3 mb-3"
@@ -22814,6 +22841,44 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       <span className="text-sm font-semibold">🔗 {EXTERNAL_SAFETY_LINKS[category].label}</span>
                       <span>→</span>
                     </a>
+                  )}
+                  {category === 'Woodlands Training' && (isAdmin || isSafety) && (
+                    <div className="mb-3">
+                      {editingWoodlandsUrl ? (
+                        <div className="rounded-lg p-3" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+                          <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Paste the new Woodlands Training course link. Everyone's "Open Course" and "Open Woodlands Training Course" buttons use it right away.</p>
+                          <input
+                            type="url"
+                            value={woodlandsUrlDraft}
+                            onChange={(e) => setWoodlandsUrlDraft(e.target.value)}
+                            placeholder="https://…"
+                            className="w-full px-3 py-2 rounded-lg text-sm mb-2"
+                            style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                          />
+                          <div className="flex gap-2">
+                            <Btn onClick={async () => { if (await saveWoodlandsUrl(woodlandsUrlDraft)) setEditingWoodlandsUrl(false); }}>Save link</Btn>
+                            <Btn variant="ghost" onClick={() => setEditingWoodlandsUrl(false)}>Cancel</Btn>
+                          </div>
+                          {woodlandsUrlSetting && (
+                            <button
+                              onClick={async () => { if (confirm('Go back to the built-in link?')) { if (await saveWoodlandsUrl('')) setEditingWoodlandsUrl(false); } }}
+                              className="text-xs mt-2"
+                              style={{ color: COLORS.inkDim }}
+                            >
+                              Reset to default link
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => { setWoodlandsUrlDraft(woodlandsUrl); setEditingWoodlandsUrl(true); }}
+                          className="text-xs"
+                          style={{ color: COLORS.accent }}
+                        >
+                          ✏️ Change course link
+                        </button>
+                      )}
+                    </div>
                   )}
                   {docs.length === 0 ? (
                     <p className="text-sm mb-3" style={{ color: COLORS.inkDim }}>No documents yet.</p>
