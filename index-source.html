@@ -6363,6 +6363,24 @@ async function translateText(text, targetLang) {
   }
 }
 
+// Asks the backend to push a short notification to specific people by name
+// (only those who've turned on notifications on their phone get one).
+// Best-effort: if there's no signal the work order itself is still saved
+// and queued reliably — this just tells people about it sooner.
+async function notifyPeople(names, title, body) {
+  if (!names || names.length === 0) return false;
+  try {
+    const res = await fetch(CLOUD_FUNCTION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: APP_SECRET, mode: 'notifyUsers', names, title, body }),
+    });
+    return res.ok;
+  } catch (e) {
+    return false;
+  }
+}
+
 function getLocalizedChecklistText(text, origLang, translations, lang, index) {
   if (origLang === lang) return text;
   const entry = Array.isArray(translations) ? translations[index] : (translations && translations[text]);
@@ -6849,16 +6867,74 @@ function ExtraTasksEditor({ shift, onAdd, onRemove }) {
 // "down since" timer — until the operator taps "Back up" to close it out.
 // That gives an actual downtime DURATION instead of just a timestamped
 // note, which is what actually matters for tracking machine reliability.
-function DowntimeButton({ activeDowntime, onStart, onEnd, actionPending }) {
+function DowntimeButton({ activeDowntime, onStart, onEnd, actionPending, crewOptions, currentName }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
+  // "Back up" step — asks what was fixed and by whom so the work order
+  // created when the downtime was reported can be closed out automatically.
+  const [closing, setClosing] = useState(false);
+  const [whatFixed, setWhatFixed] = useState('');
+  const [fixedBy, setFixedBy] = useState([]);
+  const [otherBy, setOtherBy] = useState('');
+  const crew = [currentName, ...(crewOptions || [])].filter((n, i, arr) => n && arr.indexOf(n) === i);
+  const toggleBy = (n) => setFixedBy((cur) => (cur.includes(n) ? cur.filter((x) => x !== n) : [...cur, n]));
+  const resetClose = () => { setClosing(false); setWhatFixed(''); setFixedBy([]); setOtherBy(''); };
+  const allBy = [...fixedBy, otherBy.trim()].filter(Boolean);
 
   if (activeDowntime) {
+    if (!closing) {
+      return (
+        <div className="mb-2 rounded-lg p-4" style={{ background: COLORS.surface, border: `2px solid #C1521A` }}>
+          <p className="text-sm font-semibold mb-1" style={{ color: '#C1521A' }}>⚠ Down since {fmtTime(activeDowntime.start)}</p>
+          <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>{activeDowntime.reason}</p>
+          <Btn onClick={() => { setFixedBy(currentName ? [currentName] : []); setClosing(true); }} disabled={actionPending}>✅ Back up</Btn>
+        </div>
+      );
+    }
     return (
       <div className="mb-2 rounded-lg p-4" style={{ background: COLORS.surface, border: `2px solid #C1521A` }}>
         <p className="text-sm font-semibold mb-1" style={{ color: '#C1521A' }}>⚠ Down since {fmtTime(activeDowntime.start)}</p>
         <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>{activeDowntime.reason}</p>
-        <Btn onClick={onEnd} disabled={actionPending}>{actionPending ? '…' : '✅ Back up'}</Btn>
+        <p className="text-sm font-semibold mb-1">What was fixed?</p>
+        <textarea
+          value={whatFixed}
+          onChange={(e) => setWhatFixed(e.target.value)}
+          placeholder="e.g. Replaced hydraulic hose on the boom"
+          rows={3}
+          className="w-full rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 mb-3"
+          style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+        />
+        <p className="text-sm font-semibold mb-1">Fixed by</p>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {crew.map((n) => {
+            const on = fixedBy.includes(n);
+            return (
+              <button key={n} type="button" onClick={() => toggleBy(n)} className="text-xs font-semibold px-3 py-1.5 rounded-full" style={{ border: `2px solid ${on ? COLORS.accent : COLORS.line}`, background: on ? COLORS.accent : 'transparent', color: on ? '#1B1F19' : COLORS.ink }}>
+                {on ? '✓ ' : ''}{n}
+              </button>
+            );
+          })}
+        </div>
+        <input
+          type="text"
+          value={otherBy}
+          onChange={(e) => setOtherBy(e.target.value)}
+          placeholder="Someone else (type name)"
+          className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 mb-3"
+          style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+        />
+        <div className="flex flex-col gap-2">
+          <Btn
+            onClick={async () => { await onEnd({ fixed: true, whatFixed: whatFixed.trim(), fixedBy: allBy }); resetClose(); }}
+            disabled={!whatFixed.trim() || allBy.length === 0 || actionPending}
+          >
+            {actionPending ? '…' : '✅ Fixed — back up & close work order'}
+          </Btn>
+          <Btn variant="ghost" onClick={async () => { await onEnd({ fixed: false }); resetClose(); }} disabled={actionPending}>
+            Back up, not fixed — leave work order open
+          </Btn>
+          <button type="button" onClick={resetClose} className="text-xs underline" style={{ color: COLORS.inkDim }}>Cancel</button>
+        </div>
       </div>
     );
   }
@@ -6871,7 +6947,7 @@ function DowntimeButton({ activeDowntime, onStart, onEnd, actionPending }) {
         </button>
       ) : (
         <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `2px solid #C1521A` }}>
-          <p className="text-sm mb-2" style={{ color: COLORS.inkDim }}>This creates a new work order on the board right away, and keeps the machine flagged down until you tap "Back up".</p>
+          <p className="text-sm mb-2" style={{ color: COLORS.inkDim }}>This creates a new work order on the board right away, and keeps the machine flagged down until you tap "Back up" — then you'll say what was fixed and by whom.</p>
           <textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -6883,6 +6959,81 @@ function DowntimeButton({ activeDowntime, onStart, onEnd, actionPending }) {
           <div className="flex gap-2">
             <Btn onClick={() => { onStart(reason); setReason(''); setOpen(false); }} disabled={!reason.trim() || actionPending}>{actionPending ? '…' : 'Send report'}</Btn>
             <Btn variant="ghost" onClick={() => { setOpen(false); setReason(''); }}>Cancel</Btn>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// For things an operator notices that don't need attention right away —
+// a worn hose, a cracked light, a leak that's slow. Opens a work order on
+// the board for that machine and pushes a notification to the mechanics,
+// WITHOUT flagging the machine down or starting a downtime clock.
+function DeficiencyButton({ onSubmit }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [photos, setPhotos] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const addFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    for (const f of files.slice(0, 3)) {
+      try {
+        const d = await compressImage(f);
+        setPhotos((cur) => [...cur, d].slice(0, 3));
+      } catch (err) { /* skip unreadable photo */ }
+    }
+  };
+  const send = async () => {
+    setBusy(true);
+    try {
+      await onSubmit(text, photos);
+      setText(''); setPhotos([]); setOpen(false);
+      setSent(true);
+      setTimeout(() => setSent(false), 6000);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mb-2">
+      {sent && (
+        <p className="text-xs mb-2 text-center font-semibold" style={{ color: COLORS.accent }}>✓ Deficiency reported — work order opened and mechanics notified.</p>
+      )}
+      {!open ? (
+        <button onClick={() => setOpen(true)} className="w-full font-display font-bold uppercase tracking-wide text-sm py-3 rounded-xl" style={{ border: `2px solid #D9A441`, color: '#D9A441', background: 'transparent' }}>
+          🔧 Report deficiency
+        </button>
+      ) : (
+        <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `2px solid #D9A441` }}>
+          <p className="text-sm mb-2" style={{ color: COLORS.inkDim }}>Something that needs fixing but doesn't need attention right away. Opens a work order on the board and notifies the mechanics. The machine is NOT marked down.</p>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="What did you notice?"
+            rows={3}
+            className="w-full rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 mb-3"
+            style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+          <div className="flex flex-wrap gap-2 mb-3 items-center">
+            {photos.map((d, i) => (
+              <div key={i} className="relative">
+                <img src={d} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 8 }} />
+                <button type="button" onClick={() => setPhotos((cur) => cur.filter((_, k) => k !== i))} className="absolute -top-2 -right-2 rounded-full text-xs font-bold" style={{ width: 20, height: 20, background: '#C1521A', color: '#fff' }}>×</button>
+              </div>
+            ))}
+            {photos.length < 3 && (
+              <label className="text-xs underline cursor-pointer" style={{ color: COLORS.accent }}>
+                📷 Add photo
+                <input type="file" accept="image/*" capture="environment" multiple onChange={addFiles} style={{ display: 'none' }} />
+              </label>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Btn onClick={send} disabled={!text.trim() || busy}>{busy ? '…' : 'Send report'}</Btn>
+            <Btn variant="ghost" onClick={() => { setOpen(false); setText(''); setPhotos([]); }} disabled={busy}>Cancel</Btn>
           </div>
         </div>
       )}
@@ -16757,11 +16908,37 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   };
 
   const [downtimeActionPending, setDowntimeActionPending] = useState(false);
+
+  // Machine hours straight from Samsara (what the backend last polled into
+  // samsaraDiagnostics) — blank if that unit has no reading yet, so a work
+  // order never gets a made-up number.
+  const samsaraHoursFor = (unit) => {
+    const d = samsaraDiagnostics[slugForUnit(unit)];
+    const h = d && d.hours != null ? parseFloat(d.hours) : NaN;
+    return isNaN(h) ? '' : Math.round(h * 10) / 10;
+  };
+  // Everyone on the mechanic side except the person reporting.
+  const mechanicsToNotify = () => mechanics.filter((m) => m && m !== currentMechanic && jobTypeFor(m) === 'mechanic');
+  // Same note shape (and Spanish->English handling) as addNote.
+  const buildNote = async (text, type) => {
+    const note = { id: uid(), author: currentMechanic, text, ts: new Date().toISOString(), type: type || 'note' };
+    if (lang === 'es') {
+      const translated = await translateText(text);
+      if (translated) {
+        note.originalText = text;
+        note.originalLang = 'es';
+        note.text = translated;
+      }
+    }
+    return note;
+  };
+
   const startDowntime = async (reason) => {
     if (!openProductionShift || !reason.trim()) return;
     setDowntimeActionPending(true);
     try {
-      const entry = { id: uid(), reason: reason.trim(), start: new Date().toISOString(), end: null };
+      const orderId = uid();
+      const entry = { id: uid(), reason: reason.trim(), start: new Date().toISOString(), end: null, orderId };
       await patchOpenProductionShift({ downtimeLog: [...(openProductionShift.downtimeLog || []), entry] });
       // Also creates a real Open work order on the board, tagged to the
       // machine, so it doesn't just sit as a log entry nobody sees.
@@ -16769,37 +16946,119 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         await persistMeta(mechanics, [...units, openProductionShift.machine]);
       }
       const order = {
-        id: uid(),
+        id: orderId,
         unit: openProductionShift.machine,
         description: await buildLocalizedField('⚠ Downtime: ' + reason.trim(), lang),
         workedOnBy: [],
-        hours: '',
+        hours: samsaraHoursFor(openProductionShift.machine),
         dueDate: '',
         dateCreated: localDateStr(),
         status: 'Open',
         notes: [],
         createdBy: currentMechanic,
         media: [],
+        downtime: true,
       };
       await saveOneOrder(order);
+      const shortReason = reason.trim().length > 120 ? reason.trim().slice(0, 117) + '…' : reason.trim();
+      notifyPeople(mechanicsToNotify(), `⚠ Machine down — ${openProductionShift.machine}`, `${currentMechanic}: ${shortReason}`);
     } finally {
       setDowntimeActionPending(false);
     }
   };
   // Closes out whichever downtime entry is still open (no end time yet) —
   // same "one active thing at a time" shape as startLunch/endLunch.
-  const endDowntime = async () => {
+  // fixInfo = { fixed: true, whatFixed, fixedBy: [names] } closes the work
+  // order that was opened when downtime was reported (status Done, who
+  // fixed it, a note saying what was fixed, and current Samsara machine
+  // hours). { fixed: false } just ends the downtime and leaves the work
+  // order open for the mechanics, with a note that the machine is running.
+  const endDowntime = async (fixInfo) => {
     if (!openProductionShift) return;
     const log = openProductionShift.downtimeLog || [];
     const openIndex = log.findIndex((d) => !d.end);
     if (openIndex === -1) return;
+    const fix = fixInfo && fixInfo.fixed ? fixInfo : { fixed: false };
     setDowntimeActionPending(true);
     try {
-      const nextLog = log.map((d, i) => (i === openIndex ? { ...d, end: new Date().toISOString() } : d));
+      const endIso = new Date().toISOString();
+      const entry = log[openIndex];
+      const machine = openProductionShift.machine;
+      const nextLog = log.map((d, i) => (i === openIndex
+        ? { ...d, end: endIso, fixed: fix.fixed, ...(fix.fixed ? { whatFixed: fix.whatFixed, fixedBy: fix.fixedBy } : {}) }
+        : d));
       await patchOpenProductionShift({ downtimeLog: nextLog });
+
+      const hrs = samsaraHoursFor(machine);
+      const existing = entry.orderId ? orders.find((o) => o.id === entry.orderId) : null;
+      if (fix.fixed) {
+        const noteText = `Fixed: ${fix.whatFixed} — by ${fix.fixedBy.join(', ')}. Machine back up ${fmtTime(endIso)}.`;
+        const note = await buildNote(noteText, 'fix');
+        if (existing) {
+          const crew = [...(existing.workedOnBy || [])];
+          fix.fixedBy.forEach((n) => { if (!crew.includes(n)) crew.push(n); });
+          await patchOneOrder(existing.id, {
+            status: 'Done',
+            hours: hrs !== '' ? hrs : (existing.hours || ''),
+            workedOnBy: crew,
+            notes: [...(existing.notes || []), note],
+            completedAt: endIso,
+          });
+        } else {
+          // Older downtime entries (before orders were linked) or an order
+          // that isn't loaded on this phone — record a finished work order.
+          await saveOneOrder({
+            id: uid(),
+            unit: machine,
+            description: await buildLocalizedField('⚠ Downtime: ' + (entry.reason || ''), lang),
+            workedOnBy: fix.fixedBy,
+            hours: hrs,
+            dueDate: '',
+            dateCreated: localDateStr(new Date(entry.start)),
+            status: 'Done',
+            notes: [note],
+            createdBy: currentMechanic,
+            media: [],
+            downtime: true,
+            completedAt: endIso,
+          });
+        }
+      } else if (existing) {
+        const note = await buildNote(`Machine back up ${fmtTime(endIso)} — not marked fixed, still needs a mechanic to follow up.`, 'note');
+        await patchOneOrder(existing.id, { notes: [...(existing.notes || []), note] });
+      }
     } finally {
       setDowntimeActionPending(false);
     }
+  };
+
+  // Non-urgent problem an operator notices: opens an Open work order on the
+  // board and pushes a notification to the mechanics. Does NOT start a
+  // downtime clock or mark the machine down.
+  const reportDeficiency = async (text, photos) => {
+    if (!openProductionShift || !text.trim()) return;
+    const machine = openProductionShift.machine;
+    if (!units.includes(machine)) {
+      await persistMeta(mechanics, [...units, machine]);
+    }
+    const now = new Date().toISOString();
+    const order = {
+      id: uid(),
+      unit: machine,
+      description: await buildLocalizedField('🔧 Deficiency: ' + text.trim(), lang),
+      workedOnBy: [],
+      hours: samsaraHoursFor(machine),
+      dueDate: '',
+      dateCreated: localDateStr(),
+      status: 'Open',
+      notes: [],
+      createdBy: currentMechanic,
+      media: (photos || []).map((dataUrl) => ({ id: uid(), dataUrl, author: currentMechanic, ts: now })),
+      deficiency: true,
+    };
+    await saveOneOrder(order);
+    const short = text.trim().length > 120 ? text.trim().slice(0, 117) + '…' : text.trim();
+    notifyPeople(mechanicsToNotify(), `🔧 Deficiency — ${machine}`, `${currentMechanic}: ${short}`);
   };
 
   const addBlock = async (name) => {
@@ -17367,7 +17626,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       unit: unitName,
       description: descriptionField,
       workedOnBy: [currentMechanic],
-      hours: data.hours,
+      hours: data.hours !== '' && data.hours != null ? data.hours : samsaraHoursFor(unitName),
       dueDate: data.dueDate,
       dateCreated: localDateStr(),
       status: 'Open',
@@ -18265,6 +18524,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   initialDescription={scanReviewData ? scanReviewData.description : ''}
                   initialUnit={scanReviewData ? scanReviewData.unit : ''}
                   scanBanner={!!scanReviewData}
+                  samsaraHoursFor={samsaraHoursFor}
                   t={t}
                 />
               )}
@@ -18573,7 +18833,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   onStart={startDowntime}
                   onEnd={endDowntime}
                   actionPending={downtimeActionPending}
+                  crewOptions={mechanics.filter((m) => m && jobTypeFor(m) === 'mechanic').sort((a, b) => a.localeCompare(b))}
+                  currentName={currentMechanic}
                 />
+                <DeficiencyButton onSubmit={reportDeficiency} />
               </div>
 
               <Section label="Machine">
@@ -24024,6 +24287,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               lockUnit={activeUnit}
               onCancel={() => setShowAddOrder(false)}
               onSubmit={createOrder}
+              samsaraHoursFor={samsaraHoursFor}
               t={t}
             />
           )}
@@ -25595,7 +25859,7 @@ function AdHocChecklistForm({ onSubmit, onCancel }) {
   );
 }
 
-function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit, t, initialDescription, initialUnit, scanBanner }) {
+function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit, t, initialDescription, initialUnit, scanBanner, samsaraHoursFor }) {
   const tr = t || ((k) => translations.en[k] || k);
   const [description, setDescription] = useState(initialDescription || '');
   const [hours, setHours] = useState('');
@@ -25616,6 +25880,19 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit, t, initi
 
   const finalUnit = addingNewUnit ? newUnitName.trim() : unit;
   const canSubmit = description.trim() && finalUnit;
+
+  // Machine hours fill in by themselves from Samsara as soon as a machine is
+  // picked. Typing in the box takes over (so a hand-read meter always wins),
+  // and clearing it hands control back to Samsara.
+  const [hoursTouched, setHoursTouched] = useState(false);
+  const samsaraHours = samsaraHoursFor && finalUnit ? samsaraHoursFor(finalUnit) : '';
+  useEffect(() => {
+    if (!hoursTouched) setHours(samsaraHours === '' ? '' : String(samsaraHours));
+  }, [samsaraHours, hoursTouched]);
+  const onHoursChange = (v) => {
+    setHours(v);
+    setHoursTouched(v !== '');
+  };
 
   return (
     <div className="rounded-lg p-6 mb-6" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
@@ -25664,9 +25941,12 @@ function NewOrderForm({ mechanics, units, onSubmit, onCancel, lockUnit, t, initi
 
       <TextField label={tr('whatNeedsFixed')} value={description} onChange={setDescription} placeholder={tr('whatNeedsFixedPlaceholder')} helper={tr('whatNeedsFixedHelper')} />
       <div className="grid grid-cols-2 gap-4 mb-4">
-        <TextField label={tr('machineHours')} value={hours} onChange={setHours} placeholder={tr('hourMeterReading')} type="number" mono />
+        <TextField label={tr('machineHours')} value={hours} onChange={onHoursChange} placeholder={tr('hourMeterReading')} type="number" mono />
         <TextField label={tr('whenNeedDone')} value={dueDate} onChange={setDueDate} type="date" mono />
       </div>
+      {!hoursTouched && samsaraHours !== '' && (
+        <p className="text-xs -mt-2 mb-4" style={{ color: COLORS.inkDim }}>Machine hours filled in from Samsara — change them if the meter reads differently.</p>
+      )}
       <div className="flex gap-2 mt-6">
         <Btn onClick={() => canSubmit && onSubmit({ unit: finalUnit, description, hours, dueDate })} disabled={!canSubmit}>{tr('createJob')}</Btn>
         <Btn variant="ghost" onClick={onCancel}>{tr('nevermind')}</Btn>
