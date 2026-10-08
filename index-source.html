@@ -15226,17 +15226,20 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const submitReceipt = async ({ photo, amount, note, date }) => {
     if (savingReceipt) return false;
     setSavingReceipt(true);
+    let step = 'photo upload';
     try {
       const id = uid();
-      const storageRef = firebase.storage().ref(`receipts/${id}.jpg`);
+      // mapImages/ is the Storage folder already confirmed to accept uploads.
+      const storageRef = firebase.storage().ref(`mapImages/receipt-${id}.jpg`);
       await storageRef.putString(photo, 'data_url');
       const photoUrl = await storageRef.getDownloadURL();
+      step = 'saving the receipt details';
       await firebase.database().ref('receipts/' + id).set(stripUndefined({
         id, employee: currentMechanic, date: date || todayStr(), amount: amount || '', note: note || '', photoUrl, createdAt: Date.now(),
       }));
       return true;
     } catch (e) {
-      alert("Couldn't send the receipt. You need signal for this one — try again when you have it. Keep the paper receipt.");
+      alert(`Couldn't send the receipt (problem with ${step}: ${(e && (e.code || e.message)) || 'unknown'}). Keep the paper receipt and tell Joe.`);
       return false;
     } finally {
       setSavingReceipt(false);
