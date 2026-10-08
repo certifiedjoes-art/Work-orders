@@ -13003,6 +13003,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // ---- Unified Shift screen data (ported from the standalone Timesheets app) ----
   const [roles, setRoles] = useState(() => cacheGet('roles', {})); // { [slug]: 'employee'|'foreman'|'admin' }
   const [unitAssignments, setUnitAssignments] = useState(() => cacheGet('unitAssignments', {})); // { [slug]: unitName } — a service truck or a production machine. Which one it is determines mechanic vs. production automatically.
+  const [cookFixOut, setCookFixOut] = useState(''); // datetime-local value for fixing a forgotten cook clock-out
   const [altUnitAssignments, setAltUnitAssignments] = useState(() => cacheGet('altUnitAssignments', {})); // { [slug]: (unitName | '__mechanic__')[] } — any additional jobs someone regularly switches into, beyond their primary. Missing/empty = no alternates, behaves exactly as before.
   // Training required before someone gets into the app — set per employee
   // at invite time (see the invite form's checklist). { [slug]: courseKey[] }.
@@ -14448,7 +14449,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             if (inviteTokenState.role) await setRoleFor(mechanic, inviteTokenState.role);
             if (inviteTokenState.unit) {
               await setAssignedUnit(mechanic, inviteTokenState.unit);
-              effectiveJobType = machineType(inviteTokenState.unit, unitTypes) ? 'production' : 'mechanic';
+              effectiveJobType = jobTypeForUnit(inviteTokenState.unit, unitTypes);
             }
             if (inviteTokenState.requiredTraining && inviteTokenState.requiredTraining.length) {
               await setRequiredTraining(mechanic, inviteTokenState.requiredTraining);
@@ -14474,7 +14475,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               ]);
               const realUnit = assignSnap.val() || '';
               const realUnitTypes = typesSnap.val() || {};
-              effectiveJobType = MACHINE_TYPE_LABELS[machineType(realUnit, realUnitTypes)] ? 'production' : 'mechanic';
+              effectiveJobType = jobTypeForUnit(realUnit, realUnitTypes);
             } catch (e) {
               // network hiccup — fall back to whatever's already loaded locally
             }
@@ -14482,7 +14483,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           localStorage.setItem('deviceMechanic', mechanic);
           addDeviceUser(mechanic);
           setCurrentMechanic(mechanic);
-          setScreen(effectiveJobType === 'production' ? 'shift' : 'dashboard');
+          setScreen(usesShiftScreen(effectiveJobType) ? 'shift' : 'dashboard');
           maybeOfferBiometric(mechanic);
           checkAndPromptEmail(mechanic);
         checkAndPromptPush(mechanic);
@@ -15096,7 +15097,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // a truck/pickup/trailer/light tower (or nothing at all) is 'mechanic' —
   // this is also why "mechanic" is the safe default for anyone unassigned,
   // matching the whole existing crew automatically.
-  const jobTypeFor = (name) => (MACHINE_TYPE_LABELS[machineType(assignedUnitFor(name), unitTypes)] ? 'production' : 'mechanic');
+  // Job type comes from the assigned "unit": a real production machine type
+  // means operator ('production'), the special value '__cook__' means cook
+  // (no machine, simple clock in/out, paid by the day), anything else is a
+  // mechanic.
+  const jobTypeForUnit = (unit, utMap) => (unit === '__cook__' ? 'cook' : (MACHINE_TYPE_LABELS[machineType(unit, utMap)] ? 'production' : 'mechanic'));
+  const jobTypeFor = (name) => jobTypeForUnit(assignedUnitFor(name), unitTypes);
+  const usesShiftScreen = (jobType) => jobType === 'production' || jobType === 'cook';
   // Alternate-job helpers — for the few people who regularly switch between
   // more than one job (e.g. a mechanic who also drives the winch truck, or
   // covers a second machine sometimes). hasAltRole gates whether that
@@ -15114,7 +15121,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return [];
   };
   const hasAltRole = (name) => altListFor(name).length > 0;
-  const jobTypeForValue = (value) => (value === '__mechanic__' ? 'mechanic' : (MACHINE_TYPE_LABELS[machineType(value, unitTypes)] ? 'production' : 'mechanic'));
+  const jobTypeForValue = (value) => (value === '__mechanic__' ? 'mechanic' : jobTypeForUnit(value, unitTypes));
   // The full list of options someone with alternates can choose from today
   // — their primary first, then each configured alternate — each resolved
   // to a real label and job type, ready to drive a dropdown directly.
@@ -15135,7 +15142,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // (mechanics) lands on the work order dashboard, their daily tool.
   const landingScreenFor = (name) => {
     if (admins.includes(name)) return 'admin';
-    return jobTypeFor(name) === 'production' ? 'shift' : 'dashboard';
+    return usesShiftScreen(jobTypeFor(name)) ? 'shift' : 'dashboard';
   };
   // Same fresh-page-load risk as checkAndPromptEmail above, but higher
   // stakes: right after a fresh login (new device, or cache cleared),
@@ -15162,10 +15169,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       cacheSet('unitAssignments', ua);
       cacheSet('unitTypes', ut);
       const unit = ua[slugForMechanic(name)] || '';
-      return MACHINE_TYPE_LABELS[machineType(unit, ut)] ? 'shift' : 'dashboard';
+      return usesShiftScreen(jobTypeForUnit(unit, ut)) ? 'shift' : 'dashboard';
     } catch (e) {
       // Offline — nothing fresher available than what's already loaded.
-      return jobTypeFor(name) === 'production' ? 'shift' : 'dashboard';
+      return usesShiftScreen(jobTypeFor(name)) ? 'shift' : 'dashboard';
     }
   };
 
@@ -15206,6 +15213,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const names = sorted.filter((m) => jobTypeFor(m) === 'production' && machineType(assignedUnitFor(m), unitTypes) === type);
       if (names.length > 0) groups.push({ label, names });
     });
+    const cooks = sorted.filter((m) => jobTypeFor(m) === 'cook');
+    if (cooks.length > 0) groups.push({ label: 'Cooks', names: cooks });
     return groups;
   };
   // Every assignable unit, grouped the same way — Service Trucks (and other
@@ -17352,6 +17361,39 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     }
   };
 
+  // Cook clock in/out: no lunch, no signature, no jobs — just punches. A
+  // cook can punch in and out several times in one day.
+  const cookClockIn = async () => {
+    if (timeClockActionPending || openEntry) return;
+    setTimeClockActionPending(true);
+    try {
+      await saveOneTimesheetEntry({
+        id: uid(),
+        mechanic: currentMechanic,
+        date: todayStr(),
+        clockIn: new Date().toISOString(),
+        lunchStart: null,
+        lunchEnd: null,
+        skippedLunch: true,
+        clockOut: null,
+        jobs: [],
+        jobType: 'cook',
+      });
+    } finally {
+      setTimeClockActionPending(false);
+    }
+  };
+  const cookClockOut = async (endIso) => {
+    if (timeClockActionPending || !openEntry) return;
+    setTimeClockActionPending(true);
+    try {
+      await patchOneTimesheetEntry(openEntry.id, { clockOut: endIso || new Date().toISOString(), skippedLunch: true });
+      setCookFixOut('');
+    } finally {
+      setTimeClockActionPending(false);
+    }
+  };
+
   const startLunch = async () => {
     if (!openEntry || timeClockActionPending) return;
     setTimeClockActionPending(true);
@@ -18017,7 +18059,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               await new Promise((r) => setTimeout(r, 1200));
               result = await readRealAssignment();
             }
-            landing = MACHINE_TYPE_LABELS[machineType(result.realUnit, result.realUnitTypes)] ? 'shift' : 'dashboard';
+            landing = usesShiftScreen(jobTypeForUnit(result.realUnit, result.realUnitTypes)) ? 'shift' : 'dashboard';
           } catch (e) {
             landing = landingScreenFor(mechanic); // both attempts failed (genuinely offline) — fall back to local state
           }
@@ -18443,7 +18485,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             isAdmin={isAdmin}
             isSafety={isSafety}
             isForeman={isForeman}
-            isProduction={jobTypeFor(currentMechanic) === 'production'}
+            isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
             onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
             onCheckUpdates={async () => {
               try {
@@ -18833,6 +18875,132 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       return null;
     }
 
+    // Cooks: a plain clock in / clock out screen. Several punches a day are
+    // fine; pay (day or half day) is worked out in Admin → Cook Pay, so no
+    // dollar amounts are shown here.
+    if (effectiveJobType === 'cook') {
+      const today = todayStr();
+      const myCookEntries = timesheets
+        .filter((t) => t.mechanic === currentMechanic && t.clockIn)
+        .sort((a, b) => new Date(b.clockIn) - new Date(a.clockIn));
+      const todays = myCookEntries.filter((t) => localDateFromIso(t.clockIn) === today).slice().reverse();
+      const todayMs = todays.reduce((sum, t) => sum + (t.clockOut ? Math.max(0, new Date(t.clockOut) - new Date(t.clockIn)) : 0), 0);
+      const staleOpen = openEntry && localDateFromIso(openEntry.clockIn) !== today;
+      const recentDays = [];
+      myCookEntries.filter((t) => t.clockOut && localDateFromIso(t.clockIn) !== today).forEach((t) => {
+        const d = localDateFromIso(t.clockIn);
+        let row = recentDays.find((r) => r.date === d);
+        if (!row) { row = { date: d, ms: 0, punches: [] }; recentDays.push(row); }
+        row.ms += Math.max(0, new Date(t.clockOut) - new Date(t.clockIn));
+        row.punches.push(t);
+      });
+      return (
+        <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
+          {FONT_STYLE}
+          <SidebarMenu
+            show={showSidebar}
+            onClose={() => setShowSidebar(false)}
+            mechanic={currentMechanic}
+            isProduction={true}
+            isForeman={isForeman}
+            isAdmin={isAdmin}
+            isSafety={isSafety}
+            onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
+            onCheckUpdates={async () => {
+              try {
+                const regs = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(regs.map((r) => r.unregister()));
+                const keys = await caches.keys();
+                await Promise.all(keys.map((k) => caches.delete(k)));
+              } catch (e) {}
+              window.location.reload(true);
+            }}
+            onLogout={async () => {
+              const keepSession = !!localStorage.getItem('webauthn_cred_' + currentMechanic);
+              if (!keepSession && !navigator.onLine) {
+                const proceed = confirm("You're offline right now. Logging out means you won't be able to sign back in until you have signal again. Log out anyway?");
+                if (!proceed) return;
+              }
+              if (!keepSession) { await firebase.auth().signOut().catch(() => {}); }
+              setCurrentMechanic(null);
+              setScreen('login');
+            }}
+            t={t}
+          />
+          <div className="max-w-lg mx-auto">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <p className="font-display text-xs uppercase mb-1" style={{ color: COLORS.accent, letterSpacing: '0.3em' }}>Harder Contracting</p>
+                <h1 className="font-display text-2xl font-bold">🍳 Time Clock</h1>
+              </div>
+              <button onClick={() => setShowSidebar(true)} className="text-3xl leading-none px-3 py-2 rounded-lg" style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>☰</button>
+            </div>
+
+            {staleOpen && (
+              <div className="rounded-lg p-4 mb-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
+                <p className="text-sm font-semibold mb-1">⚠ You never clocked out on {fmtDate(openEntry.clockIn)}</p>
+                <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>You clocked in at {fmtTime(openEntry.clockIn)}. Enter when you actually finished, then clock in again if you're working now.</p>
+                <input
+                  type="datetime-local"
+                  value={cookFixOut}
+                  min={openEntry.clockIn ? localDateStr(new Date(openEntry.clockIn)) + 'T' + String(new Date(openEntry.clockIn).getHours()).padStart(2, '0') + ':' + String(new Date(openEntry.clockIn).getMinutes()).padStart(2, '0') : undefined}
+                  onChange={(e) => setCookFixOut(e.target.value)}
+                  className="w-full rounded-lg px-3 py-2 text-sm mb-3"
+                  style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                />
+                <Btn
+                  onClick={() => {
+                    const d = cookFixOut ? new Date(cookFixOut) : null;
+                    if (!d || isNaN(d) || d < new Date(openEntry.clockIn) || d > new Date()) { alert('Pick a clock-out time after you clocked in and not in the future.'); return; }
+                    cookClockOut(d.toISOString());
+                  }}
+                >Save clock-out</Btn>
+              </div>
+            )}
+
+            {!openEntry ? (
+              <div className="rounded-lg p-8 text-center mb-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
+                <p className="text-base mb-5" style={{ color: COLORS.inkDim }}>Not clocked in</p>
+                <Btn onClick={cookClockIn} disabled={timeClockActionPending}>Clock In</Btn>
+              </div>
+            ) : !staleOpen && (
+              <div className="rounded-lg p-6 text-center mb-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
+                <p className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>Clocked in since</p>
+                <p className="font-display text-2xl font-bold mb-5">{fmtTime(openEntry.clockIn)}</p>
+                <Btn onClick={() => cookClockOut()} disabled={timeClockActionPending}>Clock Out</Btn>
+              </div>
+            )}
+
+            <div className="rounded-lg p-4 mb-5" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+              <div className="flex items-center justify-between mb-2">
+                <p className="font-display font-semibold text-sm uppercase tracking-wide">Today</p>
+                <p className="text-sm">{fmtHours(todayMs / 3600000)}</p>
+              </div>
+              {todays.length === 0 ? (
+                <p className="text-xs" style={{ color: COLORS.inkDim }}>No punches yet today.</p>
+              ) : todays.map((t) => (
+                <p key={t.id} className="text-sm py-1" style={{ color: COLORS.inkDim }}>
+                  {fmtTime(t.clockIn)} – {t.clockOut ? fmtTime(t.clockOut) : 'now'}
+                </p>
+              ))}
+            </div>
+
+            {recentDays.length > 0 && (
+              <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+                <p className="font-display font-semibold text-sm uppercase tracking-wide mb-2">Recent days</p>
+                {recentDays.slice(0, 10).map((r) => (
+                  <div key={r.date} className="flex items-center justify-between py-1.5 text-sm" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+                    <span>{new Date(r.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                    <span style={{ color: COLORS.inkDim }}>{fmtHours(r.ms / 3600000)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     const activeType = openProductionShift ? machineType(openProductionShift.machine, unitTypes) : machineType(effectiveUnit, unitTypes);
     const myProductionShifts = productionShifts
       .filter((s) => s.employee === currentMechanic && s.end)
@@ -18846,7 +19014,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           show={showSidebar}
           onClose={() => setShowSidebar(false)}
           mechanic={currentMechanic}
-          isProduction={jobTypeFor(currentMechanic) === 'production'}
+          isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
           isForeman={isForeman}
           isAdmin={isAdmin}
             isSafety={isSafety}
@@ -19130,7 +19298,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           show={showSidebar}
           onClose={() => setShowSidebar(false)}
           mechanic={currentMechanic}
-          isProduction={jobTypeFor(currentMechanic) === 'production'}
+          isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
           isForeman={isForeman}
           isAdmin={isAdmin}
             isSafety={isSafety}
@@ -19872,7 +20040,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           isAdmin={isAdmin}
             isSafety={isSafety}
           isForeman={isForeman}
-          isProduction={jobTypeFor(currentMechanic) === 'production'}
+          isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
           onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
           onCheckUpdates={async () => {
             try {
@@ -20036,6 +20204,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
               >
                 <option value="">— No unit (mechanic, no truck) —</option>
+                <option value="__cook__">🍳 Cook (no machine)</option>
                 {groupedUnitOptions().map((group) => (
                   <optgroup key={group.label} label={group.label}>
                     {group.units.map((u) => <option key={u} value={u}>{u}</option>)}
@@ -20195,7 +20364,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     ) : (
                       <span className="text-xs uppercase tracking-wide px-2 py-1.5" style={{ color: COLORS.accent }}>{roleFor(m) === 'safety' ? 'Safety Coordinator' : roleFor(m)}</span>
                     )}
-                    <span className="text-xs px-2 py-1.5" style={{ color: COLORS.inkDim }}>{jobTypeFor(m) === 'mechanic' ? '🔧 Mechanic' : '⏱️ Operator'}</span>
+                    <span className="text-xs px-2 py-1.5" style={{ color: COLORS.inkDim }}>{jobTypeFor(m) === 'mechanic' ? '🔧 Mechanic' : jobTypeFor(m) === 'cook' ? '🍳 Cook' : '⏱️ Operator'}</span>
                   </div>
                 </div>
 
@@ -20207,6 +20376,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     style={{ background: COLORS.surfaceRaised, color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
                   >
                     <option value="">— No unit (mechanic, no truck) —</option>
+                    <option value="__cook__">🍳 Cook (no machine)</option>
                     {groupedUnitOptions().map((group) => (
                       <optgroup key={group.label} label={group.label}>
                         {group.units.map((u) => <option key={u} value={u}>{u}</option>)}
@@ -20215,7 +20385,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   </select>
                 ) : (
                   <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>
-                    {assignedUnitFor(m) ? `${jobTypeFor(m) === 'mechanic' ? '🚚' : '🚜'} ${assignedUnitFor(m)}` : 'No unit assigned'}
+                    {jobTypeFor(m) === 'cook' ? '🍳 Cook' : assignedUnitFor(m) ? `${jobTypeFor(m) === 'mechanic' ? '🚚' : '🚜'} ${assignedUnitFor(m)}` : 'No unit assigned'}
                   </p>
                 )}
 
@@ -20989,7 +21159,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           isAdmin={isAdmin}
             isSafety={isSafety}
           isForeman={isForeman}
-          isProduction={jobTypeFor(currentMechanic) === 'production'}
+          isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
           onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
           onCheckUpdates={async () => {
             try {
@@ -21243,7 +21413,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           isAdmin={isAdmin}
             isSafety={isSafety}
           isForeman={isForeman}
-          isProduction={jobTypeFor(currentMechanic) === 'production'}
+          isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
           onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
           onCheckUpdates={async () => {
             try {
