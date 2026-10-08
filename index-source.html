@@ -1744,6 +1744,7 @@ function trainingFieldStatus(field, record) {
 }
 function trainingPersonStatus(record) {
   const statuses = TRAINING_MATRIX_FIELDS.filter((f) => f.tracked || f.renewalYears).map((f) => trainingFieldStatus(f, record).status);
+  Object.values(record.courseExpiry || {}).forEach((d) => { if (d) statuses.push(trainingFieldStatus({ key: 'd', tracked: true }, { d }).status); });
   if (statuses.includes('expired')) return 'expired';
   if (statuses.includes('expiringSoon')) return 'expiringSoon';
   if (statuses.every((s) => s === 'none')) return 'none';
@@ -8587,6 +8588,84 @@ function DataMigrationOverlay({ onClose }) {
   );
 }
 
+// ---- Receipts ----
+// Employees snap a photo of a receipt for something they bought for the
+// company. It's saved and goes out with the monthly email, listed on that
+// employee's own tab for the bookkeeper (photo attached).
+function ReceiptCard({ employee, receipts, saving, onSubmit }) {
+  const fileRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [photo, setPhoto] = useState(null); // compressed data URL
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [date, setDate] = useState(() => localDateStr());
+  const [busy, setBusy] = useState(false);
+  const inputStyle = { background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
+  const mine = receipts.filter((r) => r.employee === employee).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 5);
+  const reset = () => { setOpen(false); setPhoto(null); setAmount(''); setNote(''); setDate(localDateStr()); };
+  const pick = async (file) => {
+    if (!file) return;
+    setBusy(true);
+    try { setPhoto(await compressImage(file, 1600, 0.7)); } catch (e) { alert("Couldn't read that photo — try again."); }
+    setBusy(false);
+  };
+  return (
+    <div className="rounded-lg p-4 mb-6" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { setOpen(true); pick(e.target.files && e.target.files[0]); e.target.value = ''; }} />
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => fileRef.current && fileRef.current.click()}
+          className="w-full text-sm font-display font-semibold uppercase tracking-wide px-4 py-3 rounded-lg"
+          style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+        >
+          🧾 Snap a receipt
+        </button>
+      ) : (
+        <div>
+          <p className="font-display font-semibold text-sm uppercase tracking-wide mb-1">Receipt for reimbursement</p>
+          <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>For things you bought for the company. It goes to the bookkeeper with the monthly report.</p>
+          {photo ? (
+            <img src={photo} alt="Receipt" className="rounded mb-3" style={{ maxHeight: 220, maxWidth: '100%', border: `1px solid ${COLORS.line}` }} />
+          ) : (
+            <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>{busy ? 'Reading photo…' : 'No photo yet.'}</p>
+          )}
+          <button type="button" onClick={() => fileRef.current && fileRef.current.click()} className="text-xs mb-3" style={{ color: COLORS.accent }}>{photo ? '📷 Retake photo' : '📷 Take photo'}</button>
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <label className="text-xs" style={{ color: COLORS.inkDim }}>Total ($)
+              <input type="number" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm mt-1" style={inputStyle} />
+            </label>
+            <label className="text-xs" style={{ color: COLORS.inkDim }}>Date
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm mt-1" style={inputStyle} />
+            </label>
+          </div>
+          <input type="text" placeholder="What was it for? (e.g. hydraulic fittings, NAPA)" value={note} onChange={(e) => setNote(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm mb-3" style={inputStyle} />
+          <div className="flex gap-2">
+            <Btn
+              disabled={!photo || saving}
+              onClick={async () => { const ok = await onSubmit({ photo, amount: amount.trim(), note: note.trim(), date }); if (ok) reset(); }}
+            >
+              {saving ? 'Sending…' : 'Send receipt'}
+            </Btn>
+            <Btn variant="ghost" onClick={reset} disabled={saving}>Cancel</Btn>
+          </div>
+        </div>
+      )}
+      {mine.length > 0 && !open && (
+        <div className="mt-3">
+          <p className="text-xs mb-1" style={{ color: COLORS.inkDim }}>Your recent receipts</p>
+          {mine.map((r) => (
+            <div key={r.id} className="flex items-center justify-between text-xs py-1" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+              <span>{fmtDate(r.date)}{r.note ? ` — ${r.note}` : ''}</span>
+              <span style={{ color: COLORS.inkDim }}>{r.amount ? `$${r.amount}` : ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminSection({ icon, title, expanded, onToggle, children }) {
   return (
     <div className="mb-3 rounded-lg" style={{ border: `1px solid ${COLORS.line}` }}>
@@ -11113,7 +11192,7 @@ function CheckboxGroup({ label, options, selected, onChange, otherText, onOtherT
 // almost happened") so people actually report them; the full root-cause
 // investigation apparatus can always be added later from the report's
 // detail view if it turns out to warrant one.
-function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete, courseCerts }) {
+function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete, courseCerts, assignedCourseKeys }) {
   const inputStyle = { background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
   const [name, setName] = useState((initial && initial.name) || '');
   const [role, setRole] = useState((initial && initial.role) || '');
@@ -11128,6 +11207,8 @@ function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete,
   const [courseDates, setCourseDates] = useState((initial && initial.courseDates) || {});
   const [keptCertPhotos, setKeptCertPhotos] = useState((initial && initial.certPhotos) || []);
   const [newCertPhotos, setNewCertPhotos] = useState([]);
+  const [courseExpiry, setCourseExpiry] = useState((initial && initial.courseExpiry) || {});
+  const [courseKeys, setCourseKeys] = useState((initial && initial.courseKeys) || []); // courses safety/admin added by hand to this person
   const [newCoursePhotos, setNewCoursePhotos] = useState({}); // { [courseKey]: photos } — certificates for courses done outside the app, filed under that course
   const [viewingCertKey, setViewingCertKey] = useState(null);
 
@@ -11174,25 +11255,59 @@ function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete,
         </div>
       ))}
 
-      {initial && (
+      {initial && (() => {
+        const autoKeys = new Set([...(assignedCourseKeys || []), ...Object.keys(courseCerts || {})]);
+        const rowKeys = [...new Set([...autoKeys, ...courseKeys, ...Object.keys(courseDates)])];
+        const addable = [...Object.keys(TRAINING_COURSES), ...Object.keys(EXTERNAL_TRAINING_COURSES)].filter((k) => !rowKeys.includes(k));
+        return (
         <div className="mb-3 mt-3">
-          <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Course certificates</p>
-          <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Courses finished in the app fill in their date and certificate automatically, and keep them until the course is finished again. Courses done on an outside site (like Woodlands Training) are added by hand: set the date and attach a photo of the certificate.</p>
-          {[...new Set([...Object.keys(EXTERNAL_TRAINING_COURSES), ...Object.keys(courseCerts || {}), ...Object.keys(courseDates)])].map((ck) => {
+          <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Course dates &amp; certificates</p>
+          <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Shows the courses assigned to this person or already finished. Courses finished in the app fill in the date, expiry and certificate automatically. For outside courses (like Woodlands Training), add the course below, then enter the date and attach a photo of the certificate.</p>
+          {rowKeys.length === 0 && <p className="text-xs mb-2 italic" style={{ color: COLORS.inkDim }}>No courses assigned or finished yet.</p>}
+          {rowKeys.map((ck) => {
             const cert = (courseCerts || {})[ck];
             const external = !!EXTERNAL_TRAINING_COURSES[ck];
             const keptForCourse = keptCertPhotos.filter((ph) => ph.course === ck);
+            const expStatus = courseExpiry[ck] ? trainingFieldStatus({ key: 'd', tracked: true }, { d: courseExpiry[ck] }).status : 'none';
+            const canRemove = !autoKeys.has(ck);
             return (
               <div key={ck} className="rounded-lg p-3 mb-2" style={{ background: COLORS.surfaceRaised }}>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs flex-1 font-semibold" style={{ color: COLORS.ink }}>{courseLabelFor(ck)}</span>
-                  <input
-                    type="date"
-                    value={courseDates[ck] || ''}
-                    onChange={(e) => setCourseDates((prev) => ({ ...prev, [ck]: e.target.value }))}
-                    className="px-2 py-1.5 rounded-lg text-sm"
-                    style={inputStyle}
-                  />
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <span className="text-xs font-semibold" style={{ color: COLORS.ink }}>{courseLabelFor(ck)}</span>
+                  {canRemove && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCourseKeys((prev) => prev.filter((k) => k !== ck));
+                        setCourseDates((prev) => { const n = { ...prev }; delete n[ck]; return n; });
+                        setCourseExpiry((prev) => { const n = { ...prev }; delete n[ck]; return n; });
+                      }}
+                      className="text-xs flex-shrink-0"
+                      style={{ color: '#E07A5F' }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-xs" style={{ color: COLORS.inkDim }}>Completed
+                    <input
+                      type="date"
+                      value={courseDates[ck] || ''}
+                      onChange={(e) => setCourseDates((prev) => ({ ...prev, [ck]: e.target.value }))}
+                      className="w-full px-2 py-1.5 rounded-lg text-sm mt-1"
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label className="text-xs" style={{ color: TRAINING_STATUS_COLORS[expStatus] || COLORS.inkDim }}>Expires (if it does)
+                    <input
+                      type="date"
+                      value={courseExpiry[ck] || ''}
+                      onChange={(e) => setCourseExpiry((prev) => ({ ...prev, [ck]: e.target.value }))}
+                      className="w-full px-2 py-1.5 rounded-lg text-sm mt-1"
+                      style={inputStyle}
+                    />
+                  </label>
                 </div>
                 {cert && (
                   <button
@@ -11215,8 +11330,9 @@ function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete,
                     </PrintPortal>
                   </div>
                 )}
-                {external && (
+                {!cert && (
                   <div className="mt-2">
+                    <p className="text-xs mb-1" style={{ color: COLORS.inkDim }}>Certificate</p>
                     {keptForCourse.length > 0 && (
                       <div className="flex gap-2 mb-2 overflow-x-auto">
                         {keptForCourse.map((ph) => (
@@ -11242,8 +11358,20 @@ function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete,
               </div>
             );
           })}
+          {addable.length > 0 && (
+            <select
+              value=""
+              onChange={(e) => { if (e.target.value) setCourseKeys((prev) => [...prev, e.target.value]); }}
+              className="w-full px-3 py-2 rounded-lg text-sm"
+              style={inputStyle}
+            >
+              <option value="">+ Add a course…</option>
+              {addable.map((k) => <option key={k} value={k}>{courseLabelFor(k)}</option>)}
+            </select>
+          )}
         </div>
-      )}
+        );
+      })()}
 
       {keptCertPhotos.filter((p) => !p.course).length > 0 && (
         <div className="flex gap-2 mb-2 overflow-x-auto">
@@ -11271,7 +11399,7 @@ function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete,
       <div className="flex items-center justify-between">
         <div className="flex gap-2">
           <Btn
-            onClick={() => onSubmit({ ...(initial ? { id: initial.id } : {}), name: name.trim(), role: role.trim(), category, notes: notes.trim(), certPhotos: keptCertPhotos, pendingCertPhotos: [...newCertPhotos, ...Object.entries(newCoursePhotos).flatMap(([ck, list]) => list.map((ph) => ({ ...ph, course: ck })))], courseDates, courseSynced: (initial && initial.courseSynced) || {}, ...values })}
+            onClick={() => onSubmit({ ...(initial ? { id: initial.id } : {}), name: name.trim(), role: role.trim(), category, notes: notes.trim(), certPhotos: keptCertPhotos, pendingCertPhotos: [...newCertPhotos, ...Object.entries(newCoursePhotos).flatMap(([ck, list]) => list.map((ph) => ({ ...ph, course: ck })))], courseDates, courseExpiry, courseKeys, courseSynced: (initial && initial.courseSynced) || {}, ...values })}
             disabled={!canSubmit}
           >
             {submitting ? 'Saving…' : 'Save'}
@@ -13153,6 +13281,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [editingOilBaselineForUnit, setEditingOilBaselineForUnit] = useState(null);
   // Completion record for watch-only (noQuiz) job-hazard courses, which
   // don't produce a trainingRecords quiz entry — { [slug]: { [courseKey]: timestamp } }.
+  const [receipts, setReceipts] = useState(() => cacheGet('receipts', [])); // [{ id, employee, date, amount, note, photoUrl, createdAt, reimbursed }]
+  const [savingReceipt, setSavingReceipt] = useState(false);
   const [woodlandsUrlSetting, setWoodlandsUrlSetting] = useState(() => cacheGet('woodlandsUrl', '')); // admin-editable link to the Woodlands Training course; falls back to the built-in default
   const [editingWoodlandsUrl, setEditingWoodlandsUrl] = useState(false);
   const [woodlandsUrlDraft, setWoodlandsUrlDraft] = useState('');
@@ -14163,6 +14293,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
 
   useEffect(() => {
+    const ref = firebase.database().ref('receipts');
+    const on = ref.on('value', (snap) => {
+      const val = Object.values(snap.val() || {});
+      setReceipts(val);
+      cacheSet('receipts', val);
+    });
+    return () => ref.off('value', on);
+  }, [firebaseUser]);
+
+  useEffect(() => {
     const ref = firebase.database().ref('appSettings/woodlandsTrainingUrl');
     const on = ref.on('value', (snap) => {
       const val = typeof snap.val() === 'string' ? snap.val() : '';
@@ -15082,6 +15222,26 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // instead opens the outside course in a new tab and offers a
   // self-report "Mark Complete" button, since there's nothing in-app to
   // track its progress.
+  // Receipt photo goes to Storage first (needs signal), then the record.
+  const submitReceipt = async ({ photo, amount, note, date }) => {
+    if (savingReceipt) return false;
+    setSavingReceipt(true);
+    try {
+      const id = uid();
+      const storageRef = firebase.storage().ref(`receipts/${id}.jpg`);
+      await storageRef.putString(photo, 'data_url');
+      const photoUrl = await storageRef.getDownloadURL();
+      await firebase.database().ref('receipts/' + id).set(stripUndefined({
+        id, employee: currentMechanic, date: date || todayStr(), amount: amount || '', note: note || '', photoUrl, createdAt: Date.now(),
+      }));
+      return true;
+    } catch (e) {
+      alert("Couldn't send the receipt. You need signal for this one — try again when you have it. Keep the paper receipt.");
+      return false;
+    } finally {
+      setSavingReceipt(false);
+    }
+  };
   const woodlandsUrl = woodlandsUrlSetting || EXTERNAL_SAFETY_LINKS['Woodlands Training'].url;
   const externalCourseUrl = (key) => (key === 'woodlandsTraining' ? woodlandsUrl : (EXTERNAL_TRAINING_COURSES[key] || {}).url);
   const saveWoodlandsUrl = async (raw) => {
@@ -15961,6 +16121,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       if (!emp) return;
       const courseDates = { ...(person.courseDates || {}) };
       const courseSynced = { ...(person.courseSynced || {}) };
+      const courseExpiry = { ...(person.courseExpiry || {}) };
       const patch = {};
       let changed = false;
       courseKeys.forEach((ck) => {
@@ -15970,6 +16131,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         const dateStr = localDateStr(d);
         courseDates[ck] = dateStr;
         courseSynced[ck] = ms;
+        // Quiz courses get a certificate that's good for 3 years; watch-only
+        // orientation videos and outside courses don't expire on their own.
+        if (TRAINING_COURSES[ck] && !TRAINING_COURSES[ck].noQuiz) {
+          const ex = new Date(d);
+          ex.setFullYear(ex.getFullYear() + CERTIFICATE_VALID_YEARS);
+          courseExpiry[ck] = localDateStr(ex);
+        }
         const map = COURSE_MATRIX_FIELD[ck];
         if (map) {
           if (map.addYears) { const e = new Date(d); e.setFullYear(e.getFullYear() + map.addYears); patch[map.field] = localDateStr(e); }
@@ -15977,7 +16145,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         }
         changed = true;
       });
-      if (changed) saveTrainingPerson({ ...person, ...patch, courseDates, courseSynced });
+      if (changed) saveTrainingPerson({ ...person, ...patch, courseDates, courseSynced, courseExpiry });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trainingRecords, videoWatched, trainingMatrix, mechanics, isAdmin, isSafety]);
@@ -19131,6 +19299,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               </div>
             )}
 
+            <ReceiptCard employee={currentMechanic} receipts={receipts} saving={savingReceipt} onSubmit={submitReceipt} />
             {!openEntry ? (
               <div className="rounded-lg p-8 text-center mb-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
                 <p className="text-base mb-5" style={{ color: COLORS.inkDim }}>Not clocked in</p>
@@ -19229,6 +19398,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             />
           )}
 
+          <ReceiptCard employee={currentMechanic} receipts={receipts} saving={savingReceipt} onSubmit={submitReceipt} />
           {!openProductionShift ? (
             <div className="rounded-lg p-8 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
               <p className="text-base mb-5" style={{ color: COLORS.inkDim }}>Not clocked in</p>
@@ -19507,6 +19677,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           <h1 className="font-display text-3xl font-bold mb-2">{t('timeClock')}</h1>
           <p className="text-sm mb-8" style={{ color: COLORS.inkDim }}>{currentMechanic}</p>
 
+          <ReceiptCard employee={currentMechanic} receipts={receipts} saving={savingReceipt} onSubmit={submitReceipt} />
           {/* Current status card */}
           <div className="rounded-lg p-6 mb-8 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
             {!openEntry ? (
@@ -23652,6 +23823,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             >
               {editingTrainingPersonId ? (
                 <TrainingPersonForm
+                  assignedCourseKeys={(() => {
+                    const person = editingTrainingPersonId === 'new' ? null : trainingMatrix.find((p) => p.id === editingTrainingPersonId);
+                    const emp = person && mechanics.find((m) => sameTrainingPerson(m, person.name));
+                    if (!emp) return [];
+                    const slug = slugForMechanic(emp);
+                    return [...new Set([...(requiredTraining[slug] || []), ...(assignedTraining[slug] || [])])];
+                  })()}
                   courseCerts={(() => {
                     const person = editingTrainingPersonId === 'new' ? null : trainingMatrix.find((p) => p.id === editingTrainingPersonId);
                     const emp = person && mechanics.find((m) => sameTrainingPerson(m, person.name));
