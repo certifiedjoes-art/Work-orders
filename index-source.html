@@ -16807,6 +16807,43 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
   const openProductionShift = productionShifts.find((s) => s.employee === currentMechanic && !s.end);
 
+  // Machine hours start/stop come from Samsara automatically — at clock-in
+  // (start) and clock-out (stop). Only for machine types that actually have
+  // the hours fields on the shift screen. Anything the operator types
+  // themselves always wins: typing clears the "auto" flag, and an auto value
+  // is never written over a hand-entered one.
+  const usesMachineHours = (machine) => {
+    const t = machineType(machine, unitTypes);
+    return !!t && t !== 'crawler' && t !== 'grader' && t !== 'winch' && t !== 'fuel';
+  };
+  // Always-current view of the shift list for background updates that
+  // finish after the screen has moved on (a stale copy would clobber edits).
+  const productionShiftsRef = useRef([]);
+  productionShiftsRef.current = productionShifts;
+  // Asks the backend for Samsara's reading right now (so start/stop aren't
+  // up to 15 minutes behind the periodic poll). Falls back to the last
+  // saved reading if there's no signal or the backend can't be reached.
+  const fetchFreshEngineHours = async (unit, timeoutMs = 4000) => {
+    const cached = samsaraHoursFor(unit);
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      const res = await fetch(CLOUD_FUNCTION_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: APP_SECRET, mode: 'engineHoursNow' }),
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      if (!res.ok) return cached;
+      const data = await res.json();
+      const h = data && data.hours ? data.hours[slugForUnit(unit)] : undefined;
+      return typeof h === 'number' ? h : cached;
+    } catch (e) {
+      return cached;
+    }
+  };
+
   const startProductionShift = async (machineOverride) => {
     const entry = {
       id: uid(),
@@ -16828,7 +16865,30 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       notes: '',
       downtimeLog: [],
     };
+    // Start hours: the last saved Samsara reading goes in right away (so
+    // clocking in is never slowed down), then a fresh reading replaces it a
+    // moment later — unless the operator has already typed their own.
+    if (usesMachineHours(entry.machine)) {
+      const cachedStart = samsaraHoursFor(entry.machine);
+      if (cachedStart !== '') {
+        entry.startHours = String(cachedStart);
+        entry.startHoursAuto = true;
+      }
+    }
     await saveOneProductionShift(entry);
+    if (usesMachineHours(entry.machine)) {
+      (async () => {
+        const fresh = await fetchFreshEngineHours(entry.machine);
+        if (fresh === '') return;
+        const live = productionShiftsRef.current.find((x) => x.id === entry.id);
+        if (!live || live.end) return;
+        const untouched = live.startHoursAuto || live.startHours === '' || live.startHours == null;
+        if (!untouched || String(live.startHours) === String(fresh)) return;
+        const patch = { startHours: String(fresh), startHoursAuto: true };
+        setProductionShifts((prev) => prev.map((x) => (x.id === entry.id ? { ...x, ...patch } : x)));
+        await queueWrite('productionShifts', { kind: 'patch', entryId: entry.id, patch });
+      })();
+    }
     if (TRACK_ELIGIBLE_TYPES.includes(machineType(entry.machine, unitTypes))) {
       await startMachineTrack('productionShift', entry.id, entry.machine, currentMechanic);
     }
@@ -16849,8 +16909,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setShowProductionClockOutReview(true);
   };
 
+  // Stop hours at clock-out: fresh Samsara reading, unless the operator
+  // typed their own on the shift screen.
+  const autoEndHoursPatch = async (shift) => {
+    if (!shift || !usesMachineHours(shift.machine)) return {};
+    const typed = shift.endHours !== '' && shift.endHours != null && !shift.endHoursAuto;
+    if (typed) return {};
+    const h = await fetchFreshEngineHours(shift.machine);
+    return h === '' ? {} : { endHours: String(h), endHoursAuto: true };
+  };
+
   const confirmProductionClockOut = async (signatureDataUrl, endOverride) => {
-    await patchOpenProductionShift({ end: endOverride || new Date().toISOString(), signature: signatureDataUrl, signedAt: new Date().toISOString() });
+    const endIso = endOverride || new Date().toISOString();
+    const signedIso = new Date().toISOString();
+    // A back-dated clock-out ("forgot to clock out yesterday") can't use
+    // today's reading — hours stay as typed in that case.
+    const hoursPatch = endOverride ? {} : await autoEndHoursPatch(openProductionShift);
+    await patchOpenProductionShift({ end: endIso, signature: signatureDataUrl, signedAt: signedIso, ...hoursPatch });
     if (openProductionShift && TRACK_ELIGIBLE_TYPES.includes(machineType(openProductionShift.machine, unitTypes))) {
       await endMachineTrack('productionShift', openProductionShift.id);
     }
@@ -16874,7 +16949,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const newType = machineType(newMachine, unitTypes);
     setShowSwitchMachine(false);
     if (currentType === newType) {
-      patchOpenProductionShift({ machine: newMachine });
+      const relabel = { machine: newMachine };
+      if (openProductionShift.startHoursAuto || !openProductionShift.startHours) {
+        const h = usesMachineHours(newMachine) ? samsaraHoursFor(newMachine) : '';
+        relabel.startHours = h === '' ? '' : String(h);
+        relabel.startHoursAuto = h !== '';
+      }
+      patchOpenProductionShift(relabel);
       return;
     }
     const shiftType = currentType;
@@ -16887,7 +16968,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   };
   const confirmMachineSwitch = async (signatureDataUrl) => {
     const newMachine = pendingSwitchMachine;
-    await patchOpenProductionShift({ end: new Date().toISOString(), signature: signatureDataUrl, signedAt: new Date().toISOString() });
+    const switchIso = new Date().toISOString();
+    const hoursPatch = await autoEndHoursPatch(openProductionShift);
+    await patchOpenProductionShift({ end: switchIso, signature: signatureDataUrl, signedAt: switchIso, ...hoursPatch });
     if (openProductionShift && TRACK_ELIGIBLE_TYPES.includes(machineType(openProductionShift.machine, unitTypes))) {
       await endMachineTrack('productionShift', openProductionShift.id);
     }
@@ -18869,8 +18952,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               {activeType !== 'crawler' && activeType !== 'grader' && activeType !== 'winch' && activeType !== 'fuel' && (
                 <Section label="Machine hours">
                   <div className="grid grid-cols-2 gap-3">
-                    <TextInput type="number" inputMode="decimal" placeholder="Machine hours start" value={openProductionShift.startHours} onChange={(e) => patchOpenProductionShift({ startHours: e.target.value })} />
-                    <TextInput type="number" inputMode="decimal" placeholder="Machine hours stop" value={openProductionShift.endHours} onChange={(e) => patchOpenProductionShift({ endHours: e.target.value })} />
+                    <TextInput type="number" inputMode="decimal" placeholder="Machine hours start" value={openProductionShift.startHours} onChange={(e) => patchOpenProductionShift({ startHours: e.target.value, startHoursAuto: false })} />
+                    <TextInput type="number" inputMode="decimal" placeholder="Stop — fills in at clock-out" value={openProductionShift.endHours} onChange={(e) => patchOpenProductionShift({ endHours: e.target.value, endHoursAuto: false })} />
                   </div>
                 </Section>
               )}
