@@ -3613,17 +3613,18 @@ const GestureMapViewport = React.forwardRef(function GestureMapViewport({ childr
       {onTogglePersonalTracking && (
         <button
           onClick={onTogglePersonalTracking}
-          title={personalTracking ? 'Stop tracking me' : 'Track me'}
+          title={personalTracking ? 'Stop recording' : 'Record my track'}
+          aria-label={personalTracking ? 'Stop recording' : 'Record my track'}
           style={{
-            position: 'absolute', bottom: 58, right: 10, width: 40, height: 40, borderRadius: '50%',
-            background: personalTracking ? COLORS.accent : 'rgba(255,255,255,0.92)',
-            color: personalTracking ? '#fff' : '#333',
-            border: `2px solid ${personalTracking ? COLORS.accent : '#333'}`,
+            position: 'absolute', bottom: 58, right: 10, width: 44, height: 44, borderRadius: '50%',
+            background: '#fff', border: personalTracking ? '3px solid #d62828' : '3px solid #fff',
             display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5, touchAction: 'none',
-            boxShadow: '0 1px 4px rgba(0,0,0,0.35)', fontSize: 18,
+            boxShadow: '0 1px 5px rgba(0,0,0,0.45)', padding: 0,
           }}
         >
-          {personalTracking ? '⏹️' : '🚶'}
+          {personalTracking
+            ? <span style={{ width: 16, height: 16, borderRadius: 3, background: '#d62828', display: 'block' }} />
+            : <span style={{ width: 20, height: 20, borderRadius: '50%', background: '#d62828', display: 'block' }} />}
         </button>
       )}
     </div>
@@ -21990,11 +21991,20 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const currentMapLiveTrails = (currentMap && currentMapGeoreferenced && isAdmin)
       ? machineTracks
           .filter((tr) => (!tr.endedAt || shownTrackIds.includes(tr.id)) && tr.points && tr.points.length > 1)
-          .map((tr) => {
-            const pts = tr.points.map((p) => latLngToPixel(currentMap, p.lat, p.lng)).filter(Boolean);
-            return pts.length > 1 ? { points: pts.map((p) => ({ x: p.px, y: p.py })), color: colorForOperator(tr.employee), trackId: tr.id, employee: tr.employee } : null;
+          .flatMap((tr) => {
+            // Only draw the parts of the track that are on this map. A run of
+            // off-map points ends the line; it never connects across the gap.
+            const segs = [];
+            let cur = [];
+            const flush = () => { if (cur.length > 1) segs.push(cur); cur = []; };
+            for (const p of tr.points) {
+              const px = latLngToPixel(currentMap, p.lat, p.lng);
+              const on = px && px.px >= 0 && px.px <= currentMap.imageWidth && px.py >= 0 && px.py <= currentMap.imageHeight;
+              if (on) cur.push({ x: px.px, y: px.py }); else flush();
+            }
+            flush();
+            return segs.map((pts) => ({ points: pts, color: colorForOperator(tr.employee), trackId: tr.id, employee: tr.employee }));
           })
-          .filter(Boolean)
       : [];
 
     // Orange "parked and idling" highlights: >30 min in one spot with no
@@ -22061,7 +22071,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     // happens once in stopPersonalTrackingAndSave, using whatever map is
     // current at that moment.
     const personalTrackPreviewPoints = (personalTrackingOn && currentMap && currentMapGeoreferenced)
-      ? personalTrackPoints.map((p) => latLngToPixel(currentMap, p.lat, p.lng)).filter(Boolean).map((p) => ({ x: p.px, y: p.py }))
+      ? personalTrackPoints.map((p) => latLngToPixel(currentMap, p.lat, p.lng)).filter((p) => p && p.px >= 0 && p.px <= currentMap.imageWidth && p.py >= 0 && p.py <= currentMap.imageHeight).map((p) => ({ x: p.px, y: p.py }))
       : [];
 
     const stopPersonalTrackingAndSave = () => {
@@ -22073,7 +22083,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         }
         return;
       }
-      const pixelPoints = personalTrackPoints.map((p) => latLngToPixel(currentMap, p.lat, p.lng)).filter(Boolean);
+      const pixelPoints = personalTrackPoints.map((p) => latLngToPixel(currentMap, p.lat, p.lng)).filter((p) => p && p.px >= 0 && p.px <= currentMap.imageWidth && p.py >= 0 && p.py <= currentMap.imageHeight);
       setPersonalTrackPoints([]);
       if (pixelPoints.length < 2) return;
       setLinePoints(pixelPoints);
