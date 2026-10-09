@@ -3179,8 +3179,10 @@ function latLngToPixel(map, lat, lng) {
       let best = null, bestDist = Infinity;
       for (const du of [-step, 0, step]) {
         for (const dv of [-step, 0, step]) {
-          const tu = Math.min(1, Math.max(0, u + du));
-          const tv = Math.min(1, Math.max(0, v + dv));
+          // Not clamped to 0..1: a position off the map must come out
+          // as a pixel outside the image, not get pinned to its edge.
+          const tu = u + du;
+          const tv = v + dv;
           const guess = bilinearGeoInterp(map.geoCorners, tu, tv);
           if (!guess) continue;
           const dist = Math.hypot(guess.lat - lat, guess.lng - lng);
