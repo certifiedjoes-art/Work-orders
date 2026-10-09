@@ -13912,7 +13912,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   }, []);
 
   useEffect(() => {
-    const ref = firebase.database().ref('machineTrackRecords');
+    // Only the 40 newest tracks (ids are time-ordered) — the app never shows
+    // more than that, and downloading every track's full GPS path made the
+    // connection choke now that tracks hold thousands of points each.
+    const ref = firebase.database().ref('machineTrackRecords').orderByKey().limitToLast(40);
     let on = null;
     (async () => {
       await selfHealMigration('machineTracks', 'machineTrackRecords', 'machine tracks');
