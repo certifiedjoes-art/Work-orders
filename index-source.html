@@ -22206,7 +22206,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 map itself — left side, so it doesn't collide with the
                 compass/center-on-me/track-me buttons on the bottom right. */}
             <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, paddingBottom: 'env(safe-area-inset-bottom)', pointerEvents: 'none' }}>
-              <div className="px-4 pb-3" style={{ pointerEvents: 'auto' }}>
+              <div className="px-4 pb-3 map-bottom-controls" style={{ pointerEvents: 'none' }}>
+                {/* Only the actual buttons/labels take taps — the empty space between them must pass taps through to the record/center buttons underneath. */}
+                <style>{'.map-bottom-controls button, .map-bottom-controls p, .map-bottom-controls input, .map-bottom-controls a { pointer-events: auto; }'}</style>
                 {placingPin && (
                   <p className="text-xs mb-2 text-center rounded-lg py-1.5 px-2" style={{ color: COLORS.accent, background: 'rgba(27,31,25,0.85)' }}>Tap anywhere on the map to place your pin</p>
                 )}
