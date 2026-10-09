@@ -16797,21 +16797,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return match ? { lat: match.lat, lng: match.lng } : null;
   };
 
-  // While any track session is open, check for a new position every 10
-  // seconds. Safe to leave running even with pollSamsaraLocation stubbed
-  // out — it just resolves to null and nothing happens.
-  useEffect(() => {
-    const openTracks = machineTracks.filter((t) => !t.endedAt);
-    if (openTracks.length === 0) return;
-    const interval = setInterval(async () => {
-      for (const track of openTracks) {
-        const pos = await pollSamsaraLocation(track.machine);
-        if (pos) await appendTrackPoint(track.id, pos.lat, pos.lng);
-      }
-    }, 10000);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [machineTracks.filter((t) => !t.endedAt).map((t) => t.id).join(',')]);
+  // Machine tracks are recorded ONLY by the Cloud Run job (every minute, from
+  // Samsara's full GPS history). The app used to also write its own points
+  // here, but it saved its whole local copy of the list, which overwrote the
+  // detailed points the server had recorded and brought back the straight
+  // lines. The app now just displays tracks; it never writes track points.
 
   // Live fleet icons on the Highway Map (and any georeferenced internal
   // map, once it has reference points) show every machine's current
