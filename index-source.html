@@ -13528,6 +13528,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [showMachineTracksPanel, setShowMachineTracksPanel] = useState(false);
   const [viewingIdleStop, setViewingIdleStop] = useState(null); // tapped orange idle highlight
   const [viewingTrackId, setViewingTrackId] = useState(null); // tapped track on the map -> shows that day's production
+  const [hiddenOpenTrackIds, setHiddenOpenTrackIds] = useState([]); // open tracks the admin chose to hide from the map
   const [shownTrackIds, setShownTrackIds] = useState([]); // closed tracks the admin chose to draw on the map (open ones always show)
   const [highwayLocations, setHighwayLocations] = useState(() => cacheGet('highwayLocations', [])); // [{id, name, lat, lng, addedBy, time}]
   const [highwayLines, setHighwayLines] = useState(() => cacheGet('highwayLines', [])); // [{id, points: [{lat,lng}], type, color, strokeWidth, note, addedBy, isPublic, time}]
@@ -22150,7 +22151,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setOperatorColorOrder(machineTracks.map((t) => t.employee));
     const currentMapLiveTrails = (currentMap && currentMapGeoreferenced && isAdmin)
       ? machineTracks
-          .filter((tr) => (!tr.endedAt || shownTrackIds.includes(tr.id)) && tr.points && tr.points.length > 1)
+          .filter((tr) => ((!tr.endedAt && !hiddenOpenTrackIds.includes(tr.id)) || shownTrackIds.includes(tr.id)) && tr.points && tr.points.length > 1)
           .flatMap((tr) => {
             // Only draw the parts of the track that are on this map. A run of
             // off-map points ends the line; it never connects across the gap.
@@ -22171,7 +22172,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     // downtime marked. Only for tracked unit types, admin view.
     const currentMapIdleStops = (currentMap && currentMapGeoreferenced && isAdmin)
       ? machineTracks
-          .filter((tr) => (!tr.endedAt || shownTrackIds.includes(tr.id)) && TRACK_ELIGIBLE_TYPES.includes(machineType(tr.machine, unitTypes)))
+          .filter((tr) => ((!tr.endedAt && !hiddenOpenTrackIds.includes(tr.id)) || shownTrackIds.includes(tr.id)) && TRACK_ELIGIBLE_TYPES.includes(machineType(tr.machine, unitTypes)))
           .flatMap((tr) => {
             const shift = productionShifts.find((sh) => sh.id === tr.shiftId);
             return findIdleStops(tr, shift).map((st) => {
@@ -22687,9 +22688,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 <button onClick={() => setShowMachineTracksPanel(false)} className="text-2xl" style={{ color: COLORS.inkDim }}>✕</button>
               </div>
               <div className="flex items-center justify-between mb-3 gap-2">
-                <p className="text-xs" style={{ color: COLORS.inkDim }}>Open shifts always show on the map. Tap "Show on map" to draw a finished track too.</p>
-                {shownTrackIds.length > 0 && (
-                  <button onClick={() => setShownTrackIds([])} className="text-xs underline whitespace-nowrap" style={{ color: COLORS.accent }}>Hide all</button>
+                <p className="text-xs" style={{ color: COLORS.inkDim }}>Tracks still open show on the map by default. Use Hide / Show on any track.</p>
+                {(shownTrackIds.length > 0 || machineTracks.some((t) => !t.endedAt && !hiddenOpenTrackIds.includes(t.id))) && (
+                  <button onClick={() => { setShownTrackIds([]); setHiddenOpenTrackIds(machineTracks.filter((t) => !t.endedAt).map((t) => t.id)); }} className="text-xs underline whitespace-nowrap" style={{ color: COLORS.accent }}>Hide all</button>
                 )}
               </div>
               <div className="space-y-2">
@@ -22702,15 +22703,21 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     <p style={{ color: COLORS.inkDim }}>
                       {fmtDate(track.startedAt)} {fmtTime(track.startedAt)} → {track.endedAt ? fmtTime(track.endedAt) : 'now'} · {(track.points || []).length} point{(track.points || []).length === 1 ? '' : 's'} recorded
                     </p>
-                    {track.endedAt && (track.points || []).length > 1 && (
-                      <button
-                        onClick={() => setShownTrackIds((ids) => (ids.includes(track.id) ? ids.filter((i) => i !== track.id) : [...ids, track.id]))}
-                        className="text-xs underline mt-1"
-                        style={{ color: COLORS.accent }}
-                      >
-                        {shownTrackIds.includes(track.id) ? '🙈 Hide from map' : '🗺️ Show on map'}
-                      </button>
-                    )}
+                    {(track.points || []).length > 1 && (() => {
+                      const isShown = track.endedAt ? shownTrackIds.includes(track.id) : !hiddenOpenTrackIds.includes(track.id);
+                      return (
+                        <button
+                          onClick={() => {
+                            if (track.endedAt) setShownTrackIds((ids) => (ids.includes(track.id) ? ids.filter((i) => i !== track.id) : [...ids, track.id]));
+                            else setHiddenOpenTrackIds((ids) => (ids.includes(track.id) ? ids.filter((i) => i !== track.id) : [...ids, track.id]));
+                          }}
+                          className="text-xs underline mt-1"
+                          style={{ color: COLORS.accent }}
+                        >
+                          {isShown ? '🙈 Hide from map' : '🗺️ Show on map'}
+                        </button>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>
