@@ -4717,6 +4717,7 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
   );
   const [sharingLocalId, setSharingLocalId] = useState(null);
   const [newMapName, setNewMapName] = useState('');
+  const [newMapPublic, setNewMapPublic] = useState(true);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [confirmDeleteLocalId, setConfirmDeleteLocalId] = useState(null);
 
@@ -4727,7 +4728,7 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
           <h2 className="font-display text-lg font-bold">Manage maps</h2>
           <button onClick={onClose} className="text-2xl" style={{ color: COLORS.inkDim }}>✕</button>
         </div>
-        <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>New maps start private. Make one public when it's ready, and pick one public map as the default everyone lands on.</p>
+        <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>New maps are public by default (you can turn that off when adding one). Pick one public map as the default everyone lands on.</p>
 
         <div className="space-y-2 mb-4">
           {maps.map((m) => (
@@ -4771,9 +4772,15 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
           ))}
         </div>
 
-        <div className="flex gap-2 mb-6">
-          <TextInput value={newMapName} onChange={(e) => setNewMapName(e.target.value)} placeholder="New map name" className="flex-1" />
-          <Btn onClick={() => { onAdd(newMapName); setNewMapName(''); }} disabled={!newMapName.trim()}>Add</Btn>
+        <div className="mb-6">
+          <div className="flex gap-2 mb-2">
+            <TextInput value={newMapName} onChange={(e) => setNewMapName(e.target.value)} placeholder="New map name" className="flex-1" />
+            <Btn onClick={() => { onAdd(newMapName, newMapPublic); setNewMapName(''); }} disabled={!newMapName.trim()}>Add</Btn>
+          </div>
+          <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: COLORS.inkDim }}>
+            <input type="checkbox" checked={newMapPublic} onChange={(e) => setNewMapPublic(e.target.checked)} />
+            Public — the crew can see it right away (turn off to keep it private)
+          </label>
         </div>
 
         <div className="h-px my-4" style={{ background: COLORS.line }} />
@@ -15696,10 +15703,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     cacheSet('maps', next);
     await queueWrite('maps', { kind: 'bulkPatch', patchesById });
   };
-  const addMap = async (name) => {
+  const addMap = async (name, isPublic = true) => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    const entry = { id: uid(), name: trimmed, isPublic: false, isDefault: false, addedBy: currentMechanic };
+    const entry = { id: uid(), name: trimmed, isPublic: !!isPublic, isDefault: false, addedBy: currentMechanic };
     await saveOneMap(entry);
   };
   const setMapPublic = async (mapId, isPublic) => {
