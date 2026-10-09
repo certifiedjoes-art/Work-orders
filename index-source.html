@@ -22320,7 +22320,22 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         }}
                       >
                         <span className="font-display font-semibold">{m.name}</span>
-                        {m.isDefault && <span className="text-xs">default</span>}
+                        <span className="flex items-center gap-2">
+                          {m.isDefault && <span className="text-xs">default</span>}
+                          {(() => {
+                            const sel = currentMap.id === m.id;
+                            let label = null; let bg = 'transparent'; let fg = COLORS.inkDim;
+                            if (!isMapGeoreferenced(m)) { label = 'No GPS data'; }
+                            else if (!myLiveLocation) { label = 'Waiting for GPS'; }
+                            else {
+                              const p = latLngToPixel(m, myLiveLocation.lat, myLiveLocation.lng);
+                              const on = p && p.px >= 0 && p.px <= m.imageWidth && p.py >= 0 && p.py <= m.imageHeight;
+                              if (on) { label = '📍 You are on this map'; bg = '#2e7d32'; fg = '#fff'; }
+                              else { label = 'Not on this map'; bg = sel ? 'rgba(0,0,0,0.25)' : 'rgba(128,128,128,0.25)'; fg = sel ? COLORS.ink2 : COLORS.inkDim; }
+                            }
+                            return <span className="text-xs font-semibold" style={{ background: bg, color: fg, borderRadius: 999, padding: '2px 8px', whiteSpace: 'nowrap' }}>{label}</span>;
+                          })()}
+                        </span>
                       </button>
                     ))}
                   </div>
