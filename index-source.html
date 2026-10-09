@@ -3491,16 +3491,22 @@ const GestureMapViewport = React.forwardRef(function GestureMapViewport({ childr
       if (!container) return;
       const svg = container.querySelector('svg');
       if (!svg) return;
-      const ctm = svg.getScreenCTM();
-      if (!ctm) return;
-      const pt = svg.createSVGPoint();
-      pt.x = px;
-      pt.y = py;
-      const screenPt = pt.matrixTransform(ctm);
-      const rect = container.getBoundingClientRect();
-      const targetX = rect.left + rect.width / 2;
-      const targetY = rect.top + rect.height / 2;
-      setPan((prev) => ({ x: prev.x + (targetX - screenPt.x), y: prev.y + (targetY - screenPt.y) }));
+      // Worked out directly from the map's own layout (its viewBox, its
+      // on-screen size, and this component's current zoom/rotation) instead
+      // of asking the browser where the point sits on screen right now —
+      // Safari on iPhone/iPad doesn't reliably include CSS transforms in
+      // that answer, which is what made the recenter button do nothing.
+      const vb = svg.viewBox && svg.viewBox.baseVal;
+      const W = svg.clientWidth;
+      const H = svg.clientHeight;
+      if (!vb || !vb.width || !vb.height || !W || !H) return;
+      const fit = Math.min(W / vb.width, H / vb.height); // preserveAspectRatio="meet"
+      const lx = (W - vb.width * fit) / 2 + (px - vb.x) * fit - W / 2; // offset from the map's centre
+      const ly = (H - vb.height * fit) / 2 + (py - vb.y) * fit - H / 2;
+      const rad = (rotation * Math.PI) / 180;
+      const sx = scale * (lx * Math.cos(rad) - ly * Math.sin(rad));
+      const sy = scale * (lx * Math.sin(rad) + ly * Math.cos(rad));
+      setPan({ x: -sx, y: -sy });
   };
   useImperativeHandle(ref, () => ({ centerOnPoint }));
 
@@ -3637,7 +3643,7 @@ const GestureMapViewport = React.forwardRef(function GestureMapViewport({ childr
 // page being scaled to fit the screen.
 function MapCanvas({
   viewBoxWidth, viewBoxHeight, backgroundImageUrl,
-  pinsToShow, linesToShow, placingPin, measureMode, pencilMode, drawingPoints,
+  pinsToShow, linesToShow, placingPin, measureMode, pencilMode, drawingPoints, trackingLine,
   calibrating, refPoints, livePositions, liveTrails, myPosition,
   onMapTap, onFreehandPoint, onFreehandEnd, onPinTap, onLineTap, onLiveTap, onTrailTap, idleStops, onIdleTap,
 
@@ -3777,7 +3783,7 @@ function MapCanvas({
         );
       })}
 
-      {(measureMode || pencilMode) && drawingPoints && drawingPoints.length > 0 && (
+      {(measureMode || pencilMode || trackingLine) && drawingPoints && drawingPoints.length > 0 && (
         <g style={{ pointerEvents: 'none' }}>
           <polyline
             points={drawingPoints.map((p) => `${p.x},${p.y}`).join(' ')}
@@ -17238,7 +17244,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await saveOneProductionShift(entry);
     if (usesMachineHours(entry.machine)) {
       (async () => {
-        const fresh = await fetchFreshEngineHours(entry.machine);
+        const fresh = await fetchFreshEngineHours(entry.machine, 25000);
         if (fresh === '') return;
         const live = productionShiftsRef.current.find((x) => x.id === entry.id);
         if (!live || live.end) return;
@@ -17269,14 +17275,38 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setShowProductionClockOutReview(true);
   };
 
-  // Stop hours at clock-out: fresh Samsara reading, unless the operator
-  // typed their own on the shift screen.
+  // Stop hours at clock-out, unless the operator typed their own. Clocking
+  // out is never held up waiting on the network (on weak signal that wait
+  // used to time out and leave the stop hours blank): the last saved Samsara
+  // reading goes in right away, and a fresh reading replaces it a moment
+  // later — retrying once if the first try fails.
   const autoEndHoursPatch = async (shift) => {
     if (!shift || !usesMachineHours(shift.machine)) return {};
     const typed = shift.endHours !== '' && shift.endHours != null && !shift.endHoursAuto;
     if (typed) return {};
-    const h = await fetchFreshEngineHours(shift.machine);
+    const h = samsaraHoursFor(shift.machine);
     return h === '' ? {} : { endHours: String(h), endHoursAuto: true };
+  };
+  const refreshEndHoursInBackground = (shiftId, machine) => {
+    if (!usesMachineHours(machine)) return;
+    const attempt = async (retriesLeft) => {
+      const live0 = productionShiftsRef.current.find((x) => x.id === shiftId);
+      if (live0 && live0.endHours !== '' && live0.endHours != null && !live0.endHoursAuto) return; // operator typed their own
+      const fresh = await fetchFreshEngineHours(machine, 25000);
+      const live = productionShiftsRef.current.find((x) => x.id === shiftId);
+      if (!live) return;
+      const untouched = live.endHoursAuto || live.endHours === '' || live.endHours == null;
+      if (!untouched) return;
+      if (fresh === '') {
+        if (retriesLeft > 0) setTimeout(() => attempt(retriesLeft - 1), 15000);
+        return;
+      }
+      if (String(live.endHours) === String(fresh)) return;
+      const patch = { endHours: String(fresh), endHoursAuto: true };
+      setProductionShifts((prev) => prev.map((x) => (x.id === shiftId ? { ...x, ...patch } : x)));
+      await queueWrite('productionShifts', { kind: 'patch', entryId: shiftId, patch });
+    };
+    attempt(2);
   };
 
   const confirmProductionClockOut = async (signatureDataUrl, endOverride) => {
@@ -17286,6 +17316,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     // today's reading — hours stay as typed in that case.
     const hoursPatch = endOverride ? {} : await autoEndHoursPatch(openProductionShift);
     await patchOpenProductionShift({ end: endIso, signature: signatureDataUrl, signedAt: signedIso, ...hoursPatch });
+    if (!endOverride && openProductionShift) refreshEndHoursInBackground(openProductionShift.id, openProductionShift.machine);
     if (openProductionShift && TRACK_ELIGIBLE_TYPES.includes(machineType(openProductionShift.machine, unitTypes))) {
       await endMachineTrack('productionShift', openProductionShift.id);
     }
@@ -17331,6 +17362,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const switchIso = new Date().toISOString();
     const hoursPatch = await autoEndHoursPatch(openProductionShift);
     await patchOpenProductionShift({ end: switchIso, signature: signatureDataUrl, signedAt: switchIso, ...hoursPatch });
+    if (openProductionShift) refreshEndHoursInBackground(openProductionShift.id, openProductionShift.machine);
     if (openProductionShift && TRACK_ELIGIBLE_TYPES.includes(machineType(openProductionShift.machine, unitTypes))) {
       await endMachineTrack('productionShift', openProductionShift.id);
     }
@@ -22089,6 +22121,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   measureMode={measureMode}
                   pencilMode={pencilMode}
                   drawingPoints={personalTrackingOn ? personalTrackPreviewPoints : linePoints}
+                  trackingLine={personalTrackingOn}
                   calibrating={calibratingMap}
                   refPoints={currentMap.refPoints}
                   livePositions={currentMapLivePositions}
