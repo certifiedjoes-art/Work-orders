@@ -18009,7 +18009,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // so there's no existing entry to edit. mechanicName lets an admin add a
   // day on behalf of anyone; a mechanic adding their own just passes their
   // own name.
-  const addManualEntry = async (mechanicName, date, clockInLocal, clockOutLocal, lunchStartLocal, lunchEndLocal) => {
+  const addManualEntry = async (mechanicName, date, clockInLocal, clockOutLocal, lunchStartLocal, lunchEndLocal, jobs) => {
     const entry = {
       id: uid(),
       mechanic: mechanicName,
@@ -18019,7 +18019,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       lunchStart: lunchStartLocal ? new Date(lunchStartLocal).toISOString() : null,
       lunchEnd: lunchEndLocal ? new Date(lunchEndLocal).toISOString() : null,
       skippedLunch: !lunchStartLocal && !lunchEndLocal,
-      jobs: [],
+      jobs: Array.isArray(jobs) ? jobs : [],
     };
     await saveOneTimesheetEntry(entry);
   };
@@ -20394,7 +20394,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               className="w-full text-center text-sm font-display uppercase tracking-wide mb-6 py-3 rounded-lg"
               style={{ color: COLORS.accent, background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}
             >
-              + Add a missed day for someone
+              + Add a missed day for an employee
             </button>
           )}
 
@@ -21348,9 +21348,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               jobTypeFor={jobTypeFor}
               assignedUnitFor={assignedUnitFor}
               unitTypesMap={unitTypes}
+              unitOptions={groupedUnitOptions()}
               blocks={blocks}
-              onSubmit={async (mechanicName, date, ci, co, ls, le, setError) => {
-                await addManualEntry(mechanicName, date, ci, co, ls, le);
+              onSubmit={async (mechanicName, date, ci, co, ls, le, setError, jobs) => {
+                await addManualEntry(mechanicName, date, ci, co, ls, le, jobs);
                 setShowAddMissedDayAdmin(false);
               }}
               onSubmitProduction={async (employeeName, date, startLocal, endLocal, machine, block, numbers, setError) => {
@@ -21365,7 +21366,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               className="w-full text-center text-sm font-display uppercase tracking-wide mb-6 py-3 rounded-lg"
               style={{ color: COLORS.accent, background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}
             >
-              + Add a missed day for a mechanic
+              + Add a missed day for an employee
             </button>
           )}
 
@@ -26597,7 +26598,7 @@ function PdtTranslationsScreen({ customPdtStrings, customPdtJokes, onSaveStrings
   );
 }
 
-function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, groupedEmployeeOptions, jobTypeFor, assignedUnitFor, unitTypesMap, blocks, defaultMechanic, t }) {
+function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, groupedEmployeeOptions, jobTypeFor, assignedUnitFor, unitTypesMap, unitOptions, blocks, defaultMechanic, t }) {
   const tr = t || ((k) => translations.en[k] || k);
   const initialPerson = defaultMechanic || (mechanics && mechanics[0]) || (groupedEmployeeOptions && groupedEmployeeOptions[0] && groupedEmployeeOptions[0].names[0]) || '';
   const [mechanic, setMechanic] = useState(initialPerson);
@@ -26615,10 +26616,25 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
   const [loadCount, setLoadCount] = useState('');
   const [topPileCount, setTopPileCount] = useState('');
   const [error, setError] = useState('');
+  // '' = their usual machine (production) / nothing (everyone else).
+  const [machineChoice, setMachineChoice] = useState('');
 
   const combine = (d, time) => (time ? `${d}T${time}` : null);
   const isProductionMode = !!groupedEmployeeOptions && jobTypeFor && jobTypeFor(mechanic) === 'production';
-  const activeType = isProductionMode ? (unitTypesMap || {})[slugForUnit(assignedUnitFor(mechanic))] : null;
+  const usualMachine = isProductionMode ? assignedUnitFor(mechanic) : '';
+  const effectiveMachine = machineChoice || usualMachine;
+  const activeType = isProductionMode ? (unitTypesMap || {})[slugForUnit(effectiveMachine)] : null;
+  const showMachinePicker = !!unitOptions && unitOptions.length > 0;
+  const unitSelect = (emptyLabel) => (
+    <select value={machineChoice} onChange={(e) => setMachineChoice(e.target.value)} className={fieldClass} style={fieldStyle}>
+      <option value="">{emptyLabel}</option>
+      {(unitOptions || []).map((g) => (
+        <optgroup key={g.label} label={g.label}>
+          {g.units.map((u) => <option key={u} value={u}>{u}</option>)}
+        </optgroup>
+      ))}
+    </select>
+  );
 
   const handleSave = () => {
     if (isProductionMode) {
@@ -26631,7 +26647,7 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
         date,
         combine(date, startTime),
         combine(date, endTime),
-        assignedUnitFor(mechanic),
+        effectiveMachine,
         block,
         { spruce, aspen, trees, loadCount, topPileCount },
         setError
@@ -26642,6 +26658,20 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
       setError('Pick a date and at least a clock-in time.');
       return;
     }
+    // If they were on a machine that day, record it as a job on the timecard
+    // with the paid hours (clock span minus break) so it shows like any other.
+    let jobs = [];
+    if (machineChoice && clockOutTime) {
+      let ms = new Date(combine(date, clockOutTime)) - new Date(combine(date, clockInTime));
+      if (ms < 0) ms += 24 * 3600 * 1000;
+      if (lunchStartTime && lunchEndTime) {
+        let br = new Date(combine(date, lunchEndTime)) - new Date(combine(date, lunchStartTime));
+        if (br < 0) br += 24 * 3600 * 1000;
+        ms -= br;
+      }
+      const hours = Math.round((ms / 3600000) * 100) / 100;
+      if (hours > 0) jobs = [{ id: uid(), unit: machineChoice, hours }];
+    }
     onSubmit(
       mechanic,
       date,
@@ -26649,7 +26679,8 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
       combine(date, clockOutTime),
       combine(date, lunchStartTime),
       combine(date, lunchEndTime),
-      setError
+      setError,
+      jobs
     );
   };
 
@@ -26662,7 +26693,7 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
       {groupedEmployeeOptions ? (
         <label className="block mb-3">
           <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Employee</span>
-          <select value={mechanic} onChange={(e) => setMechanic(e.target.value)} className={fieldClass} style={fieldStyle}>
+          <select value={mechanic} onChange={(e) => { setMechanic(e.target.value); setMachineChoice(''); }} className={fieldClass} style={fieldStyle}>
             {groupedEmployeeOptions.map((group) => (
               <optgroup key={group.label} label={group.label}>
                 {group.names.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -26683,6 +26714,14 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
           <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Date</span>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={fieldClass} style={fieldStyle} />
         </label>
+        {showMachinePicker && (
+          <label className="block col-span-2">
+            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>
+              {isProductionMode ? 'Machine they operated' : 'What were they operating? (optional)'}
+            </span>
+            {unitSelect(isProductionMode ? `Their usual machine${usualMachine ? ' — ' + usualMachine : ''}` : '— Nothing / shop work —')}
+          </label>
+        )}
         {isProductionMode ? (
           <React.Fragment>
             <label className="block">
