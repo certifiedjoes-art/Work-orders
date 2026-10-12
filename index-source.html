@@ -12085,7 +12085,10 @@ function computeDayGrids(log) {
   let cumDriving = 0;
   let cumOnDuty = 0;
 
-  while (dayCursor < shiftEnd) {
+  // A log that ends a minute or two past midnight (e.g. Off Duty at 12:01 AM)
+  // shouldn't grow a whole extra, nearly empty day column for that minute.
+  const tinyTail = 3 * 60 * 1000;
+  while (dayCursor < shiftEnd && (days.length === 0 || shiftEnd.getTime() - dayCursor.getTime() > tinyTail)) {
     const dayStart = new Date(dayCursor);
     const dayEndFull = new Date(dayCursor);
     dayEndFull.setDate(dayEndFull.getDate() + 1);
@@ -12100,7 +12103,9 @@ function computeDayGrids(log) {
     // past what really happened.
     const dataEnd = new Date(Math.min(dayEndFull.getTime(), shiftEnd.getTime()));
 
-    let carriedStatus = sorted[0].status;
+    // Before a log's first entry the driver was off duty — don't paint the
+    // first entry's status backwards over the hours before it happened.
+    let carriedStatus = new Date(sorted[0].time) > dayStart ? 'off' : sorted[0].status;
     for (const c of sorted) {
       if (new Date(c.time) <= dayStart) carriedStatus = c.status; else break;
     }
@@ -12413,11 +12418,13 @@ function DriverLogGrid({ log, onUpdateChangeTime }) {
   if (dayGrids.length === 0) {
     return <p className="text-xs" style={{ color: COLORS.inkDim }}>No status changes yet — the grid will fill in as they're logged.</p>;
   }
-  const previewDay = dayGrids[dayGrids.length - 1];
+  // Preview the last day that has a real stretch of data — not a final day
+  // holding only a minute or two (a log ending just after midnight).
+  const previewDay = [...dayGrids].reverse().find((d) => d.dataEnd.getTime() - d.dayStart.getTime() > 30 * 60 * 1000) || dayGrids[dayGrids.length - 1];
 
   return (
     <div>
-      <button onClick={() => { setDayIndex(dayGrids.length - 1); setExpanded(true); }} className="w-full text-left" style={{ height: 100 }}>
+      <button onClick={() => { setDayIndex(Math.max(0, dayGrids.indexOf(previewDay))); setExpanded(true); }} className="w-full text-left" style={{ height: 100 }}>
         <DriverLogDayGrid
           dayStart={previewDay.dayStart} dayEnd={previewDay.dayEnd} dataEnd={previewDay.dataEnd} points={previewDay.points}
           startCumDriving={previewDay.startCumDriving} startCumOnDuty={previewDay.startCumOnDuty}
