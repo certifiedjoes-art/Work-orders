@@ -12547,7 +12547,7 @@ function PrintableDriverLog({ log, driverName }) {
   );
 }
 
-function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange, onRemoveChange, onCancel, isAdmin, onCloseLog }) {
+function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange, onRemoveChange, onCancel, isAdmin, onCloseLog, onSplitLog }) {
   const [closeAt, setCloseAt] = useState('');
   const [odometerStart, setOdometerStart] = useState(log.odometerStart || '');
   const [odometerEnd, setOdometerEnd] = useState(log.odometerEnd || '');
@@ -12617,7 +12617,7 @@ function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange,
 
       <p className="text-xs uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>Status changes</p>
       <div className="space-y-2 mb-3">
-        {sorted.map((c) =>
+        {sorted.map((c, rowIdx) =>
           editingChangeId === c.id ? (
             <DriverStatusChangeEditRow
               key={c.id}
@@ -12633,6 +12633,7 @@ function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange,
               </div>
               <div className="flex gap-2 shrink-0">
                 <button onClick={() => setEditingChangeId(c.id)} className="text-xs underline" style={{ color: COLORS.accent }}>Edit</button>
+                {onSplitLog && rowIdx > 0 && <button onClick={() => onSplitLog(log, c.id)} className="text-xs underline" style={{ color: COLORS.accent }}>Split</button>}
                 <button onClick={() => onRemoveChange(c.id)} className="text-xs underline" style={{ color: '#E07A5F' }}>Remove</button>
               </div>
             </div>
@@ -17185,6 +17186,45 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setEditingDriverLogId(null);
     return true;
   };
+  // Splits a log that ran too long into two: everything BEFORE the chosen
+  // entry stays in this log (closed at its last entry), and the chosen entry
+  // and everything after moves to a brand-new log that starts Off Duty at
+  // the beginning of that entry's day.
+  const adminSplitDriverLog = async (log, changeId) => {
+    const sorted = [...(log.statusChanges || [])].sort((a, b) => new Date(a.time) - new Date(b.time));
+    const idx = sorted.findIndex((c) => c.id === changeId);
+    if (idx < 1) { alert("There has to be at least one entry before the split point."); return false; }
+    const before = sorted.slice(0, idx);
+    const after = sorted.slice(idx);
+    const lastBefore = before[before.length - 1];
+    const endA = new Date(lastBefore.time);
+    const splitAt = new Date(after[0].time);
+    const dayStart = new Date(splitAt); dayStart.setHours(0, 0, 0, 0);
+    const startB = new Date(Math.max(dayStart.getTime(), endA.getTime()));
+    const label = (c) => fmtDate(c.time) + ' ' + fmtTime(c.time);
+    if (!confirm('Split this log?\n\nLog 1: ' + fmtDate(log.start) + ' → closes at ' + label(lastBefore) + ' (' + before.length + ' entries)\nLog 2: starts ' + label({ time: startB.toISOString() }) + ' Off Duty, then ' + after.length + ' entries from ' + label(after[0]) + (log.end ? '' : ' (still open)') + '\n\nContinue?')) return false;
+    const changesA = lastBefore.status === 'off' ? before : [...before, { id: uid(), status: 'off', time: endA.toISOString(), note: 'Closed — log split' }];
+    const logB = {
+      id: uid(),
+      driver: log.driver,
+      unit: log.unit || '',
+      start: startB.toISOString(),
+      end: log.end || null,
+      odometerStart: '',
+      odometerEnd: log.end ? (log.odometerEnd || '') : '',
+      statusChanges: [{ id: uid(), status: 'off', time: startB.toISOString(), note: 'Off duty — carried over' }, ...after],
+      signature: log.end ? (log.signature || null) : null,
+      signedAt: log.end ? (log.signedAt || null) : null,
+    };
+    const patchA = { end: endA.toISOString(), statusChanges: changesA, odometerEnd: '' };
+    const next = [...driverLogs.map((l) => (l.id === log.id ? { ...l, ...patchA } : l)), logB];
+    setDriverLogs(next);
+    cacheSet('driverLogs', next);
+    await queueWrite('driverLogs', { kind: 'patch', entryId: log.id, patch: patchA });
+    await queueWrite('driverLogs', { kind: 'save', entry: logB });
+    setEditingDriverLogId(null);
+    return true;
+  };
   const deleteDriverLog = async (logId) => {
     const log = driverLogs.find((l) => l.id === logId);
     await deleteOneDriverLog(logId);
@@ -21579,6 +21619,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                                     key={l.id}
                                     log={l}
                                     onCloseLog={adminCloseDriverLog}
+                                    onSplitLog={adminSplitDriverLog}
                                     onSave={(patch) => { updateDriverLog(l.id, patch); setEditingDriverLogId(null); }}
                                     onDelete={() => deleteDriverLog(l.id)}
                                     onAddMissed={(status, time, note) => addMissedStatusChange(l.id, status, time, note)}
