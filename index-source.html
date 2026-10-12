@@ -12140,7 +12140,11 @@ function DriverLogDayGrid({ dayStart, dayEnd, dataEnd, points, startCumDriving, 
   const [dragging, setDragging] = useState(null);
   const [draftTime, setDraftTime] = useState(null);
   const [debugBounds, setDebugBounds] = useState(null);
-  const viewWidth = 1200;
+  // A grid is normally one 24-hour day; a log that spans two days passes a
+  // 48-hour range so both days read as one continuous line.
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const spanDays = Math.max(1, Math.round((dayEnd.getTime() - dayStart.getTime()) / DAY_MS));
+  const viewWidth = 1200 * spanDays;
   // A right-hand "Total" column, listing each status row's hours for
   // this day — only in the full expanded view, the compact preview is
   // too small for it to be legible.
@@ -12150,20 +12154,21 @@ function DriverLogDayGrid({ dayStart, dayEnd, dataEnd, points, startCumDriving, 
   const axisHeight = compact ? 16 : 26;
   const height = rowsHeight + axisHeight;
   const rowHeight = rowsHeight / DUTY_STATUS_ROWS.length;
-  const pxPerUnit = 1500 / viewWidth;
+  const pxPerUnit = 1500 / 1200;
 
-  const rangeMs = 24 * 60 * 60 * 1000;
+  const rangeMs = spanDays * DAY_MS;
   const rowY = (status) => DUTY_STATUS_ROWS.indexOf(status) * rowHeight + rowHeight / 2;
   const timeToX = (t) => ((new Date(t) - dayStart) / rangeMs) * viewWidth;
   const xToTime = (x) => new Date(dayStart.getTime() + (x / viewWidth) * rangeMs);
 
   const ticks = [];
-  for (let h = 0; h < 24; h++) {
+  for (let hh = 0; hh < 24 * spanDays; hh++) {
+    const h = hh % 24;
     for (let q = 0; q < 4; q++) {
-      const t = new Date(dayStart.getTime() + (h * 60 + q * 15) * 60000);
+      const t = new Date(dayStart.getTime() + (hh * 60 + q * 15) * 60000);
       const isHour = q === 0;
       const h12 = h % 12 === 0 ? 12 : h % 12;
-      ticks.push({ x: timeToX(t), isHour, label: isHour ? `${h12} ${h < 12 ? 'AM' : 'PM'}` : null });
+      ticks.push({ x: timeToX(t), isHour, label: isHour ? (h === 0 && spanDays > 1 && hh > 0 ? fmtDate(t.toISOString()) : `${h12} ${h < 12 ? 'AM' : 'PM'}`) : null });
     }
   }
 
@@ -12421,20 +12426,30 @@ function DriverLogGrid({ log, onUpdateChangeTime }) {
   if (dayGrids.length === 0) {
     return <p className="text-xs" style={{ color: COLORS.inkDim }}>No status changes yet — the grid will fill in as they're logged.</p>;
   }
+  // A log spanning exactly two days reads as one continuous 48-hour grid.
+  // Longer logs keep one grid per day with the arrows.
+  const views = dayGrids.length === 2
+    ? [{
+        dayStart: dayGrids[0].dayStart, dayEnd: dayGrids[1].dayEnd, dataEnd: dayGrids[1].dataEnd,
+        points: [...dayGrids[0].points, ...dayGrids[1].points.filter((p) => !p.fixed)],
+        startCumDriving: dayGrids[0].startCumDriving, startCumOnDuty: dayGrids[0].startCumOnDuty,
+        merged: true,
+      }]
+    : dayGrids;
   // Preview the last day that has a real stretch of data — not a final day
   // holding only a minute or two (a log ending just after midnight).
-  const previewDay = [...dayGrids].reverse().find((d) => d.dataEnd.getTime() - d.dayStart.getTime() > 30 * 60 * 1000) || dayGrids[dayGrids.length - 1];
+  const previewDay = views.length === 1 ? views[0] : ([...views].reverse().find((d) => d.dataEnd.getTime() - d.dayStart.getTime() > 30 * 60 * 1000) || views[views.length - 1]);
 
   return (
     <div>
-      <button onClick={() => { setDayIndex(Math.max(0, dayGrids.indexOf(previewDay))); setExpanded(true); }} className="w-full text-left" style={{ height: 100 }}>
+      <button onClick={() => { setDayIndex(Math.max(0, views.indexOf(previewDay))); setExpanded(true); }} className="w-full text-left" style={{ height: 100 }}>
         <DriverLogDayGrid
           dayStart={previewDay.dayStart} dayEnd={previewDay.dayEnd} dataEnd={previewDay.dataEnd} points={previewDay.points}
           startCumDriving={previewDay.startCumDriving} startCumOnDuty={previewDay.startCumOnDuty}
           compact
           logEnded={!!log.end}
         />
-        <p className="text-xs mt-1 text-center" style={{ color: COLORS.accent }}>Tap to expand{dayGrids.length > 1 ? ' — spans multiple days' : ''}</p>
+        <p className="text-xs mt-1 text-center" style={{ color: COLORS.accent }}>Tap to expand{dayGrids.length > 1 ? ' — spans ' + (views[0].merged ? 'two days' : 'multiple days') : ''}</p>
       </button>
 
       {expanded && (
@@ -12448,13 +12463,13 @@ function DriverLogGrid({ log, onUpdateChangeTime }) {
               ←
             </button>
             <span style={{ fontWeight: 700, fontSize: 14, color: '#1B1F19' }}>
-              {fmtDate(dayGrids[dayIndex].dayStart.toISOString())}
-              {dayGrids.length > 1 ? ` (day ${dayIndex + 1} of ${dayGrids.length})` : ''}
+              {fmtDate(views[dayIndex].dayStart.toISOString())}{views[dayIndex].merged ? ' → ' + fmtDate(new Date(views[dayIndex].dayEnd.getTime() - 1000).toISOString()) : ''}
+              {views.length > 1 ? ` (day ${dayIndex + 1} of ${views.length})` : ''}
             </span>
             <button
-              onClick={() => setDayIndex(Math.min(dayGrids.length - 1, dayIndex + 1))}
-              disabled={dayIndex === dayGrids.length - 1}
-              style={{ fontSize: 20, padding: '4px 12px', opacity: dayIndex === dayGrids.length - 1 ? 0.3 : 1 }}
+              onClick={() => setDayIndex(Math.min(views.length - 1, dayIndex + 1))}
+              disabled={dayIndex === views.length - 1}
+              style={{ fontSize: 20, padding: '4px 12px', opacity: dayIndex === views.length - 1 ? 0.3 : 1 }}
             >
               →
             </button>
@@ -12462,13 +12477,13 @@ function DriverLogGrid({ log, onUpdateChangeTime }) {
           </div>
           <div style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch' }}>
             <DriverLogDayGrid
-              dayStart={dayGrids[dayIndex].dayStart} dayEnd={dayGrids[dayIndex].dayEnd} dataEnd={dayGrids[dayIndex].dataEnd} points={dayGrids[dayIndex].points}
-              startCumDriving={dayGrids[dayIndex].startCumDriving} startCumOnDuty={dayGrids[dayIndex].startCumOnDuty}
+              dayStart={views[dayIndex].dayStart} dayEnd={views[dayIndex].dayEnd} dataEnd={views[dayIndex].dataEnd} points={views[dayIndex].points}
+              startCumDriving={views[dayIndex].startCumDriving} startCumOnDuty={views[dayIndex].startCumOnDuty}
               onUpdateChangeTime={onUpdateChangeTime}
               logEnded={!!log.end}
             />
           </div>
-          <p className="text-xs text-center p-2" style={{ color: '#666', flexShrink: 0 }}>Scroll sideways to see the full day. Drag a duty change line left or right to correct when it happened.</p>
+          <p className="text-xs text-center p-2" style={{ color: '#666', flexShrink: 0 }}>Scroll sideways to see the full log. Drag a duty change line left or right to correct when it happened.</p>
         </div>
       )}
     </div>
