@@ -8271,6 +8271,14 @@ function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEn
             {cycleOnDutyHours >= HOS_LIMITS.cycle7day && <p className="text-xs" style={{ color: '#E07A5F' }}>⚠ Over 70hr/7-day limit</p>}
           </div>
 
+          {!endingLog && localDateStr(new Date(openLog.start)) !== localDateStr() && (
+            <div className="rounded-lg p-3 mb-3" style={{ background: COLORS.surfaceRaised, border: `2px solid ${COLORS.accent}` }}>
+              <p className="text-sm font-semibold mb-1">⚠ This log has been open since {fmtDate(openLog.start)}</p>
+              <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Forgot to end it? Set the time you actually finished, sign, and it closes there — then you can start a fresh log.</p>
+              <Btn onClick={() => setEndingLog(true)}>Fix it — set when I finished</Btn>
+            </div>
+          )}
+
           {currentStatus && (
             <p className="text-sm mb-3">Currently: <span className="font-semibold" style={{ color: COLORS.accent }}>{DUTY_STATUS_LABELS[currentStatus]}</span></p>
           )}
@@ -8289,7 +8297,7 @@ function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEn
               {Object.entries(DUTY_STATUS_LABELS).map(([status, label]) => (
                 <button
                   key={status}
-                  onClick={() => (status === 'onDuty' ? setPendingStatus(status) : onAddStatus(status, ''))}
+                  onClick={() => (status === 'onDuty' ? setPendingStatus(status) : status === 'off' ? setEndingLog(true) : onAddStatus(status, ''))}
                   disabled={currentStatus === status}
                   className="rounded-lg px-3 py-3 text-sm font-semibold text-center"
                   style={{ background: currentStatus === status ? COLORS.accent : COLORS.surfaceRaised, color: currentStatus === status ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}`, opacity: currentStatus === status ? 0.6 : 1 }}
@@ -8319,6 +8327,7 @@ function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEn
 
           {endingLog ? (
             <div>
+              <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>Going off duty ends your log. Confirm when you finished, enter your odometer and sign.</p>
               {openLog && localDateStr(new Date(openLog.start)) !== localDateStr() && (
                 <p className="text-sm font-semibold mb-2" style={{ color: COLORS.accent }}>⚠ This log was started on {fmtDate(openLog.start)} and never closed.</p>
               )}
@@ -12538,7 +12547,8 @@ function PrintableDriverLog({ log, driverName }) {
   );
 }
 
-function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange, onRemoveChange, onCancel, isAdmin }) {
+function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange, onRemoveChange, onCancel, isAdmin, onCloseLog }) {
+  const [closeAt, setCloseAt] = useState('');
   const [odometerStart, setOdometerStart] = useState(log.odometerStart || '');
   const [odometerEnd, setOdometerEnd] = useState(log.odometerEnd || '');
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -12585,6 +12595,25 @@ function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange,
       <div className="mb-4">
         <DriverLogGrid log={log} onUpdateChangeTime={(changeId, newTime) => onUpdateChange(changeId, { time: newTime })} />
       </div>
+
+      {!log.end && onCloseLog && (
+        <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `2px solid ${COLORS.accent}` }}>
+          <p className="text-sm font-semibold mb-1">This log is still open</p>
+          <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Close it at the time the driver actually finished. This adds an Off Duty entry at that time and ends the log.</p>
+          <input
+            type="datetime-local"
+            value={closeAt}
+            onChange={(e) => setCloseAt(e.target.value)}
+            className="w-full rounded-lg px-3 py-2 text-sm font-mono mb-2"
+            style={{ background: COLORS.surface, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+          />
+          <Btn onClick={async () => {
+            if (!closeAt) { alert('Pick the date and time the driver finished.'); return; }
+            const ok = await onCloseLog(log, new Date(closeAt).toISOString());
+            if (ok !== false) setCloseAt('');
+          }}>Close log at this time</Btn>
+        </div>
+      )}
 
       <p className="text-xs uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>Status changes</p>
       <div className="space-y-2 mb-3">
@@ -17137,6 +17166,17 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const log = driverLogs.find((l) => l.id === logId);
     if (log) await checkLogBookMismatch(log.driver, localDateStr(new Date(log.start)), { ...log, ...patch });
   };
+  // Admin closes someone's forgotten-open log at the real finish time.
+  const adminCloseDriverLog = async (log, endIso) => {
+    const lastChange = (log.statusChanges || []).reduce((mx, c) => Math.max(mx, new Date(c.time).getTime()), new Date(log.start).getTime());
+    const endMs = new Date(endIso).getTime();
+    if (isNaN(endMs) || endMs < lastChange) { alert("That's before the log's last entry (" + fmtDate(new Date(lastChange).toISOString()) + ' ' + fmtTime(new Date(lastChange).toISOString()) + '). Pick a later time.'); return false; }
+    if (endMs > Date.now() + 60000) { alert("That time hasn't happened yet."); return false; }
+    const finalStatus = { id: uid(), status: 'off', time: endIso, note: 'Closed by admin' };
+    await updateDriverLog(log.id, { end: endIso, statusChanges: [...(log.statusChanges || []), finalStatus] });
+    setEditingDriverLogId(null);
+    return true;
+  };
   const deleteDriverLog = async (logId) => {
     const log = driverLogs.find((l) => l.id === logId);
     await deleteOneDriverLog(logId);
@@ -21530,6 +21570,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                                   <DriverLogEditCard
                                     key={l.id}
                                     log={l}
+                                    onCloseLog={adminCloseDriverLog}
                                     onSave={(patch) => { updateDriverLog(l.id, patch); setEditingDriverLogId(null); }}
                                     onDelete={() => deleteDriverLog(l.id)}
                                     onAddMissed={(status, time, note) => addMissedStatusChange(l.id, status, time, note)}
