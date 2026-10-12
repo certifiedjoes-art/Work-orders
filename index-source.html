@@ -12109,7 +12109,11 @@ function computeDayGrids(log) {
     for (const c of sorted) {
       if (new Date(c.time) <= dayStart) carriedStatus = c.status; else break;
     }
-    const pointsInDay = sorted.filter((c) => new Date(c.time) > dayStart && new Date(c.time) < dataEnd);
+    // On the log's final day, an entry exactly AT the end (the closing Off Duty)
+    // belongs on the grid too — otherwise the previous status gets drawn
+    // right through to the end and the Off Duty never shows.
+    const isFinalDay = dataEnd.getTime() === shiftEnd.getTime();
+    const pointsInDay = sorted.filter((c) => new Date(c.time) > dayStart && (isFinalDay && log.end ? new Date(c.time) <= dataEnd : new Date(c.time) < dataEnd));
     const points = [{ id: 'carried-' + dayStart.getTime(), status: carriedStatus, time: dayStart.toISOString(), fixed: true }, ...pointsInDay];
 
     days.push({ dayStart, dayEnd: dayEndFull, dataEnd, points, startCumDriving: cumDriving, startCumOnDuty: cumOnDuty });
