@@ -12628,7 +12628,7 @@ function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange,
           ) : (
             <div key={c.id} className="rounded-lg p-2 flex items-center justify-between gap-2" style={{ background: COLORS.surfaceRaised }}>
               <div className="text-xs">
-                <span className="font-mono">{fmtTime(c.time)}</span> — {DUTY_STATUS_LABELS[c.status]}
+                <span className="font-mono">{fmtDate(c.time)} {fmtTime(c.time)}</span> — {DUTY_STATUS_LABELS[c.status]}
                 {c.note && <span style={{ color: COLORS.inkDim }}> · {c.note}</span>}
               </div>
               <div className="flex gap-2 shrink-0">
@@ -17170,10 +17170,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const adminCloseDriverLog = async (log, endIso) => {
     const lastChange = (log.statusChanges || []).reduce((mx, c) => Math.max(mx, new Date(c.time).getTime()), new Date(log.start).getTime());
     const endMs = new Date(endIso).getTime();
-    if (isNaN(endMs) || endMs < lastChange) { alert("That's before the log's last entry (" + fmtDate(new Date(lastChange).toISOString()) + ' ' + fmtTime(new Date(lastChange).toISOString()) + '). Pick a later time.'); return false; }
+    if (isNaN(endMs)) { alert('Pick a valid date and time.'); return false; }
     if (endMs > Date.now() + 60000) { alert("That time hasn't happened yet."); return false; }
+    if (endMs <= new Date(log.start).getTime()) { alert("That's before the log even started."); return false; }
+    let kept = log.statusChanges || [];
+    if (endMs < lastChange) {
+      const later = kept.filter((c) => new Date(c.time).getTime() > endMs);
+      const lines = later.map((c) => '• ' + fmtDate(c.time) + ' ' + fmtTime(c.time) + ' — ' + (DUTY_STATUS_LABELS[c.status] || c.status)).join('\n');
+      if (!confirm('The log has ' + later.length + ' entr' + (later.length === 1 ? 'y' : 'ies') + ' after that time:\n' + lines + '\n\nClose the log there and remove ' + (later.length === 1 ? 'it' : 'them') + '?')) return false;
+      kept = kept.filter((c) => new Date(c.time).getTime() <= endMs);
+    }
     const finalStatus = { id: uid(), status: 'off', time: endIso, note: 'Closed by admin' };
-    await updateDriverLog(log.id, { end: endIso, statusChanges: [...(log.statusChanges || []), finalStatus] });
+    await updateDriverLog(log.id, { end: endIso, statusChanges: [...kept, finalStatus] });
     setEditingDriverLogId(null);
     return true;
   };
