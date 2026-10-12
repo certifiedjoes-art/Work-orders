@@ -12085,10 +12085,9 @@ function computeDayGrids(log) {
   let cumDriving = 0;
   let cumOnDuty = 0;
 
-  // A log that ends a minute or two past midnight (e.g. Off Duty at 12:01 AM)
-  // shouldn't grow a whole extra, nearly empty day column for that minute.
-  const tinyTail = 3 * 60 * 1000;
-  while (dayCursor < shiftEnd && (days.length === 0 || shiftEnd.getTime() - dayCursor.getTime() > tinyTail)) {
+  // A log that ends after midnight (e.g. Off Duty at 12:01 AM) gets its next
+  // day on the grid too, so the closing entry shows on the day it happened.
+  while (dayCursor < shiftEnd) {
     const dayStart = new Date(dayCursor);
     const dayEndFull = new Date(dayCursor);
     dayEndFull.setDate(dayEndFull.getDate() + 1);
