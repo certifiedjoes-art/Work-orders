@@ -3661,6 +3661,35 @@ function MapCanvas({
   const toLocal = (clientX, clientY) => {
     const svg = svgRef.current;
     if (!svg) return null;
+    // Worked out from the map's own layout plus the zoom/rotate/pan wrapper's
+    // transform, because Safari on iPhone/iPad doesn't reliably include CSS
+    // transforms in getScreenCTM — taps landed in the wrong spot whenever the
+    // map was zoomed, panned or rotated, so drawn marks ended up off-screen.
+    try {
+      const wrap = svg.parentElement;
+      const vb = svg.viewBox && svg.viewBox.baseVal;
+      const W = svg.clientWidth;
+      const H = svg.clientHeight;
+      if (wrap && vb && vb.width && vb.height && W && H) {
+        const tf = window.getComputedStyle(wrap).transform;
+        let a = 1, b = 0;
+        if (tf && tf !== 'none') {
+          const m = new DOMMatrix(tf);
+          a = m.a; b = m.b;
+        }
+        const sc = Math.hypot(a, b) || 1;
+        const th = Math.atan2(b, a);
+        const r = wrap.getBoundingClientRect();
+        const dx = clientX - (r.left + r.width / 2);
+        const dy = clientY - (r.top + r.height / 2);
+        const ox = (dx * Math.cos(-th) - dy * Math.sin(-th)) / sc; // offset from the map's centre, in unrotated/unscaled pixels
+        const oy = (dx * Math.sin(-th) + dy * Math.cos(-th)) / sc;
+        const fit = Math.min(W / vb.width, H / vb.height); // preserveAspectRatio="meet"
+        const x = vb.x + (ox + W / 2 - (W - vb.width * fit) / 2) / fit;
+        const y = vb.y + (oy + H / 2 - (H - vb.height * fit) / 2) / fit;
+        if (isFinite(x) && isFinite(y)) return { x: Math.round(x), y: Math.round(y) };
+      }
+    } catch (e) { /* fall back to the browser's own transform below */ }
     const screenCTM = svg.getScreenCTM();
     if (!screenCTM) return null;
     const pt = svg.createSVGPoint();
@@ -22438,7 +22467,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   placingPin={placingPin}
                   measureMode={measureMode}
                   pencilMode={pencilMode}
-                  drawingPoints={personalTrackingOn ? personalTrackPreviewPoints : linePoints}
+                  drawingPoints={personalTrackingOn && !measureMode && !pencilMode ? personalTrackPreviewPoints : linePoints}
                   trackingLine={personalTrackingOn}
                   calibrating={calibratingMap}
                   refPoints={currentMap.refPoints}
