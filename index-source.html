@@ -11264,7 +11264,9 @@ function CheckboxGroup({ label, options, selected, onChange, otherText, onOtherT
 // almost happened") so people actually report them; the full root-cause
 // investigation apparatus can always be added later from the report's
 // detail view if it turns out to warrant one.
-function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete, courseCerts, assignedCourseKeys }) {
+function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete, courseCerts, assignedCourseKeys, canSignCerts, onSignEmployee, onSignEmployer }) {
+  const [empSigDraft, setEmpSigDraft] = useState(null);
+  const [emprSigDraft, setEmprSigDraft] = useState(null);
   const inputStyle = { background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
   const [name, setName] = useState((initial && initial.name) || '');
   const [role, setRole] = useState((initial && initial.role) || '');
@@ -11400,6 +11402,20 @@ function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete,
                         <CertificateOfTraining record={cert.record} course={cert.course} />
                       </div>
                     </PrintPortal>
+                    {canSignCerts && cert.record.id && !cert.record.noQuiz && !cert.record.employeeSignature && (
+                      <div className="mt-3 no-print">
+                        <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Employee signature — hand {cert.record.mechanic} this device to sign:</p>
+                        <SignaturePad onChange={setEmpSigDraft} />
+                        <Btn className="mt-2" disabled={!empSigDraft} onClick={async () => { await onSignEmployee(cert.record.id, empSigDraft); setEmpSigDraft(null); }}>Save employee signature</Btn>
+                      </div>
+                    )}
+                    {canSignCerts && cert.record.id && !cert.record.noQuiz && !cert.record.employerSignature && (
+                      <div className="mt-3 no-print">
+                        <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Countersign as employer to issue this certificate (stamps today's issue date and the 3-year expiry):</p>
+                        <SignaturePad onChange={setEmprSigDraft} />
+                        <Btn className="mt-2" disabled={!emprSigDraft} onClick={async () => { await onSignEmployer(cert.record.id, emprSigDraft); setEmprSigDraft(null); }}>Countersign & Issue Certificate</Btn>
+                      </div>
+                    )}
                   </div>
                 )}
                 {!cert && (
@@ -24279,6 +24295,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             >
               {editingTrainingPersonId ? (
                 <TrainingPersonForm
+                  canSignCerts={isAdmin || isSafety}
+                  onSignEmployee={(recordId, dataUrl) => signTrainingCertAsEmployee(recordId, dataUrl)}
+                  onSignEmployer={(recordId, dataUrl) => signTrainingCertAsEmployer(recordId, currentMechanic, dataUrl)}
                   assignedCourseKeys={(() => {
                     const person = editingTrainingPersonId === 'new' ? null : trainingMatrix.find((p) => p.id === editingTrainingPersonId);
                     const emp = person && mechanics.find((m) => sameTrainingPerson(m, person.name));
