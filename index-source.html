@@ -9518,55 +9518,73 @@ const SLIDE_ILLUSTRATION_BY_COURSE = {
   tdg: TDG_SLIDE_ILLUSTRATION,
 };
 
+// Set this to the company logo as a data URL (data:image/png;base64,...) to
+// replace the built-in emblem on certificates.
+const COMPANY_LOGO_DATA_URL = null;
+function CompanyLogo({ size = 84 }) {
+  if (COMPANY_LOGO_DATA_URL) return <img src={COMPANY_LOGO_DATA_URL} alt="Harder Contracting" style={{ height: size, width: 'auto', display: 'block', margin: '0 auto' }} />;
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" style={{ display: 'block', margin: '0 auto' }} role="img" aria-label="Harder Contracting">
+      <circle cx="50" cy="50" r="47" fill="#2F4A2A" stroke="#B08D3C" strokeWidth="3" />
+      <circle cx="50" cy="50" r="41" fill="none" stroke="#B08D3C" strokeWidth="1" />
+      <path d="M50 11 L60 27 H55 L64 40 H57 L66 52 H34 L43 40 H36 L45 27 H40 Z" fill="#FAF7EE" />
+      <rect x="47.5" y="52" width="5" height="7" fill="#FAF7EE" />
+      <text x="50" y="80" textAnchor="middle" fontSize="13" fontWeight="bold" fill="#E8D9A8" style={{ fontFamily: 'Georgia, "Times New Roman", serif', letterSpacing: 1 }}>HARDER</text>
+    </svg>
+  );
+}
+
 function CertificateOfTraining({ record, course }) {
+  const GOLD = '#B08D3C';
+  const GREEN = '#2F4A2A';
+  const INK = '#1B1F19';
+  const serif = 'Georgia, "Times New Roman", serif';
+  const fmtLong = (d) => d.toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
   const issuedDate = record.certIssuedAt ? new Date(record.certIssuedAt) : null;
   const expiresDate = record.certExpiresOn ? new Date(record.certExpiresOn + 'T00:00:00') : null;
+  const certNo = record.id ? String(record.id).slice(-8).toUpperCase() : '';
+  const sigBlock = (label, sig, signedName) => (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ height: 56, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+        {sig ? <img src={sig.dataUrl} alt={label} style={{ maxHeight: 54, maxWidth: '100%' }} /> : <span style={{ fontSize: 11, fontStyle: 'italic', color: '#777' }}>{label === 'Employee' ? 'Awaiting signature' : 'Awaiting countersignature'}</span>}
+      </div>
+      <div style={{ borderTop: `1px solid ${INK}`, marginTop: 4, paddingTop: 3 }}>
+        <p style={{ fontSize: 11, fontWeight: 'bold', letterSpacing: 1, textTransform: 'uppercase' }}>{label} signature</p>
+        {signedName && <p style={{ fontSize: 11 }}>{signedName}</p>}
+        {sig && sig.signedAt && <p style={{ fontSize: 10, color: '#555' }}>{fmtLong(new Date(sig.signedAt))}</p>}
+      </div>
+    </div>
+  );
   return (
-    <div className="rounded-lg p-6" style={{ background: '#FAF7EE', color: '#1B1F19', border: `2px solid ${COLORS.accent}` }}>
-      <p className="text-center font-display text-xs uppercase tracking-widest mb-1" style={{ color: COLORS.accent }}>Certificate of Training</p>
-      <p className="text-center font-display text-xl font-bold mb-4">{course.label}</p>
+    <div style={{ background: '#FAF7EE', color: INK, border: `3px double ${GOLD}`, padding: 6, borderRadius: 4, fontFamily: serif }}>
+      <div style={{ border: `1px solid ${GREEN}`, padding: '22px 18px', textAlign: 'center' }}>
+        <CompanyLogo />
+        <p style={{ fontSize: 15, fontWeight: 'bold', letterSpacing: 3, textTransform: 'uppercase', color: GREEN, marginTop: 8 }}>{TRAINING_EMPLOYER.name}</p>
+        <p style={{ fontSize: 11, color: '#555', marginTop: 2 }}>{TRAINING_EMPLOYER.address}</p>
+        <div style={{ height: 1, background: GOLD, margin: '14px auto', width: '60%' }} />
+        <p style={{ fontSize: 22, fontWeight: 'bold', letterSpacing: 4, textTransform: 'uppercase', color: GREEN }}>Certificate of Training</p>
+        <p style={{ fontSize: 12, fontStyle: 'italic', color: '#555', marginTop: 12 }}>This certifies that</p>
+        <p style={{ fontSize: 26, fontWeight: 'bold', margin: '4px 0 2px', borderBottom: `1px solid ${GOLD}`, display: 'inline-block', padding: '0 14px 2px' }}>{record.mechanic}</p>
+        <p style={{ fontSize: 12, fontStyle: 'italic', color: '#555', marginTop: 10 }}>{record.noQuiz ? 'has watched in full' : 'has successfully completed and passed'}</p>
+        <p style={{ fontSize: 19, fontWeight: 'bold', margin: '4px 0 12px' }}>{course.label}</p>
+        <p style={{ fontSize: 11, color: '#444', lineHeight: 1.5, textAlign: 'left' }}><strong>Trained in:</strong> {course.modules.map((m) => m.title).join('; ')}</p>
 
-      <div className="text-sm mb-4">
-        <p><strong>Employer:</strong> {TRAINING_EMPLOYER.name}</p>
-        <p><strong>Address:</strong> {TRAINING_EMPLOYER.address}</p>
-      </div>
-      <div className="text-sm mb-4">
-        <p><strong>Employee:</strong> {record.mechanic}</p>
-        <p><strong>Trained in:</strong> {course.modules.map((m) => m.title).join('; ')}</p>
-        {record.noQuiz
-          ? <p><strong>Course:</strong> Watched in full</p>
-          : <p><strong>Quiz score:</strong> {record.scorePercent}%</p>}
-      </div>
-      <div className="text-sm mb-4">
-        <p><strong>{record.noQuiz ? 'Completed:' : 'Issued:'}</strong> {issuedDate ? issuedDate.toLocaleDateString() : '—'}</p>
-        {!record.noQuiz && <p><strong>Expires on:</strong> {expiresDate ? expiresDate.toLocaleDateString() : '—'}</p>}
-      </div>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 22, flexWrap: 'wrap', margin: '14px 0 4px', fontSize: 12 }}>
+          {!record.noQuiz && <div><p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: '#777' }}>Score</p><p style={{ fontWeight: 'bold' }}>{record.scorePercent}%</p></div>}
+          <div><p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: '#777' }}>{record.noQuiz ? 'Completed' : 'Date issued'}</p><p style={{ fontWeight: 'bold' }}>{issuedDate ? fmtLong(issuedDate) : 'Pending'}</p></div>
+          {!record.noQuiz && <div><p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: '#777' }}>Valid until</p><p style={{ fontWeight: 'bold' }}>{expiresDate ? fmtLong(expiresDate) : 'Pending'}</p></div>}
+        </div>
 
-      {record.noQuiz ? (
-        <p className="text-xs italic mt-4" style={{ color: COLORS.inkDim }}>Completion recorded automatically by the Harder Contracting app.</p>
-      ) : (
-      <div className="grid grid-cols-2 gap-4 mt-6">
-        <div>
-          <p className="text-xs uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Employee signature</p>
-          {record.employeeSignature ? (
-            <img src={record.employeeSignature.dataUrl} alt="Employee signature" style={{ height: 50, background: '#fff', border: `1px solid ${COLORS.line}`, borderRadius: 4 }} />
-          ) : (
-            <p className="text-xs italic" style={{ color: COLORS.inkDim }}>Not yet signed</p>
-          )}
-        </div>
-        <div>
-          <p className="text-xs uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Employer signature</p>
-          {record.employerSignature ? (
-            <div>
-              <img src={record.employerSignature.dataUrl} alt="Employer signature" style={{ height: 50, background: '#fff', border: `1px solid ${COLORS.line}`, borderRadius: 4 }} />
-              <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>{record.employerSignature.name}</p>
-            </div>
-          ) : (
-            <p className="text-xs italic" style={{ color: COLORS.inkDim }}>Not yet countersigned</p>
-          )}
-        </div>
+        {record.noQuiz ? (
+          <p style={{ fontSize: 11, fontStyle: 'italic', color: '#666', marginTop: 14 }}>Completion recorded automatically by the Harder Contracting app.</p>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 22, marginTop: 18 }}>
+            {sigBlock('Employee', record.employeeSignature, record.mechanic)}
+            {sigBlock('Employer', record.employerSignature, record.employerSignature && record.employerSignature.name)}
+          </div>
+        )}
+        {certNo && <p style={{ fontSize: 9, color: '#888', marginTop: 14, letterSpacing: 1 }}>CERTIFICATE NO. {certNo}</p>}
       </div>
-      )}
     </div>
   );
 }
@@ -23502,6 +23520,20 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           })()}
 
           {(() => {
+            const unsigned = trainingRecords.filter((r) => r.mechanic === currentMechanic && r.passed && !r.noQuiz && !r.employeeSignature && TRAINING_COURSES[r.courseKey]);
+            if (!unsigned.length) return null;
+            const rec = unsigned[0];
+            return (
+              <div className="rounded-lg p-4 mb-8" style={{ background: COLORS.accent + '22', border: `1px solid ${COLORS.accent}` }}>
+                <p className="text-sm font-semibold mb-1" style={{ color: COLORS.accent }}>✍️ Sign your certificate{unsigned.length > 1 ? 's' : ''} — {TRAINING_COURSES[rec.courseKey].label}</p>
+                <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>You passed, but the certificate isn't signed yet. Sign below{unsigned.length > 1 ? ` (${unsigned.length} waiting)` : ''}; your supervisor then countersigns to issue it.</p>
+                <SignaturePad key={rec.id} onChange={setCertSignatureDraft} />
+                <Btn className="mt-2" disabled={!certSignatureDraft} onClick={async () => { await signTrainingCertAsEmployee(rec.id, certSignatureDraft); setCertSignatureDraft(null); }}>Sign certificate</Btn>
+              </div>
+            );
+          })()}
+
+          {(() => {
             const myAssignedPending = pendingAssignedTrainingFor(currentMechanic);
             if (!myAssignedPending.length) return null;
             return (
@@ -24213,6 +24245,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       if (!record.employeeSignature) {
                         return (
                           <div className="mb-4">
+                            <p className="text-sm font-semibold mb-1" style={{ color: COLORS.accent }}>✍️ Last step — sign your certificate</p>
                             <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Sign below to request your Certificate of Training. Your supervisor still needs to countersign before it's officially issued.</p>
                             <SignaturePad onChange={setCertSignatureDraft} />
                             <Btn
@@ -24276,7 +24309,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       >
                         Retake {COURSE_VIDEO_CHECKPOINTS[selectedCourse] ? 'Video' : 'Quiz'}
                       </Btn>
-                      <Btn variant="ghost" onClick={() => { setSelectedCourse(null); setCourseStage('modules'); setQuizAnswers({}); setQuizResult(null); setCertSignatureDraft(null); }}>Back to Training</Btn>
+                      <Btn variant="ghost" onClick={() => {
+                        const rec = quizResult.passed && trainingRecords.find((r) => r.id === quizResult.recordId);
+                        if (rec && !rec.employeeSignature && !window.confirm("You haven't signed your certificate yet. Leave without signing? You can still sign it later from the Safety page.")) return;
+                        setSelectedCourse(null); setCourseStage('modules'); setQuizAnswers({}); setQuizResult(null); setCertSignatureDraft(null);
+                      }}>Back to Training</Btn>
                     </div>
                   </div>
                 )}
