@@ -3646,9 +3646,9 @@ const GestureMapViewport = React.forwardRef(function GestureMapViewport({ childr
 // page being scaled to fit the screen.
 function MapCanvas({
   viewBoxWidth, viewBoxHeight, backgroundImageUrl,
-  pinsToShow, linesToShow, placingPin, measureMode, pencilMode, drawingPoints, trackingLine,
+  pinsToShow, linesToShow, placingPin, measureMode, pencilMode, drawingPoints, drawingStrokes, trackingLine,
   calibrating, refPoints, livePositions, liveTrails, myPosition,
-  onMapTap, onFreehandPoint, onFreehandEnd, onPinTap, onLineTap, onLiveTap, onTrailTap, idleStops, onIdleTap,
+  onMapTap, onFreehandStart, onFreehandPoint, onFreehandEnd, onPinTap, onLineTap, onLiveTap, onTrailTap, idleStops, onIdleTap,
 
 }) {
   const svgRef = useRef(null);
@@ -3714,6 +3714,7 @@ function MapCanvas({
     if (!local) return;
     isDrawingStroke.current = true;
     e.currentTarget.setPointerCapture(e.pointerId);
+    if (onFreehandStart) onFreehandStart();
     onFreehandPoint(local.x, local.y);
   };
   const handlePointerMove = (e) => {
@@ -3814,6 +3815,10 @@ function MapCanvas({
           </g>
         );
       })}
+
+      {pencilMode && (drawingStrokes || []).map((stroke, i) => stroke.length > 0 && (
+        <polyline key={'ps' + i} points={stroke.map((p) => `${p.x},${p.y}`).join(' ')} fill="none" stroke={COLORS.accent} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }} />
+      ))}
 
       {(measureMode || pencilMode || trackingLine) && drawingPoints && drawingPoints.length > 0 && (
         <g style={{ pointerEvents: 'none' }}>
@@ -13631,6 +13636,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [mapLines, setMapLines] = useState(() => cacheGet('mapLines', [])); // [{id, mapId, type, note, points: [{x,y}...], length, addedBy, isPublic, time}]
   const [measureMode, setMeasureMode] = useState(false); // tap-to-vertex "Draw & Measure" mode
   const [pencilMode, setPencilMode] = useState(false); // freehand drag-to-draw mode
+  const [pencilStrokes, setPencilStrokes] = useState([]); // pencil: every stroke drawn so far (lifting your finger no longer ends the drawing)
+  useEffect(() => { if (!pencilMode) setPencilStrokes((st) => (st.length ? [] : st)); }, [pencilMode]); // leaving pencil mode always discards unsaved strokes
   const [linePoints, setLinePoints] = useState([]); // points accumulated while measureMode or pencilMode is true, not yet saved
   const [pendingLineSubmit, setPendingLineSubmit] = useState(false); // true once drawing is finished, shows the type/note form
   const [viewingLineId, setViewingLineId] = useState(null);
@@ -22561,22 +22568,25 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       setPlacingPin(false);
                     }
                   }}
+                  drawingStrokes={pencilStrokes}
+                  onFreehandStart={() => setPencilStrokes((strokes) => [...strokes, []])}
                   onFreehandPoint={(x, y) => {
-                    setLinePoints((pts) => {
-                      const last = pts[pts.length - 1];
+                    setPencilStrokes((strokes) => {
+                      if (strokes.length === 0) return [[{ x, y }]];
+                      const cur = strokes[strokes.length - 1];
+                      const last = cur[cur.length - 1];
                       // Skip points that are too close to the last one kept —
                       // pointermove fires far more often than needed for a
                       // smooth line, and keeping every event would balloon
                       // a single stroke into hundreds of stored points.
-                      if (last && Math.hypot(x - last.x, y - last.y) < 4) return pts;
-                      return [...pts, { x, y }];
+                      if (last && Math.hypot(x - last.x, y - last.y) < 4) return strokes;
+                      return [...strokes.slice(0, -1), [...cur, { x, y }]];
                     });
                   }}
                   onFreehandEnd={() => {
-                    setLinePoints((pts) => {
-                      if (pts.length >= 2) setPendingLineSubmit(true);
-                      return pts;
-                    });
+                    // Lifting your finger just ends that stroke — the drawing stays
+                    // open until you tap Done. A lone tap (under 2 points) is dropped.
+                    setPencilStrokes((strokes) => (strokes.length && strokes[strokes.length - 1].length < 2 ? strokes.slice(0, -1) : strokes));
                   }}
                   onPinTap={(pinId) => setViewingPinId(pinId)}
                   onLineTap={(lineId) => setViewingLineId(lineId)}
@@ -22658,9 +22668,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     </div>
                   </div>
                 )}
+                {pencilMode && pencilStrokes.length > 0 && (
+                  <div className="flex items-center justify-end gap-4 mb-1 rounded-lg py-1.5 px-3" style={{ background: 'rgba(27,31,25,0.85)' }}>
+                    <button onClick={() => setPencilStrokes((st) => st.slice(0, -1))} className="text-xs underline" style={{ color: COLORS.inkDim }}>Undo stroke</button>
+                    <button onClick={() => setPencilStrokes([])} className="text-xs underline" style={{ color: COLORS.inkDim }}>Clear</button>
+                    <button onClick={() => { if (pencilStrokes.some((st) => st.length >= 2)) setPendingLineSubmit(true); }} className="text-sm font-semibold underline" style={{ color: COLORS.accent }}>Done</button>
+                  </div>
+                )}
                 {pencilMode && (
                   <p className="text-xs mb-2 text-center rounded-lg py-1.5 px-2" style={{ color: COLORS.accent, background: 'rgba(27,31,25,0.85)' }}>
-                    {linePoints.length === 0 ? 'Press and drag to draw' : `Drawing… ${formatLineLength(linePoints)}`}
+                    {pencilStrokes.length === 0 ? 'Press and drag to draw — lift as often as you like, tap Done when finished' : `${pencilStrokes.length} stroke${pencilStrokes.length === 1 ? '' : 's'} · ${formatLineLength(pencilStrokes.flat())}`}
                   </p>
                 )}
                 {myPositionStatus && myPositionStatus !== 'ok' && (
@@ -22811,6 +22828,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         setPlacingPin(false);
                         setPencilMode(false);
                         setLinePoints([]);
+                        setPencilStrokes([]);
                         setMeasureMode(!measureMode);
                       }}
                       className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
@@ -22824,6 +22842,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         setPlacingPin(false);
                         setMeasureMode(false);
                         setLinePoints([]);
+                        setPencilStrokes([]);
                         setPencilMode(!pencilMode);
                       }}
                       className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
@@ -23077,11 +23096,19 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             canChoosePublic={isAdmin || isForeman}
             onCancel={() => { setPendingLineSubmit(false); }}
             onSubmit={async (type, note, isPublicChoice, color, strokeWidth) => {
-              await addMapLine(currentMap.id, linePoints, type, note, isPublicChoice, color, strokeWidth);
+              if (pencilMode) {
+                // Each separate stroke is saved as its own line, all with the same type/note/colour.
+                for (const stroke of pencilStrokes.filter((st) => st.length >= 2)) {
+                  await addMapLine(currentMap.id, stroke, type, note, isPublicChoice, color, strokeWidth);
+                }
+              } else {
+                await addMapLine(currentMap.id, linePoints, type, note, isPublicChoice, color, strokeWidth);
+              }
               setPendingLineSubmit(false);
               setMeasureMode(false);
               setPencilMode(false);
               setLinePoints([]);
+              setPencilStrokes([]);
             }}
           />
         )}
