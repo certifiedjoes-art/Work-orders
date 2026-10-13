@@ -15244,6 +15244,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // the Employees panel) — same course list shape as requiredTraining,
   // but never blocks access; it's just a reminder that follows them
   // around (see the Safety page banner) until each item is done.
+  // Admin/safety "skip for now": lifts a course out of the blocking
+  // required list (so the person gets into the app) and moves it onto
+  // their assigned list, so the Safety-page reminder and Training Matrix
+  // still show it as outstanding.
+  const skipRequiredTraining = async (name, courseKey) => {
+    const slug = slugForMechanic(name);
+    const req = (requiredTraining[slug] || []).filter((k) => k !== courseKey);
+    const asg = assignedTraining[slug] || [];
+    const nextAsg = asg.includes(courseKey) ? asg : [...asg, courseKey];
+    const db = firebase.database();
+    try {
+      await (req.length ? db.ref('requiredTraining/' + slug).set(req) : db.ref('requiredTraining/' + slug).remove());
+      await db.ref('assignedTraining/' + slug).set(nextAsg);
+    } catch (e) {
+      alert("Couldn't skip that course — check your signal and try again.");
+    }
+  };
   const toggleAssignedTraining = async (name, courseKey) => {
     const slug = slugForMechanic(name);
     const current = assignedTraining[slug] || [];
@@ -21104,6 +21121,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     currentEmail={mechanicEmails[slugForMechanic(m)] || ''}
                     onSave={(email) => saveMechanicEmail(m, email)}
                   />
+                )}
+
+                {(isAdmin || isSafety || isForeman) && pendingRequiredTrainingFor(m).length > 0 && (
+                  <div className="rounded-lg p-2 mb-3" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+                    <p className="text-xs font-semibold mb-1" style={{ color: COLORS.inkDim }}>🔒 Must finish before {m} can use the app:</p>
+                    {pendingRequiredTrainingFor(m).map((ck) => (
+                      <div key={ck} className="flex items-center justify-between gap-2 py-1">
+                        <span className="text-sm">{((TRAINING_COURSES[ck] || EXTERNAL_TRAINING_COURSES[ck] || {}).label) || ck}</span>
+                        <Btn variant="ghost" onClick={() => { if (window.confirm('Skip this course for now? ' + m + ' gets into the app right away. It stays on their list as a reminder until done.')) skipRequiredTraining(m, ck); }}>Skip for now</Btn>
+                      </div>
+                    ))}
+                  </div>
                 )}
 
                 {(isAdmin || isSafety || isForeman) && (
