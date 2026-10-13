@@ -18112,6 +18112,27 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // clutter there, but the bookkeeper's payroll record format includes it.
   const fmtTimeWithSeconds = (iso) => (iso ? new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }) : '');
 
+  // Export & Share always covers whole calendar month(s): the month of the
+  // From date through the month of the To date (or just the month of
+  // whichever is filled in, or the current month if neither is), so the file
+  // always has every day for everyone and pastes straight into Excel.
+  const exportTimesheetsFullMonth = (includeProduction) => {
+    const today = todayStr();
+    const a = tsFilterStart || tsFilterEnd || today;
+    const b = tsFilterEnd || tsFilterStart || today;
+    const [lo, hi] = a <= b ? [a, b] : [b, a];
+    const rangeStart = lo.slice(0, 7) + '-01';
+    const [hy, hm] = hi.split('-').map(Number);
+    const rangeEnd = hi.slice(0, 7) + '-' + String(new Date(Date.UTC(hy, hm, 0)).getUTCDate()).padStart(2, '0');
+    const entries = timesheets.filter((t) => (!tsFilterMechanic || t.mechanic === tsFilterMechanic) && t.date >= rangeStart && t.date <= rangeEnd);
+    const prod = includeProduction
+      ? productionShifts.filter((s) => {
+          const d = localDateFromIso(s.end || s.start);
+          return (!tsFilterMechanic || s.employee === tsFilterMechanic) && d >= rangeStart && d <= rangeEnd;
+        })
+      : [];
+    return exportTimesheets(entries, prod, undefined, rangeStart, rangeEnd);
+  };
   const exportTimesheets = async (entries, productionEntries, filenamePrefix, rangeStart, rangeEnd) => {
     const rows = [];
 
@@ -18202,13 +18223,35 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       rows.push(['═══ PRODUCTION ═══']);
       rows.push(['Employee', 'Date', 'Machine', 'Block', 'Start', 'End', 'Paid Hours', 'Extra Hours (billing only)', 'Production', 'Downtime Reports', 'Downtime Duration', 'Downtime Detail']);
       const sortedProd = [...productionEntries].sort((a, b) => (a.employee || '').localeCompare(b.employee || '') || (a.end || '').localeCompare(b.end || ''));
+      // With an explicit range, every production employee gets every day in
+      // it (blank rows for days not worked), same as the regular section and
+      // the emailed monthly report. Insert an empty placeholder shift for
+      // each missing day so it flows through the same row builder below.
+      let prodList = sortedProd;
+      if (rangeStart && rangeEnd) {
+        const days = [];
+        const dEnd = new Date(rangeEnd + 'T00:00:00Z');
+        for (let d = new Date(rangeStart + 'T00:00:00Z'); d <= dEnd; d.setUTCDate(d.getUTCDate() + 1)) days.push(d.toISOString().slice(0, 10));
+        const byEmp = {};
+        sortedProd.forEach((s) => { (byEmp[s.employee] = byEmp[s.employee] || []).push(s); });
+        prodList = [];
+        Object.keys(byEmp).sort((a, b) => (a || '').localeCompare(b || '')).forEach((emp) => {
+          const byDay = {};
+          byEmp[emp].forEach((s) => { const k = localDateFromIso(s.end || s.start); (byDay[k] = byDay[k] || []).push(s); });
+          days.forEach((day) => {
+            if (byDay[day]) byDay[day].sort((a, b) => (a.start || '').localeCompare(b.start || '')).forEach((s) => prodList.push(s));
+            else prodList.push({ employee: emp, _blankDay: day });
+          });
+        });
+      }
       let lastEmployee = null;
-      sortedProd.forEach((s) => {
+      prodList.forEach((s) => {
         if (s.employee !== lastEmployee) {
           if (lastEmployee !== null) rows.push([]);
           rows.push([`── ${s.employee} ──`]);
         }
         lastEmployee = s.employee;
+        if (s._blankDay) { rows.push([s.employee, s._blankDay, '', '', '', '', '', '', '', '', '', '']); return; }
         const hours = s.start && s.end ? (new Date(s.end) - new Date(s.start)) / 1000 / 60 / 60 : 0;
         const extraHours = (s.extraTasks || []).reduce((sum, t) => sum + (parseFloat(t.hours) || 0), 0);
         const downtimeLog = s.downtimeLog || [];
@@ -20486,7 +20529,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-display text-lg font-semibold uppercase tracking-wide">Totals</h2>
-            <Btn variant="ghost" onClick={() => exportTimesheets(filtered, [], undefined, tsFilterStart, tsFilterEnd)}>📤 Export & Share</Btn>
+            <Btn variant="ghost" onClick={() => exportTimesheetsFullMonth(false)}>📤 Export & Share (full month)</Btn>
           </div>
 
           {Object.keys(totalsByMechanic).length === 0 ? (
@@ -21456,7 +21499,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </div>
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-display text-lg font-semibold uppercase tracking-wide">Totals</h2>
-            <Btn variant="ghost" onClick={() => exportTimesheets(filtered, filteredProduction, undefined, tsFilterStart, tsFilterEnd)}>📤 Export & Share</Btn>
+            <Btn variant="ghost" onClick={() => exportTimesheetsFullMonth(true)}>📤 Export & Share (full month)</Btn>
           </div>
 
           {Object.keys(totalsByMechanic).length === 0 && filteredProduction.length === 0 ? (
