@@ -5130,6 +5130,131 @@ async function idbGetMapImageBlob(mapId) {
     return null;
   }
 }
+// ---- Older machine tracks, kept on the admin's phone (compressed) --------------
+// A track that ended more than ~20 minutes ago never changes again (the server
+// finishes repairing it within 15 minutes of clock-out), so once an admin's
+// phone has downloaded it, it is saved here and never downloaded again. Stored
+// as: points packed into small whole-number steps, then gzip-compressed (about
+// a tenth of the size). If the phone can't gzip, the packed text is stored as is.
+const TRACK_FINAL_AFTER_MS = 20 * 60 * 1000;
+function isFinalTrack(t) {
+  if (!t || !t.endedAt) return false;
+  const e = new Date(t.endedAt).getTime();
+  return !isNaN(e) && Date.now() - e > TRACK_FINAL_AFTER_MS;
+}
+function idbOpenTrackArchive() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('harderTrackArchive', 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains('tracks')) req.result.createObjectStore('tracks', { keyPath: 'id' });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function gzipText(text) {
+  if (typeof CompressionStream === 'undefined') return null;
+  try {
+    const cs = new CompressionStream('gzip');
+    const w = cs.writable.getWriter();
+    w.write(new TextEncoder().encode(text));
+    w.close();
+    return await new Response(cs.readable).arrayBuffer();
+  } catch (e) { return null; }
+}
+async function gunzipBuffer(buf) {
+  const ds = new DecompressionStream('gzip');
+  const w = ds.writable.getWriter();
+  w.write(new Uint8Array(buf));
+  w.close();
+  return await new Response(ds.readable).text();
+}
+function packTrack(track) {
+  const pts = Array.isArray(track.points) ? track.points : Object.values(track.points || {});
+  const simple = pts.every((p) => p && typeof p.lat === 'number' && typeof p.lng === 'number' && p.time && Object.keys(p).length === 3);
+  const rest = { ...track };
+  delete rest.points;
+  if (!simple) return JSON.stringify({ rest, raw: pts });
+  const flat = [];
+  let la = 0, lg = 0, tm = 0;
+  pts.forEach((p) => {
+    const a = Math.round(p.lat * 1e6), g = Math.round(p.lng * 1e6), t = new Date(p.time).getTime();
+    flat.push(a - la, g - lg, t - tm);
+    la = a; lg = g; tm = t;
+  });
+  return JSON.stringify({ rest, d: flat });
+}
+function unpackTrack(text) {
+  const o = JSON.parse(text);
+  if (o.raw) return { ...o.rest, points: o.raw };
+  const points = [];
+  let la = 0, lg = 0, tm = 0;
+  for (let i = 0; i < o.d.length; i += 3) {
+    la += o.d[i]; lg += o.d[i + 1]; tm += o.d[i + 2];
+    points.push({ lat: la / 1e6, lng: lg / 1e6, time: new Date(tm).toISOString() });
+  }
+  return { ...o.rest, points };
+}
+async function trackArchivePut(track) {
+  try {
+    if (!track || !track.id) return;
+    const text = packTrack(track);
+    const z = await gzipText(text);
+    const db = await idbOpenTrackArchive();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('tracks', 'readwrite');
+      tx.objectStore('tracks').put(z ? { id: track.id, z } : { id: track.id, text });
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) { /* storage unavailable or full — the track just downloads again next time */ }
+}
+async function trackArchiveGetMany(ids) {
+  const out = new Map();
+  try {
+    const db = await idbOpenTrackArchive();
+    await Promise.all(ids.map((id) => new Promise((resolve) => {
+      const req = db.transaction('tracks', 'readonly').objectStore('tracks').get(id);
+      req.onsuccess = async () => {
+        try {
+          const rec = req.result;
+          if (rec) out.set(id, unpackTrack(rec.z ? await gunzipBuffer(rec.z) : rec.text));
+        } catch (e) { /* unreadable copy — treated as not saved */ }
+        resolve();
+      };
+      req.onerror = () => resolve();
+    })));
+  } catch (e) { /* no storage */ }
+  return out;
+}
+async function trackArchiveClear() {
+  try {
+    const db = await idbOpenTrackArchive();
+    await new Promise((resolve) => {
+      const tx = db.transaction('tracks', 'readwrite');
+      tx.objectStore('tracks').clear();
+      tx.oncomplete = resolve;
+      tx.onerror = resolve;
+    });
+  } catch (e) { /* nothing to clear */ }
+}
+// Just the list of track ids (a few bytes each) — not the tracks themselves.
+async function fetchTrackKeysShallow() {
+  let url = firebase.app().options.databaseURL.replace(/\/$/, '') + '/machineTrackRecords.json?shallow=true';
+  try {
+    const u = firebase.auth().currentUser;
+    if (u) url += '&auth=' + encodeURIComponent(await u.getIdToken());
+  } catch (e) { /* anonymous read */ }
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('track list ' + res.status);
+  return Object.keys((await res.json()) || {}).sort();
+}
+function mergeTracks(live, archived) {
+  const byId = new Map();
+  archived.forEach((t) => byId.set(t.id, t));
+  live.forEach((t) => byId.set(t.id, t)); // live copy wins
+  return Array.from(byId.values()).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
 async function idbDeleteMapImageBlob(mapId) {
   try {
     const db = await idbOpenMapDB();
@@ -13738,6 +13863,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [showMachineTracksPanel, setShowMachineTracksPanel] = useState(false);
   // Admin tracks panel: false = only the last 12 hours, true = the 40 newest.
   const [showOlderTracks, setShowOlderTracks] = useState(false);
+  const [olderStatus, setOlderStatus] = useState('');
+  const [olderReload, setOlderReload] = useState(0);
+  const liveTracksRef = useRef([]);
+  const archivedTracksRef = useRef([]);
+  const archivedIdsRef = useRef(new Set());
   const [viewingIdleStop, setViewingIdleStop] = useState(null); // tapped orange idle highlight
   const [viewingTrackId, setViewingTrackId] = useState(null); // tapped track on the map -> shows that day's production
   const [hiddenOpenTrackIds, setHiddenOpenTrackIds] = useState([]); // open tracks the admin chose to hide from the map
@@ -14213,22 +14343,76 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       return;
     }
     // Track ids start with the time they were made (base 36), so keys sort by
-    // time: by default only tracks from the last 12 hours are downloaded, and
-    // the admin panel's "Load older tracks" switches to the 40 newest.
-    const base = firebase.database().ref('machineTrackRecords').orderByKey();
-    const sinceKey = (Date.now() - 12 * 60 * 60 * 1000).toString(36);
-    const ref = showOlderTracks ? base.limitToLast(40) : base.startAt(sinceKey);
+    // time: only tracks from the last 12 hours are listened to live. "Load older
+    // tracks" (the effect below) adds the 40 newest, from this phone's saved copies.
+    const ref = firebase.database().ref('machineTrackRecords').orderByKey().startAt((Date.now() - 12 * 60 * 60 * 1000).toString(36));
     let on = null;
     (async () => {
       await selfHealMigration('machineTracks', 'machineTrackRecords', 'machine tracks');
       on = ref.on('value', (snap) => {
         const val = Object.values(snap.val() || {}).filter((t) => t && t.id && t.startedAt);
-        setMachineTracks(val);
-        cacheSet('machineTracks', val);
+        liveTracksRef.current = val;
+        setMachineTracks(mergeTracks(val, archivedTracksRef.current));
+        // Save finished tracks on this phone so "Load older tracks" never re-downloads them.
+        val.forEach((t) => {
+          if (isFinalTrack(t) && !archivedIdsRef.current.has(t.id)) {
+            archivedIdsRef.current.add(t.id);
+            trackArchivePut(t);
+          }
+        });
       });
     })();
     return () => { if (on) ref.off('value', on); };
-  }, [canLoadTracks, showOlderTracks]);
+  }, [canLoadTracks]);
+
+  // "Load older tracks": the 40 newest. Finished tracks come from this phone's
+  // saved (compressed) copies; only ones never seen before are downloaded.
+  useEffect(() => {
+    if (!canLoadTracks || !showOlderTracks) {
+      if (archivedTracksRef.current.length) {
+        archivedTracksRef.current = [];
+        setMachineTracks(mergeTracks(liveTracksRef.current, []));
+      }
+      setOlderStatus('');
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setOlderStatus('Checking for older tracks…');
+      let keys = [];
+      try { keys = (await fetchTrackKeysShallow()).slice(-40); } catch (e) { keys = null; }
+      if (cancelled) return;
+      const cached = await trackArchiveGetMany(keys || []);
+      if (cancelled) return;
+      cached.forEach((t, id) => archivedIdsRef.current.add(id));
+      let shown = Array.from(cached.values());
+      archivedTracksRef.current = shown;
+      setMachineTracks(mergeTracks(liveTracksRef.current, shown));
+      if (keys === null) { setOlderStatus('No signal — showing the older tracks saved on this phone.'); return; }
+      const missing = keys.filter((k) => !cached.has(k));
+      let done = 0;
+      for (let i = 0; i < missing.length && !cancelled; i += 3) {
+        const batch = missing.slice(i, i + 3);
+        await Promise.all(batch.map(async (k) => {
+          try {
+            const snap = await firebase.database().ref('machineTrackRecords/' + k).once('value');
+            const t = snap.val();
+            if (t && t.id && t.startedAt) {
+              shown = shown.concat([t]);
+              if (isFinalTrack(t)) { archivedIdsRef.current.add(t.id); trackArchivePut(t); }
+            }
+          } catch (e) { /* skipped — tried again next time */ }
+          done++;
+        }));
+        if (cancelled) return;
+        archivedTracksRef.current = shown;
+        setMachineTracks(mergeTracks(liveTracksRef.current, shown));
+        setOlderStatus(`Downloading new tracks… ${done} of ${missing.length}`);
+      }
+      if (!cancelled) setOlderStatus(missing.length ? `Done. ${cached.size} tracks came from this phone, ${missing.length} downloaded (saved for next time).` : `All ${cached.size} tracks came from this phone — nothing downloaded.`);
+    })();
+    return () => { cancelled = true; };
+  }, [canLoadTracks, showOlderTracks, olderReload]);
 
   useEffect(() => {
     const ref = firebase.database().ref('highwayLocationRecords');
@@ -23189,7 +23373,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 <button onClick={() => setShowMachineTracksPanel(false)} className="text-2xl" style={{ color: COLORS.inkDim }}>✕</button>
               </div>
               <div className="flex items-center justify-between mb-3 gap-2">
-                <p className="text-xs" style={{ color: COLORS.inkDim }}>{showOlderTracks ? 'Showing the 40 newest tracks.' : 'Showing tracks from the last 12 hours.'} Tracks still open show on the map by default. Use Hide / Show on any track.</p>
+                <p className="text-xs" style={{ color: COLORS.inkDim }}>{showOlderTracks ? 'Showing the 40 newest tracks.' : 'Showing tracks from the last 12 hours.'}{showOlderTracks && olderStatus ? ' ' + olderStatus : ''} Tracks still open show on the map by default. Use Hide / Show on any track.</p>
                 {(shownTrackIds.length > 0 || machineTracks.some((t) => !t.endedAt && !hiddenOpenTrackIds.includes(t.id))) && (
                   <button onClick={() => { setShownTrackIds([]); setHiddenOpenTrackIds(machineTracks.filter((t) => !t.endedAt).map((t) => t.id)); }} className="text-xs underline whitespace-nowrap" style={{ color: COLORS.accent }}>Hide all</button>
                 )}
@@ -23234,6 +23418,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               >
                 {showOlderTracks ? '⏱️ Back to the last 12 hours' : '🕘 Load older tracks'}
               </button>
+              {showOlderTracks && (
+                <button
+                  onClick={async () => { await trackArchiveClear(); archivedIdsRef.current = new Set(); setOlderReload((n) => n + 1); }}
+                  className="w-full rounded-lg py-2 mt-2 text-xs"
+                  style={{ background: 'transparent', color: COLORS.inkDim, border: `1px solid ${COLORS.line}` }}
+                >
+                  ↻ Re-download older tracks from the server
+                </button>
+              )}
             </div>
           </div>
         )}
