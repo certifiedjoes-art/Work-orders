@@ -4924,6 +4924,7 @@ function SidebarMenu({ show, onClose, mechanic, isAdmin, isSafety, isForeman, is
             {isAdmin && item('📍', 'Block Numbers', () => onNavigate('blocks'))}
             {!isProduction && item('🎉', t('shoutouts'), () => onNavigate('shoutouts'))}
             {!isProduction && item('📋', t('checklists'), () => onNavigate('checklists'))}
+            {(!isProduction || isAdmin) && item('🛢️', 'Oil Changes', () => onNavigate('oilChanges'))}
             {item('⚙️', 'Settings', () => onNavigate('settings'))}
           </div>
 
@@ -13636,6 +13637,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [mapLines, setMapLines] = useState(() => cacheGet('mapLines', [])); // [{id, mapId, type, note, points: [{x,y}...], length, addedBy, isPublic, time}]
   const [measureMode, setMeasureMode] = useState(false); // tap-to-vertex "Draw & Measure" mode
   const [pencilMode, setPencilMode] = useState(false); // freehand drag-to-draw mode
+  const [oilExpandedUnit, setOilExpandedUnit] = useState(null);
+  const [showOilNoData, setShowOilNoData] = useState(false);
   const [pencilStrokes, setPencilStrokes] = useState([]); // pencil: every stroke drawn so far (lifting your finger no longer ends the drawing)
   useEffect(() => { if (!pencilMode) setPencilStrokes((st) => (st.length ? [] : st)); }, [pencilMode]); // leaving pencil mode always discards unsaved strokes
   const [linePoints, setLinePoints] = useState([]); // points accumulated while measureMode or pencilMode is true, not yet saved
@@ -18477,6 +18480,38 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [samsaraDiagnostics, oilChangeBaselines, units.join(','), productionSettings.oilChangeIntervalHours]);
+
+  // Mechanic-initiated oil change work order (Oil Changes screen) — same shape
+  // as the auto-generated one, so closing it records the new baseline the
+  // same way (see updateOrder). Refuses to double up if one is already open.
+  const createOilChangeOrder = async (unit, currentHours, baselineHours) => {
+    if (orders.some((o) => o.unit === unit && o.oilChangeDue && o.status !== 'Done')) {
+      alert(`There's already an open oil change work order for ${unit}.`);
+      return;
+    }
+    const interval = productionSettings.oilChangeIntervalHours || DEFAULT_OIL_CHANGE_INTERVAL_HOURS;
+    const hasBoth = currentHours != null && baselineHours != null;
+    const text = hasBoth
+      ? `Oil change — ${Math.round(currentHours - baselineHours)} hours since last change, ${Math.max(0, Math.round(interval - (currentHours - baselineHours)))} hrs left (requested by ${currentMechanic}).`
+      : `Oil change requested by ${currentMechanic}.`;
+    const descriptionField = await buildLocalizedField(text, lang);
+    await saveOneOrder({
+      id: uid(),
+      unit,
+      description: descriptionField,
+      workedOnBy: [],
+      hours: currentHours != null ? currentHours : '',
+      dueDate: '',
+      dateCreated: localDateStr(),
+      status: 'Open',
+      notes: [],
+      createdBy: currentMechanic,
+      onBoard: true,
+      media: [],
+      oilChangeDue: true,
+    });
+    alert(`Oil change work order created for ${unit} — it's on the board.`);
+  };
 
   // Older orders saved before this feature existed have no onBoard field at
   // all — treated as already on the board so nothing already-visible
@@ -25308,6 +25343,113 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </div>
           );
         })()}
+        </div>
+      </div>
+    );
+  }
+
+  if (screen === 'oilChanges') {
+    const interval = productionSettings.oilChangeIntervalHours || DEFAULT_OIL_CHANGE_INTERVAL_HOURS;
+    const SOON = Math.max(10, Math.round(interval * 0.1)); // "due soon" = within 10% of the interval (min 10 hrs)
+    const num = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+    const fmtH = (n) => (n == null ? '—' : (Math.round(n * 10) / 10).toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 1 }));
+    const rows = (units || []).filter(Boolean).map((u) => {
+      const slug = slugForUnit(u);
+      const diag = samsaraDiagnostics[slug];
+      const cur = num(diag && diag.hours);
+      const base = num(oilChangeBaselines[slug]);
+      const since = cur != null && base != null ? cur - base : null;
+      const left = since != null ? interval - since : null;
+      let status = 'nodata';
+      if (cur != null && base != null) status = left <= 0 ? 'overdue' : left <= SOON ? 'soon' : 'ok';
+      else if (cur != null && base == null) status = 'nobase';
+      const hasOpenOrder = orders.some((o) => o.unit === u && o.oilChangeDue && o.status !== 'Done');
+      return { unit: u, slug, cur, base, since, left, status, hasOpenOrder, updatedAt: diag && diag.updatedAt };
+    });
+    const order = { overdue: 0, soon: 1, ok: 2, nobase: 3, nodata: 4 };
+    rows.sort((a, b) => order[a.status] - order[b.status] || (a.left ?? 0) - (b.left ?? 0) || String(a.unit).localeCompare(String(b.unit), undefined, { numeric: true }));
+    const statusStyle = {
+      overdue: { color: '#E07A5F', label: 'OVERDUE' },
+      soon: { color: '#E0B04F', label: 'DUE SOON' },
+      ok: { color: COLORS.done, label: 'OK' },
+      nobase: { color: COLORS.inkDim, label: 'SET LAST CHANGE' },
+      nodata: { color: COLORS.inkDim, label: 'NO HOURS' },
+    };
+    const counts = rows.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {});
+    const visibleRows = rows.filter((r) => r.status !== 'nodata' || showOilNoData);
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
+        {FONT_STYLE}
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
+        <div className="max-w-3xl mx-auto">
+          <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
+            ← Back
+          </button>
+          <h1 className="font-display text-3xl font-bold mb-1">🛢️ Oil Changes</h1>
+          <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>Change interval: {interval} hrs. Current hours come from Samsara; "last change" is the hours recorded at the unit's last oil change.</p>
+
+          <div className="grid grid-cols-3 gap-2 mb-5" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' }}>
+            {[['overdue', 'Overdue'], ['soon', 'Due soon'], ['ok', 'OK']].map(([k, label]) => (
+              <div key={k} className="rounded-lg p-3 text-center" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+                <p className="font-display text-2xl font-bold" style={{ color: statusStyle[k].color }}>{counts[k] || 0}</p>
+                <p className="text-xs" style={{ color: COLORS.inkDim }}>{label}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid items-end gap-2 px-3 pb-1 text-xs uppercase tracking-wide" style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr 1fr 1fr', color: COLORS.inkDim }}>
+            <span>Unit</span><span className="text-right">Last change</span><span className="text-right">Current</span><span className="text-right">Due in</span>
+          </div>
+          <div className="space-y-2">
+            {visibleRows.map((r) => {
+              const st = statusStyle[r.status];
+              const open = oilExpandedUnit === r.unit;
+              return (
+                <div key={r.unit} className="rounded-lg" style={{ background: COLORS.surface, border: `1px solid ${r.status === 'overdue' ? st.color : COLORS.line}`, borderLeft: `5px solid ${st.color}` }}>
+                  <button onClick={() => setOilExpandedUnit(open ? null : r.unit)} className="w-full grid items-center gap-2 px-3 py-3 text-left" style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr 1fr 1fr' }}>
+                    <span>
+                      <span className="font-display font-bold block">{r.unit}</span>
+                      <span className="text-xs font-semibold" style={{ color: st.color }}>{st.label}</span>
+                    </span>
+                    <span className="text-right font-mono text-sm">{fmtH(r.base)}</span>
+                    <span className="text-right font-mono text-sm">{fmtH(r.cur)}</span>
+                    <span className="text-right font-mono text-sm font-bold" style={{ color: st.color }}>
+                      {r.left == null ? '—' : r.left <= 0 ? `${fmtH(-r.left)} over` : `${fmtH(r.left)} h`}
+                    </span>
+                  </button>
+                  {!open && r.status === 'soon' && (
+                    <div className="px-3 pb-3">
+                      {r.hasOpenOrder
+                        ? <p className="text-xs font-semibold" style={{ color: COLORS.inkDim }}>✓ Work order already open — see the board</p>
+                        : <Btn onClick={() => { if (window.confirm(`Create an oil change work order for ${r.unit}?`)) createOilChangeOrder(r.unit, r.cur, r.base); }}>🛢️ Create oil change work order</Btn>}
+                    </div>
+                  )}
+                  {open && (
+                    <div className="px-3 pb-3">
+                      {r.hasOpenOrder
+                        ? <p className="text-xs font-semibold mb-2" style={{ color: COLORS.inkDim }}>✓ Oil change work order already open — see the board</p>
+                        : <Btn className="mb-3" onClick={() => { if (window.confirm(`Create an oil change work order for ${r.unit}?`)) createOilChangeOrder(r.unit, r.cur, r.base); }}>🛢️ Create oil change work order</Btn>}
+                      <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>
+                        {r.since != null ? `${fmtH(r.since)} hrs since last change` : 'Not enough data to work out hours since the last change.'}
+                        {r.updatedAt ? ` · Samsara reading ${new Date(r.updatedAt).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}
+                      </p>
+                      <OilBaselineEditor currentBaseline={r.base} currentHours={r.cur} onSave={(hours) => setOilChangeBaseline(r.unit, hours)} />
+                      {r.cur != null && (
+                        <Btn variant="ghost" className="mt-2" onClick={() => { if (window.confirm(`Record that ${r.unit} just had its oil changed at ${fmtH(r.cur)} hrs?`)) setOilChangeBaseline(r.unit, r.cur); }}>
+                          Oil changed just now — use {fmtH(r.cur)} hrs
+                        </Btn>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {(counts.nodata || 0) > 0 && (
+            <button onClick={() => setShowOilNoData((v) => !v)} className="text-xs underline mt-4" style={{ color: COLORS.inkDim }}>
+              {showOilNoData ? 'Hide' : 'Show'} {counts.nodata} unit{counts.nodata === 1 ? '' : 's'} with no Samsara hours
+            </button>
+          )}
         </div>
       </div>
     );
