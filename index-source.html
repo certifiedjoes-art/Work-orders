@@ -6153,6 +6153,38 @@ async function saveMachineTrackRecord(track) {
 async function patchMachineTrackRecord(trackId, patch) {
   await firebase.database().ref('machineTrackRecords/' + trackId).update(stripUndefined(patch));
 }
+// A track's id is the id of the shift it belongs to. That lets a device that
+// has downloaded no tracks (everyone except admins) still close its own track
+// at clock-out without loading anything: it just checks that one small spot.
+// Tracks created before this change have random ids, so if the shift-id spot
+// is empty a one-off search finds the old one (rare, and only for tracks that
+// were already open when this went live). If the device is offline and can't
+// tell, it assumes the normal case and queues the close like any other write.
+async function closeOpenTrackForShift(shiftId, endedAt, waitMs = 6000) {
+  const db = firebase.database();
+  let known = null; // true: track exists at the shift id, false: it doesn't, null: couldn't tell
+  try {
+    known = await Promise.race([
+      db.ref('machineTrackRecords/' + shiftId + '/machine').once('value').then((snap) => snap.exists()),
+      new Promise((resolve) => setTimeout(() => resolve(null), waitMs)),
+    ]);
+  } catch (e) {
+    known = null;
+  }
+  let trackId = shiftId;
+  if (known === false) {
+    trackId = null;
+    try {
+      const snap = await db.ref('machineTrackRecords').orderByChild('shiftId').equalTo(shiftId).once('value');
+      const found = Object.values(snap.val() || {}).find((t) => t && t.id && !t.endedAt);
+      trackId = found ? found.id : null;
+    } catch (e) {
+      trackId = null;
+    }
+  }
+  if (!trackId) return;
+  await queueWrite('machineTracks', { kind: 'patch', entryId: trackId, patch: { endedAt } });
+}
 async function migrateMachineTracksToPerRecord() {
   return migrateArrayCollectionToPerRecord('machineTracks', 'machineTrackRecords', 'machine tracks');
 }
@@ -13674,6 +13706,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [pendingCalibrationPixel, setPendingCalibrationPixel] = useState(null); // {px, py} just tapped, awaiting lat/lng entry
   const [uploadingMapPdf, setUploadingMapPdf] = useState(null); // mapId currently uploading, for a loading indicator
   const [showMachineTracksPanel, setShowMachineTracksPanel] = useState(false);
+  // Admin tracks panel: false = only the last 12 hours, true = the 40 newest.
+  const [showOlderTracks, setShowOlderTracks] = useState(false);
   const [viewingIdleStop, setViewingIdleStop] = useState(null); // tapped orange idle highlight
   const [viewingTrackId, setViewingTrackId] = useState(null); // tapped track on the map -> shows that day's production
   const [hiddenOpenTrackIds, setHiddenOpenTrackIds] = useState([]); // open tracks the admin chose to hide from the map
@@ -14138,22 +14172,33 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return () => { if (on) ref.off('value', on); };
   }, []);
 
+  // Tracks hold thousands of GPS points each and only admins can see them, so
+  // only an admin's device downloads them. Everyone else downloads none (and
+  // drops any copy an earlier version of the app saved on the device).
+  const canLoadTracks = !!currentMechanic && admins.includes(currentMechanic);
   useEffect(() => {
-    // Only the 40 newest tracks (ids are time-ordered) — the app never shows
-    // more than that, and downloading every track's full GPS path made the
-    // connection choke now that tracks hold thousands of points each.
-    const ref = firebase.database().ref('machineTrackRecords').orderByKey().limitToLast(40);
+    if (!canLoadTracks) {
+      setMachineTracks((prev) => (prev.length ? [] : prev));
+      cacheSet('machineTracks', []);
+      return;
+    }
+    // Track ids start with the time they were made (base 36), so keys sort by
+    // time: by default only tracks from the last 12 hours are downloaded, and
+    // the admin panel's "Load older tracks" switches to the 40 newest.
+    const base = firebase.database().ref('machineTrackRecords').orderByKey();
+    const sinceKey = (Date.now() - 12 * 60 * 60 * 1000).toString(36);
+    const ref = showOlderTracks ? base.limitToLast(40) : base.startAt(sinceKey);
     let on = null;
     (async () => {
       await selfHealMigration('machineTracks', 'machineTrackRecords', 'machine tracks');
       on = ref.on('value', (snap) => {
-        const val = Object.values(snap.val() || {});
+        const val = Object.values(snap.val() || {}).filter((t) => t && t.id && t.startedAt);
         setMachineTracks(val);
         cacheSet('machineTracks', val);
       });
     })();
     return () => { if (on) ref.off('value', on); };
-  }, []);
+  }, [canLoadTracks, showOlderTracks]);
 
   useEffect(() => {
     const ref = firebase.database().ref('highwayLocationRecords');
@@ -17001,7 +17046,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const startMachineTrack = async (sourceType, shiftId, machine, employee) => {
     if (!machine) return; // nothing assigned — nothing to track
     const entry = {
-      id: uid(),
+      id: shiftId, // same id as the shift, so any device can find this track again (see closeOpenTrackForShift)
       sourceType, // currently always 'productionShift'
       shiftId,
       machine,
@@ -17013,9 +17058,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await saveOneMachineTrack(entry);
   };
   const endMachineTrack = async (sourceType, shiftId) => {
+    const endedAt = new Date().toISOString();
     const track = machineTracks.find((t) => t.sourceType === sourceType && t.shiftId === shiftId && !t.endedAt);
-    if (!track) return;
-    await patchOneMachineTrack(track.id, { endedAt: new Date().toISOString() });
+    if (track) {
+      await patchOneMachineTrack(track.id, { endedAt });
+      return;
+    }
+    // Only admins keep the track list loaded, so on everyone else's device the
+    // track usually isn't in memory — close it by its shift id instead.
+    await closeOpenTrackForShift(shiftId, endedAt);
   };
   // The polling interval below is created once and keeps running across
   // renders, so it must read the LATEST tracks from a ref. Reading the
@@ -23050,7 +23101,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     >
                       ⚙️ Map settings
                     </button>
-                    {isAdmin && machineTracks.length > 0 && (
+                    {isAdmin && (
                       <button
                         onClick={() => { setShowMapToolsMenu(false); setShowMachineTracksPanel(true); }}
                         className="w-full text-left rounded-lg p-3 font-display font-semibold flex items-center gap-2"
@@ -23108,13 +23159,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 <button onClick={() => setShowMachineTracksPanel(false)} className="text-2xl" style={{ color: COLORS.inkDim }}>✕</button>
               </div>
               <div className="flex items-center justify-between mb-3 gap-2">
-                <p className="text-xs" style={{ color: COLORS.inkDim }}>Tracks still open show on the map by default. Use Hide / Show on any track.</p>
+                <p className="text-xs" style={{ color: COLORS.inkDim }}>{showOlderTracks ? 'Showing the 40 newest tracks.' : 'Showing tracks from the last 12 hours.'} Tracks still open show on the map by default. Use Hide / Show on any track.</p>
                 {(shownTrackIds.length > 0 || machineTracks.some((t) => !t.endedAt && !hiddenOpenTrackIds.includes(t.id))) && (
                   <button onClick={() => { setShownTrackIds([]); setHiddenOpenTrackIds(machineTracks.filter((t) => !t.endedAt).map((t) => t.id)); }} className="text-xs underline whitespace-nowrap" style={{ color: COLORS.accent }}>Hide all</button>
                 )}
               </div>
               <div className="space-y-2">
-                {[...machineTracks].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, 40).map((track) => (
+                {[...machineTracks].filter((t) => t && t.startedAt).sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, 40).map((track) => (
                   <div key={track.id} className="rounded-lg p-3 text-xs" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
                     <div className="flex items-center justify-between">
                       <span className="font-semibold">{track.machine || '(no unit)'} — {track.employee}</span>
@@ -23141,6 +23192,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   </div>
                 ))}
               </div>
+              {machineTracks.length === 0 && (
+                <p className="text-xs mt-2" style={{ color: COLORS.inkDim }}>
+                  {showOlderTracks ? 'No tracks found.' : 'No tracks in the last 12 hours.'}
+                </p>
+              )}
+              <button
+                onClick={() => setShowOlderTracks((v) => !v)}
+                className="w-full rounded-lg py-3 mt-3 text-sm font-semibold"
+                style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+              >
+                {showOlderTracks ? '⏱️ Back to the last 12 hours' : '🕘 Load older tracks'}
+              </button>
             </div>
           </div>
         )}
@@ -23216,7 +23279,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {viewingMachineName && currentMap && (() => {
           const pos = currentMapLivePositions.find((p) => p.name === viewingMachineName);
           if (!pos) return null;
-          const activeTrack = machineTracks.find((tr) => !tr.endedAt && tr.machine === viewingMachineName);
+          const activeTrack = productionShifts.find((sh) => !sh.end && sh.machine === viewingMachineName && TRACK_ELIGIBLE_TYPES.includes(machineType(sh.machine, unitTypes)));
           return (
             <MachineMarkerDetail
               position={{ ...pos, employee: activeTrack ? activeTrack.employee : null }}
@@ -23503,7 +23566,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           // A machine's marker doesn't know on its own who (if anyone) is
           // driving it — that's cross-referenced here against whichever
           // shift, if any, currently has this exact machine name assigned.
-          const activeTrack = openTracks.find((tr) => tr.machine === viewingMachineName);
+          const activeTrack = productionShifts.find((sh) => !sh.end && sh.machine === viewingMachineName && TRACK_ELIGIBLE_TYPES.includes(machineType(sh.machine, unitTypes)));
           return (
             <MachineMarkerDetail
               position={{ ...pos, employee: activeTrack ? activeTrack.employee : null }}
