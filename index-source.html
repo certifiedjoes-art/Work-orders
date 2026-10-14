@@ -6175,8 +6175,12 @@ async function closeOpenTrackForShift(shiftId, endedAt, waitMs = 6000) {
   if (known === false) {
     trackId = null;
     try {
-      const snap = await db.ref('machineTrackRecords').orderByChild('shiftId').equalTo(shiftId).once('value');
-      const found = Object.values(snap.val() || {}).find((t) => t && t.id && !t.endedAt);
+      // Bounded on purpose: an unindexed orderByChild would make this phone download
+      // EVERY track ever recorded. Track ids start with their creation time, and an
+      // old-style track was created right when its shift began, so look only at the
+      // few tracks created from that moment on.
+      const snap = await db.ref('machineTrackRecords').orderByKey().startAt(String(shiftId).slice(0, 8)).limitToFirst(25).once('value');
+      const found = Object.values(snap.val() || {}).find((t) => t && t.id && t.shiftId === shiftId && !t.endedAt);
       trackId = found ? found.id : null;
     } catch (e) {
       trackId = null;
