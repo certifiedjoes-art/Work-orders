@@ -5196,6 +5196,11 @@ function PrintPortal({ children }) {
   return ReactDOM.createPortal(children, target);
 }
 
+// Every time shown in the app is displayed in the company's own time zone,
+// no matter what zone the phone, laptop or desktop app reports. Stored times
+// are UTC and were always correct; only the DISPLAY used to follow the device.
+const APP_TZ = 'America/Edmonton';
+
 function fmtDate(d) {
   if (!d) return '';
   // Accepts either a plain YYYY-MM-DD date or a full ISO timestamp — a
@@ -5204,16 +5209,22 @@ function fmtDate(d) {
   // own time and zone, so it's parsed as-is. Passing a full timestamp
   // through the T00:00:00 path used to silently produce an invalid date
   // and fall back to returning the raw string unformatted.
-  const dt = new Date(d.includes('T') ? d : d + 'T00:00:00');
+  const isTimestamp = d.includes('T');
+  const dt = new Date(isTimestamp ? d : d + 'T00:00:00');
   if (isNaN(dt)) return d;
-  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  // Only a full timestamp is shown in Edmonton time. A plain YYYY-MM-DD date has
+  // no time zone of its own and is parsed as device-local midnight above, so it
+  // must be formatted in that same device-local zone to keep the same day.
+  return dt.toLocaleDateString(undefined, isTimestamp
+    ? { month: 'short', day: 'numeric', year: 'numeric', timeZone: APP_TZ }
+    : { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function fmtTime(iso) {
   if (!iso) return '';
   // hour12 forced explicitly so this always shows AM/PM regardless of the
   // phone's system time format setting (some Android phones default to 24-hour).
-  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: APP_TZ });
 }
 
 // Total paid hours for a shift: clock-in to clock-out, minus any unpaid break.
@@ -5681,7 +5692,7 @@ async function buildIncidentReportPdf(record) {
           y -= h + 6;
         } catch (e) { /* skip a broken signature image rather than fail the whole PDF */ }
       }
-      page.drawText(`Signed: ${sig.signedAt ? new Date(sig.signedAt).toLocaleString() : ''}`, { x: margin, y, size: 8, font, color: PDFLib.rgb(0.4, 0.4, 0.4) });
+      page.drawText(`Signed: ${sig.signedAt ? new Date(sig.signedAt).toLocaleString(undefined, { timeZone: APP_TZ }) : ''}`, { x: margin, y, size: 8, font, color: PDFLib.rgb(0.4, 0.4, 0.4) });
       y -= 20;
     }
   }
@@ -10205,7 +10216,7 @@ function PrintableYardInspection({ record, sectionOrders }) {
       <p style={{ fontSize: 12, color: '#555', marginBottom: 12 }}>{fmtDate(record.date)} · Inspected by {record.inspectedBy}</p>
       <PrintableInspectionItemRows entries={entries} />
       <div style={{ marginTop: 16, fontSize: 11, color: '#555' }}>
-        {record.reviewedBy ? `Reviewed by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}` : 'Not yet reviewed'}
+        {record.reviewedBy ? `Reviewed by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString(undefined, { timeZone: APP_TZ })}` : 'Not yet reviewed'}
       </div>
       {record.signature && (
         <div style={{ marginTop: 12 }}>
@@ -10226,7 +10237,7 @@ function PrintableVehicleInspection({ record, itemOrder }) {
       <p style={{ fontSize: 12, color: '#555', marginBottom: 12 }}>{fmtDate(record.date)}{record.km ? ` · ${record.km} km` : ''} · Inspected by {record.inspectedBy}</p>
       <PrintableInspectionItemRows entries={entries} />
       <div style={{ marginTop: 16, fontSize: 11, color: '#555' }}>
-        {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
+        {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString(undefined, { timeZone: APP_TZ })}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
       </div>
       {record.signature && (
         <div style={{ marginTop: 12 }}>
@@ -10255,7 +10266,7 @@ function PrintableEquipmentInspection({ record, itemOrder }) {
         </div>
       )}
       <div style={{ marginTop: 16, fontSize: 11, color: '#555' }}>
-        {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
+        {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString(undefined, { timeZone: APP_TZ })}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
       </div>
       {record.signature && (
         <div style={{ marginTop: 12 }}>
@@ -10288,7 +10299,7 @@ function YardInspectionDetail({ record, isAdmin, onReview, onUpdateItem, onDelet
       <p className="font-display text-lg font-bold">{record.site}</p>
       <p className="text-sm mb-1" style={{ color: COLORS.inkDim }}>{record.date} · Inspected by {record.inspectedBy}</p>
       <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>
-        {record.reviewedBy ? `Reviewed by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}` : 'Not yet reviewed'}
+        {record.reviewedBy ? `Reviewed by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString(undefined, { timeZone: APP_TZ })}` : 'Not yet reviewed'}
       </p>
 
       {YARD_INSPECTION_SECTIONS.map((section, sIdx) => (
@@ -10567,7 +10578,7 @@ function VehicleInspectionDetail({ record, isAdmin, onReview, onUpdateItem, onDe
       <p className="font-display text-lg font-bold">Unit {record.unit}</p>
       <p className="text-sm mb-1" style={{ color: COLORS.inkDim }}>{record.date} · {record.km ? `${record.km} km · ` : ''}Inspected by {record.inspectedBy}</p>
       <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>
-        {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
+        {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString(undefined, { timeZone: APP_TZ })}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
       </p>
 
       {effectiveItemOrder(itemOrder, VEHICLE_INSPECTION_ITEMS.length).map((iIdx) => (
@@ -10807,7 +10818,7 @@ function EquipmentInspectionDetail({ record, isAdmin, onReview, onUpdateItem, on
         {record.machine}{record.hourMeter ? ` · ${record.hourMeter} hrs` : ''} · {record.date} · Inspected by {record.inspectedBy}
       </p>
       <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>
-        {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString()}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
+        {record.reviewedBy ? `Follow-up by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString(undefined, { timeZone: APP_TZ })}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}` : 'No follow-up recorded yet'}
       </p>
 
       {effectiveItemOrder(itemOrder, EQUIPMENT_INSPECTION_ITEMS.length).map((iIdx) => (
@@ -12010,7 +12021,7 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
           <div key={i} className="mb-3">
             <p className="text-sm font-semibold">{sig.name}{sig.role ? ` — ${sig.role}` : ''}</p>
             {sig.dataUrl && <img src={sig.dataUrl} alt="Signature" className="rounded-lg my-1" style={{ background: '#F4F1E8', width: 160 }} />}
-            <p className="text-xs" style={{ color: COLORS.inkDim }}>{sig.signedAt ? new Date(sig.signedAt).toLocaleString() : ''}</p>
+            <p className="text-xs" style={{ color: COLORS.inkDim }}>{sig.signedAt ? new Date(sig.signedAt).toLocaleString(undefined, { timeZone: APP_TZ }) : ''}</p>
           </div>
         ))}
 
@@ -12129,7 +12140,7 @@ function IncidentReportDetail({ record, isAdmin, actionBusy, onAddSignature, onS
         <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
           <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Follow-up</p>
           <p className="text-sm whitespace-pre-wrap">{record.followUpNotes}</p>
-          <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>{record.followUpBy}{record.followUpAt ? ` · ${new Date(record.followUpAt).toLocaleString()}` : ''}</p>
+          <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>{record.followUpBy}{record.followUpAt ? ` · ${new Date(record.followUpAt).toLocaleString(undefined, { timeZone: APP_TZ })}` : ''}</p>
         </div>
       )}
     </div>
@@ -12972,7 +12983,7 @@ function PrintableWorkOrder({ order, activeUnit, t, lang, getAssignedMechanics, 
                     {getLocalizedChecklistText(it.text, c.nameOrigLang, c.itemTranslations, lang, idx)}
                   </span>
                   {it.checked && it.checkedBy && (
-                    <span style={{ color: '#6B6250', fontSize: 11 }}> — ✓ {it.checkedBy} on {new Date(it.checkedAt).toLocaleDateString()}</span>
+                    <span style={{ color: '#6B6250', fontSize: 11 }}> — ✓ {it.checkedBy} on {new Date(it.checkedAt).toLocaleDateString(undefined, { timeZone: APP_TZ })}</span>
                   )}
                 </p>
               ))}
@@ -12987,7 +12998,7 @@ function PrintableWorkOrder({ order, activeUnit, t, lang, getAssignedMechanics, 
           {notes.slice().reverse().map((n) => (
             <div key={n.id} style={{ marginBottom: 10 }}>
               <p className="text-xs" style={{ color: '#6B6250' }}>
-                {n.type === 'shoutout' ? '🎉 ' : ''}{n.author} · {new Date(n.ts).toLocaleString()}{n.edited ? ' (edited)' : ''}
+                {n.type === 'shoutout' ? '🎉 ' : ''}{n.author} · {new Date(n.ts).toLocaleString(undefined, { timeZone: APP_TZ })}{n.edited ? ' (edited)' : ''}
               </p>
               <p className="text-sm whitespace-pre-wrap">{n.text}</p>
             </div>
@@ -18238,7 +18249,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // Seconds-precision time, for this export only — the shared fmtTime used
   // for on-screen display deliberately omits seconds since that's just
   // clutter there, but the bookkeeper's payroll record format includes it.
-  const fmtTimeWithSeconds = (iso) => (iso ? new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }) : '');
+  const fmtTimeWithSeconds = (iso) => (iso ? new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: APP_TZ }) : '');
 
   // Export & Share always covers whole calendar month(s): the month of the
   // From date through the month of the To date (or just the month of
@@ -22512,7 +22523,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 >
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-display font-semibold text-sm" style={{ color: COLORS.accent }}>🎉 {s.author}</span>
-                    <span className="font-mono text-xs" style={{ color: COLORS.line }}>{new Date(s.ts).toLocaleDateString()}</span>
+                    <span className="font-mono text-xs" style={{ color: COLORS.line }}>{new Date(s.ts).toLocaleDateString(undefined, { timeZone: APP_TZ })}</span>
                   </div>
                   <p className="text-base mb-2">{s.text}</p>
                   <p className="text-xs font-mono" style={{ color: COLORS.inkDim }}>
@@ -25535,7 +25546,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         : <Btn className="mb-3" onClick={() => { if (window.confirm(`Create an oil change work order for ${r.unit}?`)) createOilChangeOrder(r.unit, r.cur, r.base); }}>🛢️ Create oil change work order</Btn>}
                       <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>
                         {r.since != null ? `${fmtH(r.since)} hrs since last change` : 'Not enough data to work out hours since the last change.'}
-                        {r.updatedAt ? ` · Samsara reading ${new Date(r.updatedAt).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}
+                        {r.updatedAt ? ` · Samsara reading ${new Date(r.updatedAt).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: APP_TZ })}` : ''}
                       </p>
                       <OilBaselineEditor currentBaseline={r.base} currentHours={r.cur} onSave={(hours) => setOilChangeBaseline(r.unit, hours)} />
                       {r.cur != null && (
@@ -26102,7 +26113,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                               </span>
                               {it.checked && it.checkedBy && (
                                 <span className="block font-mono text-xs mt-1" style={{ color: COLORS.line }}>
-                                  ✓ {it.checkedBy} on {new Date(it.checkedAt).toLocaleDateString()}
+                                  ✓ {it.checkedBy} on {new Date(it.checkedAt).toLocaleDateString(undefined, { timeZone: APP_TZ })}
                                 </span>
                               )}
                             </div>
@@ -27519,7 +27530,7 @@ function NoteCard({ note, isEditing, canEdit, onEdit, onCancel, onSave, onDelete
         </span>
         <div className="flex items-center gap-3">
           <span className="font-mono text-xs" style={{ color: COLORS.line }}>
-            {new Date(note.ts).toLocaleString()}{note.edited ? ' (edited)' : ''}
+            {new Date(note.ts).toLocaleString(undefined, { timeZone: APP_TZ })}{note.edited ? ' (edited)' : ''}
           </span>
           {canEdit && !confirmDelete && (
             <button onClick={onEdit} className="text-xs underline" style={{ color: COLORS.inkDim }}>Edit</button>
