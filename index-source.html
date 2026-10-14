@@ -13778,6 +13778,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firebaseUser, mechanics.length, currentMechanic]);
   const [pinModal, setPinModal] = useState(null); // { mode: 'verify'|'setup', mechanic, stage, firstEntry }
+  // The "create a PIN" screen can open before the app has finished loading that this person
+  // already has a login. As soon as it learns they do (and they aren't signed in as themselves
+  // — which would make it a genuine Change PIN), switch to entering their existing PIN.
+  useEffect(() => {
+    if (!pinModal || pinModal.mode !== 'setup' || !authMigrated[pinModal.mechanic]) return;
+    const cu = firebase.auth().currentUser;
+    if (cu && cu.email === emailForMechanic(pinModal.mechanic)) return;
+    setPinModal({ mode: 'verify', mechanic: pinModal.mechanic });
+    setPinInput('');
+    setPinError('You already have a PIN on this account — enter it to sign in.');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinModal, authMigrated]);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [mechanicTapInProgress, setMechanicTapInProgress] = useState(false);
@@ -14911,13 +14923,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               await saveAuthMigrated(nextMigrated);
             }
           } catch (e) {
-            setPinError(
-              e.code === 'auth/email-already-in-use'
-                ? 'A login already exists for this name — try entering your PIN instead, or ask an admin for help.'
-                : e.code === 'needs-reauth'
-                ? "Please sign out and enter your current PIN first, then use Change PIN from there."
-                : 'Could not save your PIN. Check your connection and try again.'
-            );
+            if (e.code === 'auth/email-already-in-use' || e.code === 'needs-reauth') {
+              // This person already has a login (the app just hadn't finished loading that
+              // when the PIN screen opened). Don't leave them stuck on "create a PIN" —
+              // switch to entering the PIN they already have.
+              setPinModal({ mode: 'verify', mechanic: pinModal.mechanic });
+              setPinInput('');
+              setPinError('You already have a PIN on this account — enter it to sign in. Forgotten it? Close this and tap "Lost access? Get a login link".');
+              return;
+            }
+            setPinError('Could not save your PIN. Check your connection and try again.');
             setPinModal({ ...pinModal, stage: 'first', firstEntry: '' });
             setPinInput('');
             return;
