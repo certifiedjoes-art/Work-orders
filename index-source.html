@@ -7104,7 +7104,7 @@ function DeficiencyButton({ onSubmit }) {
             {photos.length < 3 && (
               <label className="text-xs underline cursor-pointer" style={{ color: COLORS.accent }}>
                 📷 Add photo
-                <input type="file" accept="image/*" capture="environment" multiple onChange={addFiles} style={{ display: 'none' }} />
+                <input type="file" accept="image/*" multiple onChange={addFiles} style={{ display: 'none' }} />
               </label>
             )}
           </div>
@@ -7541,7 +7541,7 @@ function PreTripItemRow({ item, onSetStatus, onUpdateDetail, onAddPhoto }) {
           <TextInput value={item.note} onChange={(e) => onUpdateDetail({ note: e.target.value })} placeholder="What's wrong?" className="w-full mb-2" />
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={() => fileInputRef.current.click()} className="text-xs underline" style={{ color: COLORS.accent }}>📷 Add photo</button>
-            <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handlePhotoSelect} className="hidden" />
+            <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhotoSelect} className="hidden" />
             {(item.photos || []).map((p, i) => (
               <img key={i} src={p} alt="" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 4 }} />
             ))}
@@ -8689,7 +8689,7 @@ function ReceiptCard({ employee, receipts, saving, onSubmit }) {
   };
   return (
     <div className="rounded-lg p-4 mb-6" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-      <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { setOpen(true); pick(e.target.files && e.target.files[0]); e.target.value = ''; }} />
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { setOpen(true); pick(e.target.files && e.target.files[0]); e.target.value = ''; }} />
       {!open ? (
         <button
           type="button"
@@ -9726,7 +9726,7 @@ function ScanDocumentForm({ scanning, onCancel, onSubmit }) {
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        capture="environment"
+       
         className="hidden"
         onChange={(e) => { addPage(e.target.files && e.target.files[0]); e.target.value = ''; }}
       />
@@ -11190,9 +11190,14 @@ function OperatorTrainingDetail({ record, isAdmin, onDelete, onBack }) {
 // An "Other" option (however it's worded) reveals a specify box.
 function PhotoCapture({ photos, onChange }) {
   const fileInputRef = useRef(null);
+  const addedRef = useRef([]);
+  const addedTimer = useRef(null);
   const addPhoto = (file) => {
     if (!file) return;
-    onChange([...photos, { id: uid(), blob: file, previewUrl: URL.createObjectURL(file) }]);
+    addedRef.current.push({ id: uid(), blob: file, previewUrl: URL.createObjectURL(file) });
+    onChange([...photos, ...addedRef.current]); // several files picked at once all land in the list
+    clearTimeout(addedTimer.current);
+    addedTimer.current = setTimeout(() => { addedRef.current = []; }, 0);
   };
   const removePhoto = (id) => {
     const target = photos.find((p) => p.id === id);
@@ -11206,7 +11211,9 @@ function PhotoCapture({ photos, onChange }) {
         <div className="flex gap-2 mb-2 overflow-x-auto">
           {photos.map((p) => (
             <div key={p.id} className="relative flex-shrink-0">
-              <img src={p.previewUrl} alt="Photo" className="rounded" style={{ width: 72, height: 72, objectFit: 'cover', border: `1px solid ${COLORS.line}` }} />
+              {p.blob && p.blob.type === 'application/pdf'
+                ? <a href={p.previewUrl} target="_blank" rel="noopener noreferrer" className="rounded flex items-center justify-center text-xs font-bold" style={{ width: 72, height: 72, background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.line}` }}>📄 PDF</a>
+                : <img src={p.previewUrl} alt="Photo" className="rounded" style={{ width: 72, height: 72, objectFit: 'cover', border: `1px solid ${COLORS.line}` }} />}
               <button
                 type="button"
                 onClick={() => removePhoto(p.id)}
@@ -11219,14 +11226,14 @@ function PhotoCapture({ photos, onChange }) {
           ))}
         </div>
       )}
-      <input ref={fileInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { addPhoto(e.target.files && e.target.files[0]); e.target.value = ''; }} />
+      <input ref={fileInputRef} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => { Array.from(e.target.files || []).forEach(addPhoto); e.target.value = ''; }} />
       <button
         type="button"
         onClick={() => fileInputRef.current && fileInputRef.current.click()}
         className="text-xs font-semibold px-3 py-2 rounded-lg"
         style={{ background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
       >
-        📷 Add Photo
+        📷 Add Photo / File
       </button>
     </div>
   );
@@ -11450,7 +11457,8 @@ function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete,
                         {keptForCourse.map((ph) => (
                           <div key={ph.id} className="relative flex-shrink-0">
                             <a href={ph.url} target="_blank" rel="noopener noreferrer">
-                              <img src={ph.url} alt="Certificate" className="rounded" style={{ width: 72, height: 72, objectFit: 'cover', border: `1px solid ${COLORS.line}` }} />
+                              {/\.pdf$/i.test(ph.fileName || '') ? <span className="rounded flex items-center justify-center text-xs font-bold" style={{ width: 72, height: 72, background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.line}` }}>📄 PDF</span>
+                                : <img src={ph.url} alt="Certificate" className="rounded" style={{ width: 72, height: 72, objectFit: 'cover', border: `1px solid ${COLORS.line}` }} />}
                             </a>
                             <button
                               type="button"
@@ -11490,7 +11498,8 @@ function TrainingPersonForm({ initial, submitting, onCancel, onSubmit, onDelete,
           {keptCertPhotos.filter((p) => !p.course).map((p) => (
             <div key={p.id} className="relative flex-shrink-0">
               <a href={p.url} target="_blank" rel="noopener noreferrer">
-                <img src={p.url} alt="Certificate" className="rounded" style={{ width: 72, height: 72, objectFit: 'cover', border: `1px solid ${COLORS.line}` }} />
+                {/\.pdf$/i.test(p.fileName || '') ? <span className="rounded flex items-center justify-center text-xs font-bold" style={{ width: 72, height: 72, background: COLORS.surfaceRaised, color: COLORS.accent, border: `1px solid ${COLORS.line}` }}>📄 PDF</span>
+                  : <img src={p.url} alt="Certificate" className="rounded" style={{ width: 72, height: 72, objectFit: 'cover', border: `1px solid ${COLORS.line}` }} />}
               </a>
               <button
                 type="button"
@@ -13714,6 +13723,60 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     });
     return () => unsubscribe();
   }, []);
+
+  // ---- Stay signed in for a set number of hours ----
+  // While someone is signed in, the time of their last activity is kept in
+  // localStorage (refreshed every minute and whenever the app comes back to
+  // the foreground). Reopening the app within the configured number of hours
+  // of that skips the name/Face ID screen and drops them straight back in.
+  // Logging out (or switching user) clears it. The hours setting lives in
+  // Admin > settings (productionSettings.sessionHours, default 12) and is
+  // mirrored to localStorage so it is known before anyone has signed in.
+  const sessionHadUserRef = useRef(false);
+  const autoSignInTriedRef = useRef(false);
+  const stayHours = () => { const h = parseFloat(localStorage.getItem('sessionHours')); return isNaN(h) ? 12 : h; };
+  useEffect(() => {
+    try { if (productionSettings.sessionHours != null) localStorage.setItem('sessionHours', String(productionSettings.sessionHours)); } catch (e) { /* ignore */ }
+  }, [productionSettings.sessionHours]);
+  useEffect(() => {
+    try {
+      if (currentMechanic) {
+        sessionHadUserRef.current = true;
+        localStorage.setItem('sessionMechanic', currentMechanic);
+        localStorage.setItem('sessionLastActive', String(Date.now()));
+        const beat = () => { if (document.visibilityState === 'visible') localStorage.setItem('sessionLastActive', String(Date.now())); };
+        const timer = setInterval(beat, 60000);
+        document.addEventListener('visibilitychange', beat);
+        return () => { clearInterval(timer); document.removeEventListener('visibilitychange', beat); };
+      }
+      if (sessionHadUserRef.current) { // an actual logout / switch user — not just the first render
+        sessionHadUserRef.current = false;
+        localStorage.removeItem('sessionMechanic');
+        localStorage.removeItem('sessionLastActive');
+      }
+    } catch (e) { /* ignore */ }
+  }, [currentMechanic]);
+  useEffect(() => {
+    if (autoSignInTriedRef.current || currentMechanic || !firebaseUser || !firebaseUser.email || mechanics.length === 0) return;
+    let name = null, last = 0;
+    try { name = localStorage.getItem('sessionMechanic'); last = parseInt(localStorage.getItem('sessionLastActive'), 10) || 0; } catch (e) { return; }
+    if (!name) { autoSignInTriedRef.current = true; return; }
+    autoSignInTriedRef.current = true;
+    const withinWindow = Date.now() - last < stayHours() * 3600 * 1000;
+    if (!withinWindow || !mechanics.includes(name) || firebaseUser.email !== emailForMechanic(name)) {
+      try { localStorage.removeItem('sessionMechanic'); localStorage.removeItem('sessionLastActive'); } catch (e) { /* ignore */ }
+      return;
+    }
+    (async () => {
+      try { localStorage.setItem('deviceMechanic', name); } catch (e) { /* ignore */ }
+      addDeviceUser(name);
+      setCurrentMechanic(name);
+      setScreen(await freshLandingScreenFor(name));
+      checkAndPromptEmail(name);
+      checkAndPromptPush(name);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebaseUser, mechanics.length, currentMechanic]);
   const [pinModal, setPinModal] = useState(null); // { mode: 'verify'|'setup', mechanic, stage, firstEntry }
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
@@ -18530,32 +18593,37 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // read it, then opens the normal new-work-order form pre-filled with
   // whatever it found — nothing is ever saved without the person reviewing
   // and confirming it first.
+  // "Scan a receipt": the photo of the receipt/invoice IS the work order. It is
+  // saved straight away as a new work order with the photo attached — no form to
+  // fill in. If the receipt can be read, its vendor/amount/date become the
+  // description and a unit it mentions is used; otherwise (or with no signal)
+  // the work order is still created with the photo alone. Everything can be
+  // edited afterwards from the board.
+  const RECEIPT_UNIT_NAME = 'Receipts / Invoices';
   const handleScanReceipt = async (file) => {
     setScanningReceipt(true);
     try {
       const compressed = await compressImage(file);
-      const base64 = compressed.split(',')[1];
-      const res = await fetch(CLOUD_FUNCTION_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: APP_SECRET, mode: 'scanReceipt', image: base64, mediaType: 'image/jpeg' }),
-      });
-      if (!res.ok) throw new Error('Scan failed');
-      const data = await res.json();
-      const ex = data.extracted || {};
+      let ex = {};
+      try {
+        const res = await fetch(CLOUD_FUNCTION_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: APP_SECRET, mode: 'scanReceipt', image: compressed.split(',')[1], mediaType: 'image/jpeg' }),
+        });
+        if (res.ok) ex = (await res.json()).extracted || {};
+      } catch (e) { /* can't read it right now — the photo alone still becomes the work order */ }
       const descParts = [];
       if (ex.vendor) descParts.push(`Vendor: ${ex.vendor}`);
       if (ex.amount) descParts.push(`Amount: ${ex.amount}`);
       if (ex.date) descParts.push(`Date on receipt: ${ex.date}`);
       if (ex.description) descParts.push(ex.description);
-      setScanReviewData({
-        description: descParts.join('\n'),
-        unit: ex.unit && units.includes(ex.unit) ? ex.unit : '',
-        photoDataUrl: compressed,
-      });
-      setShowAddOrder(true);
+      const description = descParts.length ? `Receipt/invoice — ${descParts.join(' · ')}` : `Receipt/invoice photo (scanned by ${currentMechanic})`;
+      const unit = (ex.unit && units.includes(ex.unit)) ? ex.unit : (activeUnit && units.includes(activeUnit) ? activeUnit : RECEIPT_UNIT_NAME);
+      await createOrder({ unit, description, hours: '', dueDate: '' }, compressed);
+      alert(`Work order created from the receipt${unit === RECEIPT_UNIT_NAME ? ` under "${RECEIPT_UNIT_NAME}" — open it on the board to move it to a unit` : ` for ${unit}`}.`);
     } catch (e) {
-      alert("Couldn't read that photo — check your signal and try again, or just type in the work order normally.");
+      alert("Couldn't save that photo — try again.");
     } finally {
       setScanningReceipt(false);
     }
@@ -19325,7 +19393,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     <input
                       type="file"
                       accept="image/*"
-                      capture="environment"
+                     
                       className="hidden"
                       disabled={scanningReceipt}
                       onChange={(e) => {
@@ -21963,6 +22031,21 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   type="number"
                   value={productionSettings.oilChangeIntervalHours ?? DEFAULT_OIL_CHANGE_INTERVAL_HOURS}
                   onChange={(e) => persistProductionSettings({ ...productionSettings, oilChangeIntervalHours: parseFloat(e.target.value) || 0 })}
+                  className="w-24 rounded-lg px-3 py-2 text-sm"
+                  style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                />
+                <span className="text-sm" style={{ color: COLORS.inkDim }}>hours</span>
+              </div>
+            </div>
+            <div className="pt-3" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+              <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>
+                Stay signed in: how many hours after someone's last use the app lets them straight back in without picking their name again. 0 = always ask. Logging out always ends it.
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  value={productionSettings.sessionHours ?? 12}
+                  onChange={(e) => persistProductionSettings({ ...productionSettings, sessionHours: Math.max(0, parseFloat(e.target.value) || 0) })}
                   className="w-24 rounded-lg px-3 py-2 text-sm"
                   style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
                 />
@@ -27622,7 +27705,7 @@ function PhotosSection({ order, onAdd, onRemove, t }) {
         <input
           type="file"
           accept="image/*"
-          capture="environment"
+         
           multiple
           onChange={handleFiles}
           className="hidden"
