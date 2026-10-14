@@ -13781,15 +13781,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // The "create a PIN" screen can open before the app has finished loading that this person
   // already has a login. As soon as it learns they do (and they aren't signed in as themselves
   // — which would make it a genuine Change PIN), switch to entering their existing PIN.
-  useEffect(() => {
-    if (!pinModal || pinModal.mode !== 'setup' || !authMigrated[pinModal.mechanic]) return;
-    const cu = firebase.auth().currentUser;
-    if (cu && cu.email === emailForMechanic(pinModal.mechanic)) return;
-    setPinModal({ mode: 'verify', mechanic: pinModal.mechanic });
-    setPinInput('');
-    setPinError('You already have a PIN on this account — enter it to sign in.');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pinModal, authMigrated]);
+  
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [mechanicTapInProgress, setMechanicTapInProgress] = useState(false);
@@ -14890,7 +14882,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         if (e && (e.code === 'auth/network-request-failed' || !navigator.onLine)) {
           setPinError("Can't verify — you're offline, and this device isn't currently signed in as you. Signing in for the first time (or after logging out) needs a connection. Try again once you have signal.");
         } else {
-          setPinError(t('wrongPin'));
+          setPinError(t('wrongPin') + (e && e.code ? ' [' + e.code + ']' : ''));
         }
         setPinInput('');
       }
@@ -14904,18 +14896,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           const email = emailForMechanic(mechanic);
           const alreadyMigrated = authMigrated[mechanic];
           try {
-            if (alreadyMigrated) {
-              // Changing an existing PIN — must be signed in as this person already.
-              if (firebase.auth().currentUser && firebase.auth().currentUser.email === email) {
-                await firebase.auth().currentUser.updatePassword(pinInput);
-              } else {
-                // Not currently signed in as them (e.g. resuming after a while) — sign in with old
-                // session isn't available, so re-authenticate isn't possible without their old PIN.
-                // Safest fallback: treat this like a fresh account so they can still get in.
-                await firebase.auth().signOut().catch(() => {});
-                throw { code: 'needs-reauth' };
-              }
+            const signedInAsThem = firebase.auth().currentUser && firebase.auth().currentUser.email === email;
+            if (alreadyMigrated && signedInAsThem) {
+              // Changing an existing PIN while signed in as this person.
+              await firebase.auth().currentUser.updatePassword(pinInput);
             } else {
+              // New login — or the "already set up" flag is stale (login was deleted/reset).
+              // Try to create it; if it truly exists, the catch below sends them to enter their PIN.
               const cred = await firebase.auth().createUserWithEmailAndPassword(email, pinInput);
               await firebase.database().ref('users/' + cred.user.uid).set({ name: mechanic, isAdmin: admins.includes(mechanic) });
               const nextMigrated = { ...authMigrated, [mechanic]: true };
@@ -14929,7 +14916,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               // switch to entering the PIN they already have.
               setPinModal({ mode: 'verify', mechanic: pinModal.mechanic });
               setPinInput('');
-              setPinError('You already have a PIN on this account — enter it to sign in. Forgotten it? Close this and tap "Lost access? Get a login link".');
+              setPinError('You already have a PIN on this account — enter it to sign in. [' + (e.code === 'needs-reauth' ? 'flag: authMigrated still set' : 'login exists in Firebase Authentication') + ']');
               return;
             }
             setPinError('Could not save your PIN. Check your connection and try again.');
