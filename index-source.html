@@ -16113,11 +16113,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // and the browser silently blocks it — for the recording AND the
   // built-in-voice fallback, since both are gesture-gated the same way.
   const chosenTrainingVoice = ttsVoices.find((v) => v.voiceURI === ttsVoiceURI) || pickBestVoice(ttsVoices);
+  // Fully silences + detaches the current recording so a stale clip can never
+  // fire its onended/onerror (which would start a second voice or skip ahead).
+  const killTrainingAudio = () => {
+    const a = trainingAudioRef.current;
+    if (a) {
+      a.onplay = null; a.onended = null; a.onerror = null;
+      try { a.pause(); } catch (e) {}
+      trainingAudioRef.current = null;
+    }
+  };
   const speakWithBrowserVoice = (text, onDone) => {
     if (typeof window === 'undefined' || !window.speechSynthesis) {
       setAudioDebugMsg('This browser has no speech synthesis available at all.');
       return;
     }
+    // Never let the browser voice talk over a recording.
+    killTrainingAudio();
     window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(text);
     if (chosenTrainingVoice) utter.voice = chosenTrainingVoice;
@@ -16141,14 +16153,21 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // fresh autoplay attempt, as long as it's called synchronously from
   // here rather than deferred.
   const speakTraining = (text, audioId, courseKey, onDone) => {
-    if (trainingAudioRef.current) { trainingAudioRef.current.pause(); trainingAudioRef.current = null; }
+    killTrainingAudio();
+    if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
     if (!audioId) { speakWithBrowserVoice(text, onDone); return; }
     const audio = new Audio(`./${audioId}.mp3`);
     trainingAudioRef.current = audio;
-    audio.onplay = () => { setVideoSpeaking(true); setVideoPaused(false); setAudioDebugMsg(''); };
-    audio.onended = () => { setVideoSpeaking(false); setVideoPaused(false); if (onDone) onDone(); };
-    audio.onerror = () => { setAudioDebugMsg(`Recording didn't load (./${audioId}.mp3) — falling back to browser voice.`); speakWithBrowserVoice(text, onDone); };
-    audio.play().catch((err) => { setAudioDebugMsg('Recording blocked from playing: ' + (err && err.name ? err.name + ' — ' + err.message : String(err))); speakWithBrowserVoice(text, onDone); });
+    const isCurrent = () => trainingAudioRef.current === audio;
+    audio.onplay = () => { if (!isCurrent()) return; setVideoSpeaking(true); setVideoPaused(false); setAudioDebugMsg(''); };
+    audio.onended = () => { if (!isCurrent()) return; setVideoSpeaking(false); setVideoPaused(false); if (onDone) onDone(); };
+    audio.onerror = () => { if (!isCurrent()) return; setAudioDebugMsg(`Recording didn't load (./${audioId}.mp3) — falling back to browser voice.`); speakWithBrowserVoice(text, onDone); };
+    audio.play().catch((err) => {
+      // A newer clip replaced this one (or it was stopped) — do nothing, or two voices overlap.
+      if (!isCurrent()) return;
+      setAudioDebugMsg('Recording blocked from playing: ' + (err && err.name ? err.name + ' — ' + err.message : String(err)));
+      speakWithBrowserVoice(text, onDone);
+    });
   };
   // True pause — keeps the current clip's position instead of throwing it
   // away, so Resume picks up where it left off rather than restarting
@@ -16177,7 +16196,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // deliberate pause. Throws away position on purpose.
   const stopTrainingSpeech = () => {
     if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
-    if (trainingAudioRef.current) { trainingAudioRef.current.pause(); trainingAudioRef.current = null; }
+    killTrainingAudio();
     setVideoSpeaking(false);
     setVideoPaused(false);
   };
