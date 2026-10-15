@@ -456,12 +456,12 @@ function monthlySummaryXlsx(timesheets, productionShifts, unitTypesMap, receipts
     if (myReceipts.length > 0) {
       const sumR = myReceipts.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
       rows.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
-      rows.push(['RECEIPTS FOR REIMBURSEMENT', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
-      rows.push(['Date', 'Amount ($)', '', 'What it was for', '', '', '', '', 'Photo (attached to email)', '', '', '', '', '', '', '']);
+      rows.push([`REIMBURSE ${name.toUpperCase()} — RECEIPTS FOR COMPANY PURCHASES`, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+      rows.push(['Date', 'Amount ($)', '', 'What it was for', '', '', '', '', 'Receipt photo (click to open; also attached to email)', '', '', '', '', '', '', '']);
       myReceipts.forEach((r) => {
         rows.push([r.date, r.amount === '' || r.amount == null ? '' : (parseFloat(r.amount) || r.amount), '', r.note || '', '', '', '', '', r.fname, '', '', '', '', '', '', '']);
       });
-      rows.push(['Receipts total:', sumR.toFixed(2), '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+      rows.push([`TOTAL OWED TO ${name.toUpperCase()}:`, sumR.toFixed(2), '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
     }
 
     const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -693,6 +693,65 @@ async function checkFuelTankReminders() {
 // show up after deploying, check the logged raw response below (same
 // place the samsaraStats confidence note says to look) and adjust the
 // field names here to match.
+
+// ---- Low-battery flag via a Samsara TAG --------------------------------
+// A Samsara automation (battery voltage under 21 V for 30 s) adds a tag
+// named "Battery Low" to the machine. Here we read which machines carry that
+// tag and mirror it into samsaraDiagnostics/{unit}/lowBattery so the app can
+// show its red banner. When the tag is removed, the flag clears itself.
+// Needs only read access to tags + equipment. Change the name with the
+// LOW_BATTERY_TAG environment variable if the tag is called something else.
+const LOW_BATTERY_TAG = (process.env.LOW_BATTERY_TAG || 'Battery Low').trim();
+async function readLowBatteryTag() {
+  const headers = { 'Authorization': `Bearer ${SAMSARA_API_TOKEN}`, 'Accept': 'application/json' };
+  const norm = (x) => String(x || '').trim().toLowerCase();
+  const want = norm(LOW_BATTERY_TAG);
+  const tags = [];
+  let after = '';
+  for (let page = 0; page < 10; page++) {
+    const r = await fetch(`https://api.samsara.com/tags?limit=512${after}`, { headers });
+    if (!r.ok) throw new Error(`Samsara tags HTTP ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    const j = await r.json();
+    (j.data || []).forEach((t) => tags.push(t));
+    if (j.pagination && j.pagination.hasNextPage && j.pagination.endCursor) after = `&after=${encodeURIComponent(j.pagination.endCursor)}`; else break;
+  }
+  // A tag can list its members under several keys depending on what it is
+  // attached to; gather every {id, name} we find.
+  const membersOf = (t) => {
+    const out = [];
+    ['assets', 'equipment', 'vehicles', 'machines'].forEach((k) => {
+      (Array.isArray(t[k]) ? t[k] : []).forEach((m) => { if (m && (m.id || m.name)) out.push({ id: m.id ? String(m.id) : '', name: m.name || '' }); });
+    });
+    return out;
+  };
+  const allTags = tags.map((t) => ({ name: t.name || '(unnamed)', count: membersOf(t).length }));
+  const tag = tags.find((t) => norm(t.name) === want);
+  const ids = await samsaraUnitIds(); // name -> { id, kind }
+  const nameById = {};
+  Object.keys(ids).forEach((n) => { nameById[String(ids[n].id)] = n; });
+  const flaggedNames = [];
+  const unmatchedIds = [];
+  if (tag) {
+    membersOf(tag).forEach((m) => {
+      const n = (m.id && nameById[m.id]) || m.name;
+      if (n) { if (!flaggedNames.includes(n)) flaggedNames.push(n); } else unmatchedIds.push(m.id);
+    });
+  }
+  return { tagFound: !!tag, allTags, flaggedNames, unmatchedIds, allUnitNames: Object.keys(ids) };
+}
+
+async function pollLowBatteryFlags(updates) {
+  let info;
+  try { info = await readLowBatteryTag(); }
+  catch (e) { console.error('Low-battery tag check failed (flags left as they were):', e.message); return; }
+  if (!info.tagFound) { console.error(`Low-battery tag "${LOW_BATTERY_TAG}" not found in Samsara — flags left as they were.`); return; }
+  const flagged = new Set(info.flaggedNames);
+  info.allUnitNames.forEach((n) => {
+    updates[`samsaraDiagnostics/${slugForUnit(n)}/lowBattery`] = flagged.has(n);
+  });
+  flagged.forEach((n) => { updates[`samsaraDiagnostics/${slugForUnit(n)}/lowBattery`] = true; });
+}
+
 async function pollSamsaraDiagnostics() {
   const db = admin.database();
   const [vehiclesRes, assetsRes] = await Promise.all([
@@ -761,6 +820,8 @@ async function pollSamsaraDiagnostics() {
     console.error('Samsara equipment diagnostics error:', assetsRes.status, await assetsRes.text());
   }
 
+  await pollLowBatteryFlags(updates);
+
   if (Object.keys(updates).length > 0) {
     await db.ref().update(updates);
   }
@@ -775,6 +836,7 @@ async function pollSamsaraDiagnostics() {
 //   - shift reminders job: ...?key=SECRET&mode=shiftReminders  (schedule every few minutes)
 //   - fuel tank reminders job: ...?key=SECRET&mode=fuelTankReminders  (schedule once daily)
 //   - track recorder job: ...?key=SECRET&mode=recordTracks  (schedule every 1 minute)
+//   - Low-battery tag check: ...?key=SECRET&mode=samsaraTags  (open in a browser; reads only)
 //   - Samsara diagnostics job: ...?key=SECRET&mode=samsaraDiagnostics  (schedule every 15 minutes)
 
 // ============================================================================
@@ -822,15 +884,116 @@ async function fetchSamsaraPositions() {
   }
   return positions;
 }
+
+// ---- Full GPS history from Samsara (every ping, not just "now") ----------
+// Samsara stores every GPS ping a unit sends. Pulling that history for a
+// track's time window gives the real path the machine took, even when
+// nobody had the app open and even if a scheduler run was missed.
+let _samsaraIdCache = null;
+async function samsaraUnitIds() {
+  if (_samsaraIdCache && Date.now() - _samsaraIdCache.at < 6 * 3600 * 1000) return _samsaraIdCache.map;
+  const headers = { 'Authorization': `Bearer ${SAMSARA_API_TOKEN}`, 'Accept': 'application/json' };
+  const map = {};
+  for (const kind of ['vehicles', 'equipment']) {
+    try {
+      let after = '';
+      for (let page = 0; page < 10; page++) {
+        const r = await fetch(`https://api.samsara.com/fleet/${kind}?limit=512${after}`, { headers });
+        if (!r.ok) break;
+        const j = await r.json();
+        (j.data || []).forEach((u) => { if (u.name && u.id && !map[u.name]) map[u.name] = { id: u.id, kind }; });
+        if (j.pagination && j.pagination.hasNextPage && j.pagination.endCursor) after = `&after=${encodeURIComponent(j.pagination.endCursor)}`; else break;
+      }
+    } catch (e) { console.error('samsaraUnitIds', kind, e.message); }
+  }
+  _samsaraIdCache = { at: Date.now(), map };
+  return map;
+}
+async function fetchSamsaraGpsHistory(machineName, startISO, endISO) {
+  const unit = (await samsaraUnitIds())[machineName];
+  if (!unit) return [];
+  const headers = { 'Authorization': `Bearer ${SAMSARA_API_TOKEN}`, 'Accept': 'application/json' };
+  const idParam = unit.kind === 'vehicles' ? 'vehicleIds' : 'equipmentIds';
+  const out = [];
+  let after = '';
+  for (let page = 0; page < 40; page++) {
+    const url = `https://api.samsara.com/fleet/${unit.kind}/stats/history?types=gps&${idParam}=${unit.id}`
+      + `&startTime=${encodeURIComponent(startISO)}&endTime=${encodeURIComponent(endISO)}${after}`;
+    const r = await fetch(url, { headers });
+    if (!r.ok) { console.error('gps history error', r.status, await r.text().catch(() => '')); break; }
+    const j = await r.json();
+    (j.data || []).forEach((u) => (u.gps || []).forEach((g) => {
+      if (typeof g.latitude === 'number' && typeof g.longitude === 'number' && g.time) out.push({ lat: g.latitude, lng: g.longitude, time: g.time });
+    }));
+    if (j.pagination && j.pagination.hasNextPage && j.pagination.endCursor) after = `&after=${encodeURIComponent(j.pagination.endCursor)}`; else break;
+  }
+  out.sort((a, b) => a.time.localeCompare(b.time));
+  return out;
+}
+// Merge new pings into an existing points list: keep order by time, drop
+// exact duplicates, and skip pings under 5 m from the previous point
+// (parked/idling) so the list doesn't balloon.
+function mergeTrackPoints(existing, incoming) {
+  const all = [...existing, ...incoming].filter((p) => p && typeof p.lat === 'number' && p.time);
+  all.sort((a, b) => a.time.localeCompare(b.time));
+  const out = [];
+  for (const p of all) {
+    const last = out[out.length - 1];
+    if (last && last.time === p.time) continue;
+    if (last && distMeters(last.lat, last.lng, p.lat, p.lng) < 5) continue;
+    out.push({ lat: p.lat, lng: p.lng, time: p.time });
+  }
+  return out;
+}
+// Rebuild / fill one track from Samsara history for its whole time window.
+async function fillTrackFromHistory(db, track) {
+  const start = new Date(new Date(track.startedAt).getTime() - 60 * 1000).toISOString();
+  const end = track.endedAt ? new Date(new Date(track.endedAt).getTime() + 60 * 1000).toISOString() : new Date().toISOString();
+  const hist = await fetchSamsaraGpsHistory(track.machine, start, end);
+  if (hist.length === 0) return 0;
+  const res = await db.ref(`machineTrackRecords/${track.id}/points`).transaction((current) => {
+    const pts = Array.isArray(current) ? current : Object.values(current || {});
+    return mergeTrackPoints(pts, hist);
+  });
+  return res.committed ? (res.snapshot.val() || []).length : 0;
+}
+
 async function recordOpenTracks() {
   const db = admin.database();
-  const snap = await db.ref('machineTrackRecords').once('value');
-  const all = snap.val() || {};
-  const open = Object.values(all).filter((t) => t && t.id && !t.endedAt && t.machine);
+  // Only download what we need (cost!): tracks with no endedAt (open), and
+  // tracks that ended in the last 15 minutes. Needs ".indexOn": ["endedAt"]
+  // under machineTrackRecords in the database rules. Never read the whole
+  // collection here — this runs every minute.
+  const openSnap = await db.ref('machineTrackRecords').orderByChild('endedAt').equalTo(null).once('value');
+  const recentSnap = await db.ref('machineTrackRecords').orderByChild('endedAt')
+    .startAt(new Date(Date.now() - 15 * 60 * 1000).toISOString()).once('value');
+  const open = Object.values(openSnap.val() || {}).filter((t) => t && t.id && !t.endedAt && t.machine);
+  // Tracks that just ended: give them a final fill for ~15 minutes so the last
+  // stretch before clock-out is complete and any earlier gaps get repaired.
+  const justEnded = Object.values(recentSnap.val() || {}).filter((t) => t && t.id && t.endedAt && t.machine && t.startedAt
+    && Date.now() - new Date(t.endedAt).getTime() < 15 * 60 * 1000);
+  for (const t of justEnded) {
+    try { await fillTrackFromHistory(db, t); } catch (e) { console.error('final fill failed', t.id, e.message); }
+  }
   if (open.length === 0) return { open: 0, added: 0 };
   const positions = await fetchSamsaraPositions();
   let added = 0;
   for (const track of open) {
+    // Preferred: pull every ping Samsara has stored since this track's last
+    // saved point, so the path is the real one no matter how often we run.
+    try {
+      const pts0 = Array.isArray(track.points) ? track.points : Object.values(track.points || {});
+      const lastT = pts0.length ? pts0[pts0.length - 1].time : track.startedAt;
+      const since = new Date(new Date(lastT).getTime() - 60 * 1000).toISOString();
+      const hist = await fetchSamsaraGpsHistory(track.machine, since, new Date().toISOString());
+      if (hist.length > 0) {
+        const r2 = await db.ref(`machineTrackRecords/${track.id}/points`).transaction((current) => {
+          const pts = Array.isArray(current) ? current : Object.values(current || {});
+          return mergeTrackPoints(pts, hist);
+        });
+        if (r2.committed) { added++; continue; }
+      }
+    } catch (e) { console.error('history merge failed, falling back to latest ping', e.message); }
     const pos = positions.find((p) => p.name === track.machine);
     if (!pos) continue;
     const result = await db.ref(`machineTrackRecords/${track.id}/points`).transaction((current) => {
@@ -1326,6 +1489,49 @@ if (body.mode === 'samsaraStats') {
     return;
   }
 
+  // Rebuild tracks from Samsara's full GPS history.
+  //   ...?key=SECRET&mode=fillTracks&days=30   (all tracks started in the last N days)
+  //   ...?key=SECRET&mode=fillTracks&trackId=ID (one track)
+  if (mode === 'fillTracks') {
+    try {
+      const db = admin.database();
+      const snap = await db.ref('machineTrackRecords').once('value');
+      const all = Object.values(snap.val() || {}).filter((t) => t && t.id && t.machine && t.startedAt);
+      const days = Math.min(120, Math.max(1, parseInt(req.query.days, 10) || 14));
+      const cutoff = Date.now() - days * 86400000;
+      const targets = req.query.trackId ? all.filter((t) => t.id === req.query.trackId) : all.filter((t) => new Date(t.startedAt).getTime() >= cutoff);
+      let done = 0; const lines = [];
+      for (const t of targets) {
+        const before = (Array.isArray(t.points) ? t.points : Object.values(t.points || {})).length;
+        const after = await fillTrackFromHistory(db, t);
+        if (after) { done++; lines.push(`${t.machine} ${t.startedAt}: ${before} -> ${after} points`); }
+      }
+      res.status(200).send(`Filled ${done} of ${targets.length} track(s).\n` + lines.join('\n'));
+    } catch (err) {
+      console.error(err);
+      res.status(500).send('Error: ' + err.message);
+    }
+    return;
+  }
+
+  // Read-only check of the low-battery tag: shows every Samsara tag, how many
+  // machines each one is on, and which machines the app would flag.
+  //   ...?key=SECRET&mode=samsaraTags
+  if (mode === 'samsaraTags') {
+    try {
+      const info = await readLowBatteryTag();
+      const lines = [`Looking for tag: "${LOW_BATTERY_TAG}"`, `Tags found (${info.allTags.length}):`];
+      info.allTags.forEach((t) => lines.push(`  - ${t.name}  (${t.count} item${t.count === 1 ? '' : 's'})`));
+      lines.push('', info.tagFound ? `Machines with the tag (${info.flaggedNames.length}): ${info.flaggedNames.join(', ') || 'none right now'}` : 'That tag was NOT found — check the name (or set LOW_BATTERY_TAG).');
+      if (info.unmatchedIds.length) lines.push('', `Tagged items I could not match to a machine name: ${info.unmatchedIds.join(', ')}`);
+      res.status(200).type('text/plain').send(lines.join('\n'));
+    } catch (err) {
+      console.error(err);
+      res.status(500).type('text/plain').send('Error: ' + err.message);
+    }
+    return;
+  }
+
   if (mode === 'samsaraDiagnostics') {
     try {
       const matched = await pollSamsaraDiagnostics();
@@ -1391,7 +1597,10 @@ if (body.mode === 'samsaraStats') {
           }
           if (!attached) missing.push(`${r.date} ${r.employee}: ${r.photoUrl || 'no photo link'}`);
         }
-        receiptText = `\n\nReceipts for reimbursement: ${receiptList.length} this month. Each is listed under the employee's month total on their tab, and the photos are attached.`;
+        const owed = {};
+        receiptList.forEach((r) => { owed[r.employee || 'Unknown'] = (owed[r.employee || 'Unknown'] || 0) + (parseFloat(r.amount) || 0); });
+        const owedLines = Object.keys(owed).sort().map((n) => `  ${n}: $${owed[n].toFixed(2)}`).join('\n');
+        receiptText = `\n\nREIMBURSEMENTS OWED TO EMPLOYEES (receipts for company purchases):\n${owedLines}\n\nEach receipt is listed on that employee's own tab, under their month total, with a link to the photo. The photos are also attached to this email.`;
         if (missing.length > 0) receiptText += `\n\nThese photos could not be attached — open the links:\n${missing.join('\n')}`;
       }
 

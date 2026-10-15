@@ -2310,7 +2310,8 @@ function OfflineBanner({ isOnline, pendingCount }) {
 
 // Shown to everyone (not just whoever's looking at the map) whenever any
 // unit's last Samsara voltage reading is below the cutoff for its type —
-// 20V for the 24V machines, 9V for the 12V trucks/pickups. lowUnits is
+// 20V for the 24V machines, 9V for the 12V trucks/pickups — or any machine
+// carrying Samsara's "Low Battery" tag (under 21 V for 30 s). lowUnits is
 // built by the caller as [{ name, voltage }], already filtered/sorted.
 function LowVoltageBanner({ lowUnits }) {
   if (!lowUnits || lowUnits.length === 0) return null;
@@ -2319,7 +2320,7 @@ function LowVoltageBanner({ lowUnits }) {
       className="font-display font-bold text-sm uppercase tracking-wide text-center py-2.5 px-4 mb-4 rounded-lg"
       style={{ background: COLORS.danger, color: '#1B1F19' }}
     >
-      🔋 Low voltage — {lowUnits.map((u) => `${u.name} (${u.voltage}V)`).join(', ')}
+      🔋 Low voltage — {lowUnits.map((u) => (u.voltage != null ? `${u.name} (${u.voltage}V)` : `${u.name} (battery low)`)).join(', ')}
     </div>
   );
 }
@@ -15993,7 +15994,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     .map((unit) => {
       if (voltageMonitoringDisabled[slugForUnit(unit)]) return null;
       const diag = samsaraDiagnostics[slugForUnit(unit)];
-      if (!diag || diag.voltage == null) return null;
+      if (!diag) return null;
+      // Samsara's own alert (battery under 21 V for 30 s) tags the machine;
+      // the backend mirrors that as lowBattery. It shows with no number.
+      if (diag.lowBattery === true) return { name: unit, voltage: diag.voltage != null && isLowVoltage(diag.voltage, is12VoltUnit(unit)) ? diag.voltage : null };
+      if (diag.voltage == null) return null;
       return isLowVoltage(diag.voltage, is12VoltUnit(unit)) ? { name: unit, voltage: diag.voltage } : null;
     })
     .filter(Boolean);
