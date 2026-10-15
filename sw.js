@@ -1,6 +1,6 @@
 // Bump this version string every time index.html changes, so phones
 // reliably pick up the new version instead of getting stuck on an old one.
-const CACHE_NAME = 'harder-work-orders-v382';
+const CACHE_NAME = 'harder-work-orders-v383';
 
 // Handles push notifications arriving while the app isn't open — separate
 // from the caching logic below, using Firebase Cloud Messaging's own
@@ -45,7 +45,10 @@ const APP_SHELL = [
   './icon-512.png',
 ];
 
-const CDN_ASSETS = [
+// Files the app cannot start without. If ANY of these can't be saved during an
+// update, the update is abandoned (the phone keeps running the version it already
+// has and tries again later) — never swap to a version with an incomplete saved set.
+const CDN_ESSENTIAL = [
   'https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css',
   'https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js',
   'https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js',
@@ -54,36 +57,51 @@ const CDN_ASSETS = [
   'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js',
   'https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js',
   'https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js',
+];
+// Nice to have (PDF maps, fonts): tried during the update but a miss doesn't block it;
+// they get saved the first time they're used.
+const CDN_OPTIONAL = [
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs',
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',
   'https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap',
 ];
 
+async function cacheOne(cache, url, attempts) {
+  let lastErr;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const res = await fetch(url, { mode: 'no-cors' });
+      // opaque responses can't be inspected; a network failure throws above
+      await cache.put(url, res);
+      return;
+    } catch (e) {
+      lastErr = e;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+  throw lastErr || new Error('could not save ' + url);
+}
+
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      // Same-origin files: normal caching.
-      await cache.addAll(APP_SHELL).catch(() => {});
-      // Cross-origin CDN files are essential — if even one fails to cache
-      // (e.g. a signal drop mid-install), the whole app can break later
-      // when truly offline, since there's nowhere else to load it from.
-      // Retry each one a few times before giving up.
-      await Promise.all(
-        CDN_ASSETS.map(async (url) => {
-          for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-              const res = await fetch(url, { mode: 'no-cors' });
-              await cache.put(url, res);
-              return;
-            } catch (e) {
-              // wait a moment and try again
-              await new Promise((r) => setTimeout(r, 800));
-            }
-          }
-        })
-      );
-    })
-  );
-  self.skipWaiting();
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    try {
+      // Same-origin app files: all required.
+      await cache.addAll(APP_SHELL);
+      // Libraries: all essential ones required (4 tries each), optional ones best-effort.
+      await Promise.all([
+        ...CDN_ESSENTIAL.map((u) => cacheOne(cache, u, 4)),
+        ...CDN_OPTIONAL.map((u) => cacheOne(cache, u, 2).catch(() => {})),
+      ]);
+    } catch (e) {
+      // Incomplete (weak signal during the update). Throw the half-filled set away and
+      // fail the install: the old version stays in charge, untouched, and the browser
+      // tries this update again later.
+      await caches.delete(CACHE_NAME);
+      throw e;
+    }
+    self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (event) => {
@@ -158,7 +176,7 @@ async function handleStatic(event) {
   const request = event.request;
   const cache = await caches.open(CACHE_NAME);
   const hasRange = request.headers.has('range');
-  const cached = await cache.match(request, { ignoreVary: true });
+  const cached = (await cache.match(request, { ignoreVary: true })) || (await caches.match(request, { ignoreVary: true }));
   if (cached) {
     if (!hasRange) {
       // refresh quietly for next time
