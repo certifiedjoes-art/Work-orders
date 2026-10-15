@@ -5022,7 +5022,17 @@ function isOilChangeDue(currentHours, baselineHours, intervalHours) {
 // New changes made offline still rely on Firebase's own queue-and-sync,
 // which only survives as long as the app isn't fully closed before
 // reconnecting — this cache is purely for offline viewing, not writes.
+// Saved copies of the app's data on this device (localStorage, roughly 5 MB total).
+// Reads see the newest value even if it hasn't been written to storage yet.
+// Writes of the big lists are held back ~1.5 s and merged (they used to be re-saved
+// in full on every single update, which freezes slower phones); the list of changes
+// waiting to be sent ("pendingWrites") is always written immediately, and if the
+// storage is full it clears other saved copies (largest first — they simply
+// download again when there's signal) so that list can never be lost.
+const _cachePending = {};
+const _cacheTimers = {};
 function cacheGet(key, fallback) {
+  if (Object.prototype.hasOwnProperty.call(_cachePending, key)) return _cachePending[key];
   try {
     const raw = localStorage.getItem('cache_' + key);
     return raw ? JSON.parse(raw) : fallback;
@@ -5030,12 +5040,61 @@ function cacheGet(key, fallback) {
     return fallback;
   }
 }
-function cacheSet(key, value) {
+function cacheEvictLargest(exceptKey) {
   try {
-    localStorage.setItem('cache_' + key, JSON.stringify(value));
-  } catch (e) {
-    // storage full or unavailable — offline viewing just won't have this data
+    const items = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('cache_') && k !== 'cache_' + exceptKey && k !== 'cache_pendingWrites') {
+        items.push({ k, n: (localStorage.getItem(k) || '').length });
+      }
+    }
+    items.sort((a, b) => b.n - a.n);
+    if (items.length === 0) return false;
+    localStorage.removeItem(items[0].k);
+    return true;
+  } catch (e) { return false; }
+}
+function cacheWriteNow(key, value) {
+  let text;
+  try { text = JSON.stringify(value); } catch (e) { return; }
+  for (let attempt = 0; attempt < 40; attempt++) {
+    try {
+      localStorage.setItem('cache_' + key, text);
+      return;
+    } catch (e) {
+      // Storage full. Only the waiting-to-send list is worth clearing space for.
+      if (key !== 'pendingWrites') return;
+      if (!cacheEvictLargest(key)) return;
+    }
   }
+}
+function cacheFlushAll() {
+  Object.keys(_cacheTimers).forEach((k) => {
+    clearTimeout(_cacheTimers[k]);
+    delete _cacheTimers[k];
+    if (Object.prototype.hasOwnProperty.call(_cachePending, k)) {
+      const v = _cachePending[k];
+      delete _cachePending[k];
+      cacheWriteNow(k, v);
+    }
+  });
+}
+function cacheSet(key, value) {
+  if (key === 'pendingWrites') { cacheWriteNow(key, value); return; }
+  _cachePending[key] = value;
+  clearTimeout(_cacheTimers[key]);
+  _cacheTimers[key] = setTimeout(() => {
+    delete _cacheTimers[key];
+    if (!Object.prototype.hasOwnProperty.call(_cachePending, key)) return;
+    const v = _cachePending[key];
+    delete _cachePending[key];
+    cacheWriteNow(key, v);
+  }, 1500);
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', cacheFlushAll);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') cacheFlushAll(); });
 }
 
 // Map image storage (IndexedDB, not localStorage): map PNGs can be several
@@ -6011,9 +6070,15 @@ async function migrateArrayCollectionToPerRecord(oldPath, newPath, itemLabel) {
 // button manually first. Safe to run redundantly on multiple devices at
 // once, since the underlying migration is itself idempotent.
 async function selfHealMigration(oldPath, newPath, itemLabel) {
-  try {
+  // Runs before a list starts loading. It used to download the WHOLE new list just to
+  // check it exists (a second full download on every open) and, on a weak signal,
+  // could wait forever so the list never started. Now: skipped once it has passed on
+  // this device, only reads one record, and never holds things up more than 4 s.
+  const doneKey = 'selfHealDone_' + newPath;
+  try { if (localStorage.getItem(doneKey) === '1') return; } catch (e) { /* ignore */ }
+  const check = (async () => {
     const db = firebase.database();
-    const newSnap = await db.ref(newPath).once('value');
+    const newSnap = await db.ref(newPath).limitToFirst(1).once('value');
     if (!newSnap.exists()) {
       const oldSnap = await db.ref(oldPath).once('value');
       const oldVal = oldSnap.val();
@@ -6021,10 +6086,10 @@ async function selfHealMigration(oldPath, newPath, itemLabel) {
         await migrateArrayCollectionToPerRecord(oldPath, newPath, itemLabel);
       }
     }
-  } catch (e) {
-    // Offline or similar — the caller's listener still attaches right
-    // after this either way, so the app isn't blocked from loading.
-  }
+    try { localStorage.setItem(doneKey, '1'); } catch (e) { /* ignore */ }
+  })();
+  check.catch(() => {});
+  await Promise.race([check.catch(() => {}), new Promise((resolve) => setTimeout(resolve, 4000))]);
 }
 
 async function migrateOrdersToPerRecord() {
@@ -6310,9 +6375,14 @@ async function patchMachineTrackRecord(trackId, patch) {
 // is empty a one-off search finds the old one (rare, and only for tracks that
 // were already open when this went live). If the device is offline and can't
 // tell, it assumes the normal case and queues the close like any other write.
-async function closeOpenTrackForShift(shiftId, endedAt, waitMs = 6000) {
+async function closeOpenTrackForShift(shiftId, endedAt, waitMs = 2500) {
   const db = firebase.database();
   let known = null; // true: track exists at the shift id, false: it doesn't, null: couldn't tell
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    // Offline: don't wait on a network check — assume the normal case and queue the close.
+    await queueWrite('machineTracks', { kind: 'patch', entryId: shiftId, patch: { endedAt } });
+    return;
+  }
   try {
     known = await Promise.race([
       db.ref('machineTrackRecords/' + shiftId + '/machine').once('value').then((snap) => snap.exists()),
@@ -6329,7 +6399,10 @@ async function closeOpenTrackForShift(shiftId, endedAt, waitMs = 6000) {
       // EVERY track ever recorded. Track ids start with their creation time, and an
       // old-style track was created right when its shift began, so look only at the
       // few tracks created from that moment on.
-      const snap = await db.ref('machineTrackRecords').orderByKey().startAt(String(shiftId).slice(0, 8)).limitToFirst(25).once('value');
+      const snap = await Promise.race([
+        db.ref('machineTrackRecords').orderByKey().startAt(String(shiftId).slice(0, 8)).limitToFirst(25).once('value'),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000)),
+      ]);
       const found = Object.values(snap.val() || {}).find((t) => t && t.id && t.shiftId === shiftId && !t.endedAt);
       trackId = found ? found.id : null;
     } catch (e) {
@@ -6460,7 +6533,13 @@ async function queueWrite(collection, op) {
   const queue = loadPendingWrites();
   queue.push({ ...op, collection, qid: uid() });
   savePendingWrites(queue);
-  await flushPendingWrites();
+  // Try to send right away, but never keep the person waiting on a weak signal:
+  // after a few seconds carry on — the change is safely saved on this device and
+  // is retried in the background until it goes through.
+  await Promise.race([
+    flushPendingWrites().catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, 2500)),
+  ]);
 }
 
 // Live listeners replace local state with whatever the server has — but on
@@ -6534,12 +6613,16 @@ async function flushPendingWritesOnce() {
     const handlers = OFFLINE_QUEUE_HANDLERS[op.collection];
     if (!handlers) continue;
     try {
-      if (op.kind === 'save') await handlers.save(op.entry);
-      else if (op.kind === 'patch') await handlers.patch(op.entryId, op.patch);
-      else if (op.kind === 'delete') await handlers.delete(op.entryId);
-      else if (op.kind === 'bulkSave') await handlers.bulkSave(op.entries);
-      else if (op.kind === 'bulkPatch') await handlers.bulkPatch(op.patchesById);
-      else if (op.kind === 'setWhole') await handlers.setWhole(op.value);
+      // A send that gets no answer within 12 s counts as failed for now (kept in the
+      // queue and retried) instead of freezing every other change behind it. Sends are
+      // all "set this record / update these fields", so a retry is harmless.
+      const sendWithTimeout = (p) => Promise.race([p, new Promise((_, reject) => setTimeout(() => reject(new Error('send timed out')), 12000))]);
+      if (op.kind === 'save') await sendWithTimeout(handlers.save(op.entry));
+      else if (op.kind === 'patch') await sendWithTimeout(handlers.patch(op.entryId, op.patch));
+      else if (op.kind === 'delete') await sendWithTimeout(handlers.delete(op.entryId));
+      else if (op.kind === 'bulkSave') await sendWithTimeout(handlers.bulkSave(op.entries));
+      else if (op.kind === 'bulkPatch') await sendWithTimeout(handlers.bulkPatch(op.patchesById));
+      else if (op.kind === 'setWhole') await sendWithTimeout(handlers.setWhole(op.value));
       doneIds.add(op.qid);
     } catch (e) {
       blockedCollections.add(op.collection);
@@ -14702,7 +14785,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   useEffect(() => {
     if (!loading) { setLoadingTooLong(false); return; }
     const timer = setTimeout(() => setLoadingTooLong(true), 12000);
-    return () => clearTimeout(timer);
+    // A device someone is already signed in on shouldn't sit on "Loading board…" with
+    // no signal: after 6 s open the app with whatever is saved on the device. The
+    // lists fill in by themselves as soon as signal returns.
+    const openAnyway = setTimeout(() => {
+      try { if (localStorage.getItem('deviceMechanic') || firebase.auth().currentUser) setLoading(false); } catch (e) { /* ignore */ }
+    }, 6000);
+    return () => { clearTimeout(timer); clearTimeout(openAnyway); };
   }, [loading]);
 
   // ---- Unified Shift screen listeners ----
@@ -19066,6 +19155,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             <p className="text-sm mb-1" style={{ color: COLORS.inkDim }}>This is taking longer than it should.</p>
             <p className="text-xs mb-4" style={{ color: COLORS.line }}>Check your signal, or try again below.</p>
             <button onClick={() => window.location.reload()} className="px-4 py-2 rounded-lg text-sm font-bold" style={{ background: COLORS.accent, color: COLORS.bg }}>Try again</button>
+            <button onClick={() => setLoading(false)} className="px-4 py-2 rounded-lg text-sm font-bold ml-2" style={{ background: 'transparent', color: COLORS.ink, border: `1px solid ${COLORS.line}` }}>Open anyway</button>
           </div>
         ) : (
           <span className="text-sm uppercase tracking-widest" style={{ color: COLORS.inkDim }}>Loading board…</span>

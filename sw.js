@@ -1,6 +1,6 @@
 // Bump this version string every time index.html changes, so phones
 // reliably pick up the new version instead of getting stuck on an old one.
-const CACHE_NAME = 'harder-work-orders-v379';
+const CACHE_NAME = 'harder-work-orders-v380';
 
 // Handles push notifications arriving while the app isn't open — separate
 // from the caching logic below, using Firebase Cloud Messaging's own
@@ -95,27 +95,102 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Network-first: always try to get the latest version when online (so
-// updates show up right away), but fall back to the cached copy — of the
-// app itself, or any CDN library — when there's no signal at all. Only
-// navigation requests (loading the page itself) fall back to index.html;
-// falling back to it for a failed script/CSS request would serve HTML
-// content where JS was expected, breaking the app with a syntax error.
+// How requests are handled (rewritten for weak / no signal):
+//  - The page itself (index.html): try the network, but only wait ~3.5 s. If the
+//    network hasn't answered by then, open the saved copy right away (the network
+//    request keeps going in the background and refreshes the saved copy). With no
+//    saved copy yet, wait for the network as before.
+//  - The app's own files and the fixed libraries (React, Firebase, fonts, pdf.js):
+//    saved copy first (instant, no network), refreshed quietly in the background.
+//  - Recorded narration (.mp3): saved copy first; Safari/Android ask for audio in
+//    byte ranges, so a saved copy answers range requests too.
+//  - Everything else (Firebase data, photos, Google APIs, Cloud Run): NOT touched
+//    here. The old version saved every one of those responses; cross-origin photos
+//    count as a huge chunk of the phone's storage allowance each, which filled it up
+//    and made things stop working.
+const CDN_HOSTS = ['cdn.jsdelivr.net', 'www.gstatic.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
+const PAGE_NETWORK_WAIT_MS = 3500;
+
+async function rangeResponseFromCached(request, cached) {
+  const range = request.headers.get('range');
+  const m = /bytes=(\d*)-(\d*)/.exec(range || '');
+  if (!m) return cached;
+  const buf = await cached.arrayBuffer();
+  const size = buf.byteLength;
+  let start = m[1] === '' ? 0 : parseInt(m[1], 10);
+  let end = m[2] === '' ? size - 1 : parseInt(m[2], 10);
+  if (m[1] === '' && m[2] !== '') { start = Math.max(0, size - parseInt(m[2], 10)); end = size - 1; }
+  if (isNaN(start) || isNaN(end) || start >= size) return new Response('', { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
+  end = Math.min(end, size - 1);
+  return new Response(buf.slice(start, end + 1), {
+    status: 206,
+    statusText: 'Partial Content',
+    headers: {
+      'Content-Type': cached.headers.get('Content-Type') || 'audio/mpeg',
+      'Content-Range': `bytes ${start}-${end}/${size}`,
+      'Content-Length': String(end - start + 1),
+    },
+  });
+}
+
+function putIfGood(cache, request, res) {
+  // Never save partial (206) or error responses.
+  if (res && (res.ok || res.type === 'opaque') && res.status !== 206) {
+    cache.put(request, res.clone()).catch(() => {});
+  }
+}
+
+async function handlePage(event) {
+  const request = event.request;
+  const cache = await caches.open(CACHE_NAME);
+  const cached = (await cache.match(request)) || (await cache.match('./index.html'));
+  const network = fetch(request).then((res) => { putIfGood(cache, request, res); return res; });
+  network.catch(() => {});
+  event.waitUntil(network.catch(() => {}));
+  if (!cached) return network;
+  return Promise.race([
+    network.catch(() => cached),
+    new Promise((resolve) => setTimeout(() => resolve(cached), PAGE_NETWORK_WAIT_MS)),
+  ]);
+}
+
+async function handleStatic(event) {
+  const request = event.request;
+  const cache = await caches.open(CACHE_NAME);
+  const hasRange = request.headers.has('range');
+  const cached = await cache.match(request, { ignoreVary: true });
+  if (cached) {
+    if (!hasRange) {
+      // refresh quietly for next time
+      event.waitUntil(fetch(request).then((res) => putIfGood(cache, request, res)).catch(() => {}));
+      return cached;
+    }
+    return rangeResponseFromCached(request, cached);
+  }
+  if (hasRange) {
+    // Not saved yet: let this request through, and save the whole file for next time.
+    const url = new URL(request.url);
+    if (url.origin === self.location.origin) {
+      event.waitUntil(fetch(url.href).then((res) => putIfGood(cache, url.href, res)).catch(() => {}));
+    }
+    return fetch(request);
+  }
+  try {
+    const res = await fetch(request);
+    putIfGood(cache, request, res);
+    return res;
+  } catch (e) {
+    return new Response('', { status: 504, statusText: 'Offline and not cached' });
+  }
+}
+
 self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET') return;
-  event.respondWith(
-    fetch(event.request)
-      .then((res) => {
-        const resClone = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, resClone)).catch(() => {});
-        return res;
-      })
-      .catch(() =>
-        caches.match(event.request).then((cached) => {
-          if (cached) return cached;
-          if (event.request.mode === 'navigate') return caches.match('./index.html');
-          return new Response('', { status: 504, statusText: 'Offline and not cached' });
-        })
-      )
-  );
+  const request = event.request;
+  if (request.method !== 'GET') return;
+  let url;
+  try { url = new URL(request.url); } catch (e) { return; }
+  const sameOrigin = url.origin === self.location.origin;
+  if (!sameOrigin && !CDN_HOSTS.includes(url.hostname)) return; // not ours — leave it to the browser
+  const isPage = request.mode === 'navigate' || (sameOrigin && (url.pathname.endsWith('/') || url.pathname.endsWith('/index.html')));
+  event.respondWith(isPage ? handlePage(event) : handleStatic(event));
 });
