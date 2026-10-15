@@ -18360,7 +18360,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // Admins are skipped too — Joe opening the work order board to check on
   // things isn't him starting a shift, so it shouldn't nag him to clock in.
   useEffect(() => {
-    if (currentMechanic && !openEntry && jobTypeFor(currentMechanic) === 'mechanic' && !isAdmin) {
+    if (currentMechanic && !openEntry && !existingClockInFor(currentMechanic) && jobTypeFor(currentMechanic) === 'mechanic' && !isAdmin) {
       setShowClockInPrompt(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -18413,8 +18413,31 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // before the write actually lands — a repeat tap in that window can hit
   // the wrong button entirely (e.g. lands on Clock Out instead of End
   // Break). Locking the button the instant it's tapped closes that window.
+  // Has this person already clocked in — either an entry the app can see, or
+  // one saved on this device that hasn't reached the server yet? A device
+  // that lost its saved list (weak signal, full storage) used to forget the
+  // clock-in it had just made and offer "Clock in" again, one new entry per tap.
+  // Looks at: any still-open entry, and any clock-in in the last 5 minutes
+  // (a quick double tap), so a real clock-out-then-back-in still works.
+  const existingClockInFor = (name) => {
+    const recentCutoff = Date.now() - 5 * 60 * 1000;
+    let pending = [];
+    try { pending = loadPendingWrites().filter((op) => op.collection === 'timesheets' && op.kind === 'save' && op.entry); } catch (e) {}
+    const known = new Set(timesheets.map((t) => t.id));
+    const pool = [...timesheets, ...pending.map((op) => op.entry).filter((e) => !known.has(e.id))].filter((t) => t && t.mechanic === name && t.clockIn);
+    const hit = pool
+      .filter((t) => !t.clockOut || new Date(t.clockIn).getTime() > recentCutoff)
+      .sort((a, b) => new Date(b.clockIn) - new Date(a.clockIn))[0];
+    return hit || null;
+  };
+
   const clockIn = async () => {
     if (timeClockActionPending) return;
+    const already = existingClockInFor(currentMechanic);
+    if (already) {
+      alert(`You're already clocked in since ${fmtTime(already.clockIn)} — nothing new was created.`);
+      return;
+    }
     setTimeClockActionPending(true);
     const entry = {
       id: uid(),
