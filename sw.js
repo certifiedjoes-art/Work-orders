@@ -1,6 +1,6 @@
 // Bump this version string every time index.html changes, so phones
 // reliably pick up the new version instead of getting stuck on an old one.
-const CACHE_NAME = 'harder-work-orders-v383';
+const CACHE_NAME = 'harder-work-orders-v384';
 
 // Handles push notifications arriving while the app isn't open — separate
 // from the caching logic below, using Firebase Cloud Messaging's own
@@ -70,8 +70,18 @@ async function cacheOne(cache, url, attempts) {
   let lastErr;
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      const res = await fetch(url, { mode: 'no-cors' });
-      // opaque responses can't be inspected; a network failure throws above
+      // Save a normal (readable) copy. The page loads these libraries with the
+      // "crossorigin" attribute, and the browser REFUSES a saved opaque copy for
+      // such a request — that made every library show FAILED after an update.
+      let res;
+      try {
+        res = await fetch(url, { mode: 'cors' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+      } catch (corsErr) {
+        // Host didn't allow a readable copy: keep an opaque one as a last resort
+        // (the fetch handler never hands an opaque copy to a crossorigin request).
+        res = await fetch(url, { mode: 'no-cors' });
+      }
       await cache.put(url, res);
       return;
     } catch (e) {
@@ -176,11 +186,15 @@ async function handleStatic(event) {
   const request = event.request;
   const cache = await caches.open(CACHE_NAME);
   const hasRange = request.headers.has('range');
-  const cached = (await cache.match(request, { ignoreVary: true })) || (await caches.match(request, { ignoreVary: true }));
+  let cached = (await cache.match(request, { ignoreVary: true })) || (await caches.match(request, { ignoreVary: true }));
+  // An opaque saved copy can't be used for a crossorigin (CORS) request — the browser
+  // turns it into a network error — so treat it as "not saved" and go to the network.
+  if (cached && cached.type === 'opaque' && request.mode === 'cors') cached = null;
   if (cached) {
     if (!hasRange) {
       // refresh quietly for next time
-      event.waitUntil(fetch(request).then((res) => putIfGood(cache, request, res)).catch(() => {}));
+      // (never replace a readable saved copy with an opaque one)
+      event.waitUntil(fetch(request).then((res) => { if (!(res.type === 'opaque' && cached.type !== 'opaque')) putIfGood(cache, request, res); }).catch(() => {}));
       return cached;
     }
     return rangeResponseFromCached(request, cached);
