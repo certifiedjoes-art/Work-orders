@@ -2303,7 +2303,7 @@ function OfflineBanner({ isOnline, pendingCount }) {
       className="font-display font-bold text-sm uppercase tracking-wide text-center py-2.5 px-4 mb-4 rounded-lg"
       style={{ background: '#3E7CB1', color: '#fff' }}
     >
-      ⏳ Syncing {pendingCount} change{pendingCount === 1 ? '' : 's'} — keep this open a moment
+      ⏳ Back online — sending {pendingCount} saved change{pendingCount === 1 ? '' : 's'}…
     </div>
   );
 }
@@ -13739,7 +13739,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [woodlandsUrlDraft, setWoodlandsUrlDraft] = useState('');
   const [videoWatched, setVideoWatched] = useState(() => cacheGet('videoWatched', {}));
   const [blocks, setBlocks] = useState([]);
-  const [productionShifts, setProductionShifts] = useState([]);
+  // Start from what this phone saved last (plus any clock-in/out not yet sent to the
+  // server) so an open shift is recognised even with no signal at app start.
+  const [productionShifts, setProductionShifts] = useState(() => applyPendingWrites('productionShifts', cacheGet('productionShifts', [])));
   const [driverLogs, setDriverLogs] = useState(() => cacheGet('driverLogs', [])); // hours-of-service log book — winch truck driver only, separate from paid clock-in
   const [driverLogApprovals, setDriverLogApprovals] = useState(() => cacheGet('driverLogApprovals', {}));
   const [preTripInspections, setPreTripInspections] = useState(() => cacheGet('preTripInspections', []));
@@ -14096,7 +14098,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [lostAccessSubmitting, setLostAccessSubmitting] = useState(false);
   const [lostAccessSubmitted, setLostAccessSubmitted] = useState(false);
   const [showAdHocChecklist, setShowAdHocChecklist] = useState(false);
-  const [timesheets, setTimesheets] = useState(() => cacheGet('timesheets', []));
+  const [timesheets, setTimesheets] = useState(() => applyPendingWrites('timesheets', cacheGet('timesheets', [])));
   const [timesheetSettings, setTimesheetSettings] = useState({ email: '', autoEmail: false });
   const [mapUnit, setMapUnit] = useState(() => cacheGet('mapUnit', 'feet'));
   const [showMapSettings, setShowMapSettings] = useState(false);
@@ -14968,7 +14970,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     let on = null;
     (async () => {
       await selfHealMigration('productionShifts', 'productionShiftRecords', 'production shifts');
-      on = ref.on('value', (snap) => setProductionShifts(applyPendingWrites('productionShifts', Object.values(snap.val() || {}))));
+      on = ref.on('value', (snap) => {
+        const val = applyPendingWrites('productionShifts', Object.values(snap.val() || {}));
+        setProductionShifts(val);
+        cacheSet('productionShifts', val);
+      });
     })();
     return () => { if (on) ref.off('value', on); };
   }, []);
@@ -16169,21 +16175,27 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     }
   };
   const saveOneProductionShift = async (shift) => {
-    const next = productionShifts.some((s) => s.id === shift.id) ? productionShifts.map((s) => (s.id === shift.id ? shift : s)) : [...productionShifts, shift];
-    setProductionShifts(next);
-    cacheSet('productionShifts', next);
+    setProductionShifts((prev) => {
+      const next = prev.some((s) => s.id === shift.id) ? prev.map((s) => (s.id === shift.id ? shift : s)) : [...prev, shift];
+      cacheSet('productionShifts', next);
+      return next;
+    });
     await queueWrite('productionShifts', { kind: 'save', entry: shift });
   };
   const patchOneProductionShift = async (shiftId, patch) => {
-    const next = productionShifts.map((s) => (s.id === shiftId ? { ...s, ...patch } : s));
-    setProductionShifts(next);
-    cacheSet('productionShifts', next);
+    setProductionShifts((prev) => {
+      const next = prev.map((s) => (s.id === shiftId ? { ...s, ...patch } : s));
+      cacheSet('productionShifts', next);
+      return next;
+    });
     await queueWrite('productionShifts', { kind: 'patch', entryId: shiftId, patch });
   };
   const deleteOneProductionShift = async (shiftId) => {
-    const next = productionShifts.filter((s) => s.id !== shiftId);
-    setProductionShifts(next);
-    cacheSet('productionShifts', next);
+    setProductionShifts((prev) => {
+      const next = prev.filter((s) => s.id !== shiftId);
+      cacheSet('productionShifts', next);
+      return next;
+    });
     await queueWrite('productionShifts', { kind: 'delete', entryId: shiftId });
   };
   const persistDriverLogs = async (next) => {
@@ -18311,21 +18323,27 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // someone else, which simply can't happen when every write is scoped to
   // one entry's own id.
   const saveOneTimesheetEntry = async (entry) => {
-    const next = timesheets.some((t) => t.id === entry.id) ? timesheets.map((t) => (t.id === entry.id ? entry : t)) : [...timesheets, entry];
-    setTimesheets(next);
-    cacheSet('timesheets', next);
+    setTimesheets((prev) => {
+      const next = prev.some((t) => t.id === entry.id) ? prev.map((t) => (t.id === entry.id ? entry : t)) : [...prev, entry];
+      cacheSet('timesheets', next);
+      return next;
+    });
     await queueWrite('timesheets', { kind: 'save', entry });
   };
   const patchOneTimesheetEntry = async (entryId, patch) => {
-    const next = timesheets.map((t) => (t.id === entryId ? { ...t, ...patch } : t));
-    setTimesheets(next);
-    cacheSet('timesheets', next);
+    setTimesheets((prev) => {
+      const next = prev.map((t) => (t.id === entryId ? { ...t, ...patch } : t));
+      cacheSet('timesheets', next);
+      return next;
+    });
     await queueWrite('timesheets', { kind: 'patch', entryId, patch });
   };
   const deleteOneTimesheetEntry = async (entryId) => {
-    const next = timesheets.filter((t) => t.id !== entryId);
-    setTimesheets(next);
-    cacheSet('timesheets', next);
+    setTimesheets((prev) => {
+      const next = prev.filter((t) => t.id !== entryId);
+      cacheSet('timesheets', next);
+      return next;
+    });
     await queueWrite('timesheets', { kind: 'delete', entryId });
   };
 
