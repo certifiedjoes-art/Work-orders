@@ -8478,6 +8478,15 @@ function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEn
   const [odometerEndDraft, setOdometerEndDraft] = useState('');
   const [endTimeDraft, setEndTimeDraft] = useState(''); // datetime-local; blank = right now
   const [signature, setSignature] = useState(null);
+  // The end-of-day form sits at the bottom of a long screen (grid + every entry
+  // above it), so a tap on Off Duty used to look like it did nothing. Bring the
+  // form into view whenever it opens.
+  const endFormRef = useRef(null);
+  useEffect(() => {
+    if (!endingLog) return;
+    const t = setTimeout(() => { try { endFormRef.current && endFormRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {} }, 60);
+    return () => clearTimeout(t);
+  }, [endingLog]);
 
   const todayTotals = openLog ? computeDutyDurations(openLog.statusChanges, null) : null;
 
@@ -8614,9 +8623,9 @@ function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEn
                 <button
                   key={status}
                   onClick={() => (status === 'onDuty' ? setPendingStatus(status) : status === 'off' ? setEndingLog(true) : onAddStatus(status, ''))}
-                  disabled={currentStatus === status}
+                  disabled={currentStatus === status && status !== 'off'}
                   className="rounded-lg px-3 py-3 text-sm font-semibold text-center"
-                  style={{ background: currentStatus === status ? COLORS.accent : COLORS.surfaceRaised, color: currentStatus === status ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}`, opacity: currentStatus === status ? 0.6 : 1 }}
+                  style={{ background: currentStatus === status && status !== 'off' ? COLORS.accent : COLORS.surfaceRaised, color: currentStatus === status && status !== 'off' ? COLORS.ink2 : COLORS.ink, border: `1px solid ${COLORS.line}`, opacity: currentStatus === status && status !== 'off' ? 0.6 : 1 }}
                 >
                   {label}
                 </button>
@@ -8642,7 +8651,8 @@ function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEn
           )}
 
           {endingLog ? (
-            <div>
+            <div ref={endFormRef} className="rounded-lg p-3" style={{ border: `2px solid ${COLORS.accent}`, scrollMarginTop: '12px' }}>
+              <p className="font-display text-sm font-bold mb-2" style={{ color: COLORS.accent }}>End your driver log</p>
               <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>Going off duty ends your log. Confirm when you finished, enter your odometer and sign.</p>
               {openLog && localDateStr(new Date(openLog.start)) !== localDateStr() && (
                 <p className="text-sm font-semibold mb-2" style={{ color: COLORS.accent }}>⚠ This log was started on {fmtDate(openLog.start)} and never closed.</p>
