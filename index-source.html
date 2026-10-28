@@ -2280,6 +2280,21 @@ const YARD_INSPECTION_SECTIONS = [
   ]},
 ];
 
+// Harder Contracting logo (redrawn as a sharp vector from the truck sticker).
+function HarderLogo() {
+  return (
+    <svg className="harder-logo" viewBox="0 0 176 120" width="124" height="84" role="img" aria-label="Harder Contracting Ltd.">
+          <polygon points="40.0,34.0 36.0,44.0 37.8,44.0 32.0,54.0 35.6,54.0 28.0,64.0 33.4,64.0 24.0,74.0 40.0,74.0 56.0,74.0 46.6,64.0 52.0,64.0 44.4,54.0 48.0,54.0 42.2,44.0 44.0,44.0" fill="#fff" />
+          <polygon points="86.0,6.0 81.6,15.7 83.6,15.7 77.1,25.4 81.1,25.4 72.7,35.1 78.7,35.1 68.3,44.9 76.3,44.9 63.9,54.6 73.8,54.6 59.4,64.3 71.4,64.3 55.0,74.0 86.0,74.0 117.0,74.0 100.6,64.3 112.6,64.3 98.2,54.6 108.1,54.6 95.7,44.9 103.7,44.9 93.3,35.1 99.3,35.1 90.9,25.4 94.9,25.4 88.4,15.7 90.4,15.7" fill="#fff" />
+          <polygon points="128.0,22.0 123.8,30.7 125.7,30.7 119.7,39.3 123.4,39.3 115.5,48.0 121.1,48.0 111.3,56.7 118.8,56.7 107.2,65.3 116.5,65.3 103.0,74.0 128.0,74.0 153.0,74.0 139.5,65.3 148.8,65.3 137.2,56.7 144.7,56.7 134.9,48.0 140.5,48.0 132.6,39.3 136.3,39.3 130.3,30.7 132.2,30.7" fill="#fff" />
+          <rect x="6" y="62" width="164" height="42" rx="4" fill="#fff" />
+          <rect x="22" y="98" width="132" height="14" rx="3" fill="#fff" />
+          <text x="88" y="96" textAnchor="middle" fontFamily="'Rajdhani','Arial Narrow',Impact,sans-serif" fontWeight="800" fontSize="40" fill="#1a1f4d" textLength="148" lengthAdjust="spacingAndGlyphs">HARDER</text>
+          <text x="88" y="109" textAnchor="middle" fontFamily="'Rajdhani',Arial,sans-serif" fontWeight="700" fontSize="8.5" fill="#1a1f4d" letterSpacing="1.2">CONTRACTING LTD.</text>
+        </svg>
+  );
+}
+
 // Loading screen animation: a feller buncher cutting and laying down a spruce
 // while the forest scrolls past. Pure inline SVG + CSS (nothing to download, so it
 // also works with no signal). Honors "reduce motion".
@@ -19394,6 +19409,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           }}
           onSkip={() => setOfferBiometric(null)}
         />
+        <div className="mb-3"><HarderLogo /></div>
         <LoadingAnimation />
         {loadingTooLong ? (
           <div className="text-center px-6 mt-4">
