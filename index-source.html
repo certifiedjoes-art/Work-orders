@@ -13802,6 +13802,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // run with nothing cached yet.
   const [loading, setLoading] = useState(() => cacheGet('orders', null) === null);
   const [loadingTooLong, setLoadingTooLong] = useState(false);
+  // The loading screen (buncher animation) always stays up for at least 5 seconds
+  // after the app opens, even if everything is ready sooner.
+  const [minLoadDone, setMinLoadDone] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setMinLoadDone(true), 5000);
+    return () => clearTimeout(t);
+  }, []);
   const [mechanics, setMechanics] = useState(() => cacheGet('mechanics', []));
   const [units, setUnits] = useState(() => cacheGet('units', []));
   const [unitTypes, setUnitTypes] = useState(() => cacheGet('unitTypes', {})); // { [unitName]: 'buncher'|'processor'|...|'truck'|'other' } — tags a real work-order unit for production/mechanic tracking
@@ -19343,7 +19350,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setConfirmDelete(false);
   };
 
-  if (loading) {
+  if (loading || !minLoadDone) {
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="flex flex-col items-center justify-center font-display px-4">
         {FONT_STYLE}
