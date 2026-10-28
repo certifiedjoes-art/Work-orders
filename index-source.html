@@ -2332,7 +2332,7 @@ function LoadingAnimation() {
   .bunch-chips, .bunch-stump, .bunch-laid, .bunch-carried, .bunch-dust { opacity: 0; }
 }
 `}</style>
-      <svg className="bunch-svg" viewBox="0 0 360 200" width="260" height="144" role="img" aria-label="Loading">
+      <svg className="bunch-svg" viewBox="0 0 360 200" width="180" height="100" role="img" aria-label="Loading">
         <defs>
           <g id="bunch-tree">
             <rect x="-2.5" y="-50" width="5" height="50" fill="#5b4128" />
@@ -19347,10 +19347,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="flex flex-col items-center justify-center font-display px-4">
         {FONT_STYLE}
-        <div className="w-full max-w-md">
-          <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
-          <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        </div>
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
