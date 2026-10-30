@@ -5104,7 +5104,7 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
   );
 }
 
-function SidebarMenu({ show, onClose, mechanic, isAdmin, isSafety, isForeman, isProduction, onNavigate, onLogout, onCheckUpdates, t }) {
+function SidebarMenu({ show, onClose, mechanic, isAdmin, isSafety, isForeman, isProduction, onOpenBoard, onNavigate, onLogout, onCheckUpdates, t }) {
   if (!show) return null;
   const item = (icon, label, onClick, color) => (
     <button
@@ -5139,6 +5139,7 @@ function SidebarMenu({ show, onClose, mechanic, isAdmin, isSafety, isForeman, is
           <div className="space-y-1 mb-4">
             {(isAdmin || isSafety) && item('🛠️', 'Admin', () => onNavigate('admin'))}
             {item('⏱️', 'Shift', () => onNavigate('shift'))}
+            {onOpenBoard && item('📋', 'Work Order Board', onOpenBoard)}
             {!isAdmin && item('🗒️', 'Timesheets', () => onNavigate('myTimesheets'))}
             {item('🗺️', 'Maps', () => onNavigate('maps'))}
             {item('🛣️', 'Highway Map', () => onNavigate('highwayMap'))}
@@ -16282,6 +16283,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // (mechanics) lands on the work order dashboard, their daily tool.
   const landingScreenFor = (name) => {
     if (admins.includes(name)) return 'admin';
+    // Someone who picked "Working as today: Mechanic" gets the board as home.
+    if (todaysJobChoice && name === currentMechanic) return usesShiftScreen(jobTypeForValue(todaysJobChoice)) ? 'shift' : 'dashboard';
     return usesShiftScreen(jobTypeFor(name)) ? 'shift' : 'dashboard';
   };
   // Same fresh-page-load risk as checkAndPromptEmail above, but higher
@@ -19905,6 +19908,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             isSafety={isSafety}
             isForeman={isForeman}
             isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
+          onOpenBoard={(!admins.includes(currentMechanic) && altListFor(currentMechanic).includes('__mechanic__')) ? () => { setTodaysJobChoice('__mechanic__'); setScreen('dashboard'); } : null}
             onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
             onCheckUpdates={async () => {
               try {
@@ -20435,6 +20439,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           onClose={() => setShowSidebar(false)}
           mechanic={currentMechanic}
           isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
+          onOpenBoard={(!admins.includes(currentMechanic) && altListFor(currentMechanic).includes('__mechanic__')) ? () => { setTodaysJobChoice('__mechanic__'); setScreen('dashboard'); } : null}
           isForeman={isForeman}
           isAdmin={isAdmin}
             isSafety={isSafety}
@@ -20720,6 +20725,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           onClose={() => setShowSidebar(false)}
           mechanic={currentMechanic}
           isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
+          onOpenBoard={(!admins.includes(currentMechanic) && altListFor(currentMechanic).includes('__mechanic__')) ? () => { setTodaysJobChoice('__mechanic__'); setScreen('dashboard'); } : null}
           isForeman={isForeman}
           isAdmin={isAdmin}
             isSafety={isSafety}
@@ -21594,6 +21600,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             isSafety={isSafety}
           isForeman={isForeman}
           isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
+          onOpenBoard={(!admins.includes(currentMechanic) && altListFor(currentMechanic).includes('__mechanic__')) ? () => { setTodaysJobChoice('__mechanic__'); setScreen('dashboard'); } : null}
           onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
           onCheckUpdates={async () => {
             try {
@@ -22743,6 +22750,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             isSafety={isSafety}
           isForeman={isForeman}
           isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
+          onOpenBoard={(!admins.includes(currentMechanic) && altListFor(currentMechanic).includes('__mechanic__')) ? () => { setTodaysJobChoice('__mechanic__'); setScreen('dashboard'); } : null}
           onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
           onCheckUpdates={async () => {
             try {
@@ -22997,6 +23005,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             isSafety={isSafety}
           isForeman={isForeman}
           isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
+          onOpenBoard={(!admins.includes(currentMechanic) && altListFor(currentMechanic).includes('__mechanic__')) ? () => { setTodaysJobChoice('__mechanic__'); setScreen('dashboard'); } : null}
           onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
           onCheckUpdates={async () => {
             try {
