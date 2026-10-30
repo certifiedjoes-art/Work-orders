@@ -13816,10 +13816,20 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // run with nothing cached yet.
   const [loading, setLoading] = useState(() => cacheGet('orders', null) === null);
   const [loadingTooLong, setLoadingTooLong] = useState(false);
-  // The loading screen (buncher animation) always stays up for at least 5 seconds
-  // after the app opens, even if everything is ready sooner.
-  const [minLoadDone, setMinLoadDone] = useState(false);
+  // The loading screen (buncher animation) stays up for at least 5 seconds, but
+  // only when it hasn't been shown in the last LOADING_SCREEN_RESET_HOURS. Opened
+  // again within that window, the app goes straight in. (If the app genuinely has
+  // nothing saved yet to show, the loading screen still appears until data arrives.)
+  const LOADING_SCREEN_RESET_HOURS = 12;
+  const [minLoadDone, setMinLoadDone] = useState(() => {
+    try {
+      const last = parseInt(localStorage.getItem('loadingScreenShownAt') || '0', 10);
+      return !!last && (Date.now() - last) < LOADING_SCREEN_RESET_HOURS * 3600 * 1000;
+    } catch (e) { return false; }
+  });
   useEffect(() => {
+    if (minLoadDone) return undefined;
+    try { localStorage.setItem('loadingScreenShownAt', String(Date.now())); } catch (e) { /* ignore */ }
     const t = setTimeout(() => setMinLoadDone(true), 5000);
     return () => clearTimeout(t);
   }, []);
