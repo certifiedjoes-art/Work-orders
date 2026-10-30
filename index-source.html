@@ -19908,7 +19908,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             isSafety={isSafety}
             isForeman={isForeman}
             isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
-          onOpenBoard={(!admins.includes(currentMechanic) && todaysJobChoice === '__mechanic__') ? () => { setTodaysJobChoice('__mechanic__'); setScreen('dashboard'); } : null}
+          onOpenBoard={(!admins.includes(currentMechanic) && (todaysJobChoice === '__mechanic__' || altListFor(currentMechanic).includes('__mechanic__'))) ? () => setScreen('dashboard') : null}
             onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
             onCheckUpdates={async () => {
               try {
@@ -20439,7 +20439,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           onClose={() => setShowSidebar(false)}
           mechanic={currentMechanic}
           isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
-          onOpenBoard={(!admins.includes(currentMechanic) && todaysJobChoice === '__mechanic__') ? () => { setTodaysJobChoice('__mechanic__'); setScreen('dashboard'); } : null}
+          onOpenBoard={(!admins.includes(currentMechanic) && (todaysJobChoice === '__mechanic__' || altListFor(currentMechanic).includes('__mechanic__'))) ? () => setScreen('dashboard') : null}
           isForeman={isForeman}
           isAdmin={isAdmin}
             isSafety={isSafety}
@@ -20725,7 +20725,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           onClose={() => setShowSidebar(false)}
           mechanic={currentMechanic}
           isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
-          onOpenBoard={(!admins.includes(currentMechanic) && todaysJobChoice === '__mechanic__') ? () => { setTodaysJobChoice('__mechanic__'); setScreen('dashboard'); } : null}
+          onOpenBoard={(!admins.includes(currentMechanic) && (todaysJobChoice === '__mechanic__' || altListFor(currentMechanic).includes('__mechanic__'))) ? () => setScreen('dashboard') : null}
           isForeman={isForeman}
           isAdmin={isAdmin}
             isSafety={isSafety}
@@ -21600,7 +21600,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             isSafety={isSafety}
           isForeman={isForeman}
           isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
-          onOpenBoard={(!admins.includes(currentMechanic) && todaysJobChoice === '__mechanic__') ? () => { setTodaysJobChoice('__mechanic__'); setScreen('dashboard'); } : null}
+          onOpenBoard={(!admins.includes(currentMechanic) && (todaysJobChoice === '__mechanic__' || altListFor(currentMechanic).includes('__mechanic__'))) ? () => setScreen('dashboard') : null}
           onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
           onCheckUpdates={async () => {
             try {
@@ -22750,7 +22750,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             isSafety={isSafety}
           isForeman={isForeman}
           isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
-          onOpenBoard={(!admins.includes(currentMechanic) && todaysJobChoice === '__mechanic__') ? () => { setTodaysJobChoice('__mechanic__'); setScreen('dashboard'); } : null}
+          onOpenBoard={(!admins.includes(currentMechanic) && (todaysJobChoice === '__mechanic__' || altListFor(currentMechanic).includes('__mechanic__'))) ? () => setScreen('dashboard') : null}
           onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
           onCheckUpdates={async () => {
             try {
@@ -23005,7 +23005,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             isSafety={isSafety}
           isForeman={isForeman}
           isProduction={usesShiftScreen(jobTypeFor(currentMechanic))}
-          onOpenBoard={(!admins.includes(currentMechanic) && todaysJobChoice === '__mechanic__') ? () => { setTodaysJobChoice('__mechanic__'); setScreen('dashboard'); } : null}
+          onOpenBoard={(!admins.includes(currentMechanic) && (todaysJobChoice === '__mechanic__' || altListFor(currentMechanic).includes('__mechanic__'))) ? () => setScreen('dashboard') : null}
           onNavigate={(s, adminSection) => { setScreen(s); if (adminSection) setExpandedAdmin(adminSection); }}
           onCheckUpdates={async () => {
             try {
