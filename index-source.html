@@ -13844,6 +13844,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [orders, setOrders] = useState(() => cacheGet('orders', []));
   const [currentMechanic, setCurrentMechanic] = useState(null);
   const [screen, setScreen] = useState('login');
+  // If this phone is about to sign itself back in (still inside the stay-signed-in
+  // window), keep our loading screen up until it lands on its real screen — otherwise
+  // the login screen (and its banners) flashes for a second first.
+  const [autoSignInPending, setAutoSignInPending] = useState(() => {
+    try {
+      const name = localStorage.getItem('sessionMechanic');
+      const last = parseInt(localStorage.getItem('sessionLastActive'), 10) || 0;
+      const h = parseFloat(localStorage.getItem('sessionHours'));
+      return !!name && (Date.now() - last) < (isNaN(h) ? 12 : h) * 3600 * 1000;
+    } catch (e) { return false; }
+  });
+  useEffect(() => {
+    if (!autoSignInPending) return undefined;
+    const t = setTimeout(() => setAutoSignInPending(false), 8000); // never get stuck
+    return () => clearTimeout(t);
+  }, [autoSignInPending]);
+  useEffect(() => { if (screen !== 'login' && autoSignInPending) setAutoSignInPending(false); }, [screen, autoSignInPending]);
   useEffect(() => { window.__appScreen = screen; }, [screen]); // read by the auto-update check in <head>
   const [lang, setLang] = useState(() => localStorage.getItem('appLang') || 'en');
   const setLangPersist = (l) => {
@@ -19377,7 +19394,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setConfirmDelete(false);
   };
 
-  if (loading || !minLoadDone) {
+  if (loading || !minLoadDone || (autoSignInPending && screen === 'login')) {
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="flex flex-col items-center justify-center font-display px-4">
         {FONT_STYLE}
