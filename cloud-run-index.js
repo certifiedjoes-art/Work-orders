@@ -830,10 +830,16 @@ async function pollSamsaraDiagnostics() {
       const name = a.name || a.equipmentName || a.assetName || '';
       if (!name) return;
       const slug = slugForUnit(name);
-      const secs = [a.obdEngineSeconds, a.gatewayEngineSeconds, a.gatewayJ1939EngineSeconds]
-        .map((s) => (s && s.value) ?? s)
-        .find((s) => typeof s === 'number');
+      // PREFERENCE ORDER matters: OBD (the machine's own meter) first, then the
+      // J1939 counter (only present when someone set a manual engine-runtime offset
+      // in Samsara to match the real meter — it's what the Samsara dashboard shows),
+      // and the plain gateway-powered-on counter LAST (the weakest signal; on LL3 it
+      // ran ~3,200 h ahead of the real hours and made it look badly overdue).
+      const hoursKeys = ['obdEngineSeconds', 'gatewayJ1939EngineSeconds', 'gatewayEngineSeconds'];
+      const srcKey = hoursKeys.find((k) => typeof ((a[k] && a[k].value) ?? a[k]) === 'number');
+      const secs = srcKey ? ((a[srcKey] && a[srcKey].value) ?? a[srcKey]) : undefined;
       if (typeof secs === 'number') {
+        updates[`samsaraDiagnostics/${slug}/hoursSource`] = srcKey; // for troubleshooting: which Samsara counter this unit's hours come from
         updates[`samsaraDiagnostics/${slug}/hours`] = Math.round(secs / 360) / 10; // hours, 1 decimal (shift start/stop need better than whole hours)
         updates[`samsaraDiagnostics/${slug}/updatedAt`] = Date.now();
         matched++;
@@ -1115,7 +1121,7 @@ exports.weeklyBackupAndEmail = async (req, res) => {
         (eqData.data || eqData.equipment || []).forEach((a) => {
           const name = a.name || a.equipmentName || a.assetName || '';
           if (!name) return;
-          const secs = [a.obdEngineSeconds, a.gatewayEngineSeconds, a.gatewayJ1939EngineSeconds]
+          const secs = [a.obdEngineSeconds, a.gatewayJ1939EngineSeconds, a.gatewayEngineSeconds]
             .map((x) => (x && x.value) ?? x)
             .find((x) => typeof x === 'number');
           if (typeof secs !== 'number') return;
@@ -1308,7 +1314,7 @@ if (body.mode === 'samsaraStats') {
       const rawList = equipData.data || equipData.equipment || [];
       rawList.forEach((a) => {
         const name = a.name || a.equipmentName || a.assetName || '';
-        const secs = [a.obdEngineSeconds, a.gatewayEngineSeconds, a.gatewayJ1939EngineSeconds]
+        const secs = [a.obdEngineSeconds, a.gatewayJ1939EngineSeconds, a.gatewayEngineSeconds]
           .map((s) => (s && s.value) ?? s)
           .find((s) => typeof s === 'number');
         if (name && typeof secs === 'number') {
