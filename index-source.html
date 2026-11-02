@@ -18914,9 +18914,62 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           return (!tsFilterMechanic || s.employee === tsFilterMechanic) && d >= rangeStart && d <= rangeEnd;
         })
       : [];
-    return exportTimesheets(entries, prod, undefined, rangeStart, rangeEnd);
+    return exportTimesheets(entries, prod, undefined, rangeStart, rangeEnd, { includeProduction, name: tsFilterMechanic || '', totalLabel: 'Month total:' });
   };
-  const exportTimesheets = async (entries, productionEntries, filenamePrefix, rangeStart, rangeEnd) => {
+  // Export & Share: asks the backend for the SAME Excel file the automatic monthly
+  // email sends (one tab per person, hours rounded to the nearest 0.5, every day
+  // listed), for this date range, then hands it to the phone's share sheet.
+  // Needs a connection — the file is built on the server so every export matches.
+  const exportTimesheets = async (entries, productionEntries, filenamePrefix, rangeStart, rangeEnd, opts) => {
+    opts = opts || {};
+    if (!rangeStart || !rangeEnd) { alert('Pick a date range first.'); return; }
+    try {
+      const res = await fetch(CLOUD_FUNCTION_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: APP_SECRET,
+          mode: 'exportTimesheets',
+          startStr: rangeStart,
+          endStr: rangeEnd,
+          includeMechanics: true,
+          includeProduction: opts.includeProduction !== false,
+          name: opts.name || '',
+          totalLabel: opts.totalLabel || 'Week total:',
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.base64) throw new Error(json.error || ('HTTP ' + res.status));
+      const bin = atob(json.base64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const filename = `${filenamePrefix ? filenamePrefix + '-' : ''}${json.filename}`;
+      const file = new File([bytes], filename, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: 'Timesheets export',
+            text: timesheetSettings.email ? `Timesheets for ${timesheetSettings.email}` : 'Timesheets export',
+          });
+          return;
+        } catch (e) {
+          if (e && e.name === 'AbortError') return; // cancelled the share sheet — don't also download
+        }
+      }
+      const url = URL.createObjectURL(file);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Couldn't make the export — it needs a connection (" + (e.message || 'try again') + ").");
+    }
+  };
+  // Old single-sheet CSV builder — no longer used by the Export buttons (kept
+  // only so nothing else that might reference it breaks).
+  const exportTimesheetsCsvLegacy = async (entries, productionEntries, filenamePrefix, rangeStart, rangeEnd) => {
     const rows = [];
 
     if (entries.length > 0) {

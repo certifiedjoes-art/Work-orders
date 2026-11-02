@@ -337,19 +337,36 @@ function productionSummary(s, unitTypesMap) {
 // what marks the start of the next day, so there's no need to repeat it.
 // This is what gives block numbers room of their own without a wide,
 // cluttered single-day row trying to hold everything at once.
-function monthlySummaryXlsx(timesheets, productionShifts, unitTypesMap, receiptsMap) {
-  const { y: ny, m: nm } = edmontonYMD(new Date());
-  const startStr = ymdStr(ny, nm - 1, 1);
-  const endStr = ymdStr(ny, nm, 0);
-  const daysInMonth = new Date(Date.UTC(ny, nm - 1, 0)).getUTCDate();
+// opts (all optional) lets the app's Export button ask for this SAME file for
+// any date range: { startStr, endStr, includeMechanics, includeProduction,
+// name (just one person), totalLabel }. With no opts it is the automatic
+// monthly email: the previous full calendar month, everyone.
+function monthlySummaryXlsx(timesheets, productionShifts, unitTypesMap, receiptsMap, opts) {
+  opts = opts || {};
+  let startStr, endStr;
+  if (opts.startStr && opts.endStr) {
+    startStr = opts.startStr;
+    endStr = opts.endStr;
+  } else {
+    const { y: ny, m: nm } = edmontonYMD(new Date());
+    startStr = ymdStr(ny, nm - 1, 1);
+    endStr = ymdStr(ny, nm, 0);
+  }
+  // Every calendar date in the range, so each tab has every day (blank days included).
+  const dateList = [];
+  for (let t = Date.parse(startStr + 'T00:00:00Z'); t <= Date.parse(endStr + 'T00:00:00Z'); t += 86400000) {
+    dateList.push(new Date(t).toISOString().slice(0, 10));
+  }
+  const totalLabel = opts.totalLabel || 'Month total:';
+  const onlyName = opts.name || '';
 
-  const entries = Object.values(timesheets || {}).filter((e) => e.date && e.date >= startStr && e.date <= endStr);
-  const shifts = Object.values(productionShifts || {}).filter((s) => s.end && shiftEndDate(s) >= startStr && shiftEndDate(s) <= endStr);
+  const entries = opts.includeMechanics === false ? [] : Object.values(timesheets || {}).filter((e) => e.date && e.date >= startStr && e.date <= endStr && (!onlyName || e.mechanic === onlyName));
+  const shifts = opts.includeProduction === false ? [] : Object.values(productionShifts || {}).filter((s) => s.end && shiftEndDate(s) >= startStr && shiftEndDate(s) <= endStr && (!onlyName || s.employee === onlyName));
 
   // Reimbursement receipts dated this month, each with the file name its
   // photo gets as an email attachment (listed on that employee's own tab).
   const receiptList = Object.values(receiptsMap || {})
-    .filter((r) => r && r.date && r.date >= startStr && r.date <= endStr)
+    .filter((r) => r && r.date && r.date >= startStr && r.date <= endStr && (!onlyName || r.employee === onlyName))
     .sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt || 0) - (b.createdAt || 0))
     .map((r, i) => ({ ...r, fname: `receipt-${r.date}-${String(r.employee || 'unknown').replace(/[^a-zA-Z0-9]+/g, '-')}-${i + 1}.jpg` }));
   const receiptsByMechanic = {};
@@ -397,8 +414,7 @@ function monthlySummaryXlsx(timesheets, productionShifts, unitTypesMap, receipts
     const rows = [['Date', 'Block', 'Machine', 'Clock In', 'Clock Out', 'Break Start', 'Break End', 'Worked Through Break', 'Paid Hours', 'Jobs', 'Trees', 'Spruce', 'Aspen', 'Loads', 'Top Piles', 'Fuel Delivered (L)']];
     let total = 0;
 
-    for (let day = 1; day <= daysInMonth; day++) {
-      const dateStr = ymdStr(ny, nm - 1, day);
+    for (const dateStr of dateList) {
       const dayEntries = entriesByDate[dateStr] || [];
       const dayShifts = shiftsByDate[dateStr] || [];
 
@@ -457,7 +473,7 @@ function monthlySummaryXlsx(timesheets, productionShifts, unitTypesMap, receipts
         dateShown = true;
       });
     }
-    rows.push(['', '', '', '', '', '', '', 'Month total:', total.toFixed(2), '', '', '', '', '', '', '']);
+    rows.push(['', '', '', '', '', '', '', totalLabel, total.toFixed(2), '', '', '', '', '', '', '']);
 
     // Receipts this person photographed for reimbursement, right under
     // their month total.
@@ -1036,6 +1052,44 @@ exports.weeklyBackupAndEmail = async (req, res) => {
     const body = req.body || {};
     if (body.key !== APP_SECRET) {
       res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
+    // The app's Export & Share buttons: builds the exact same Excel file the
+    // automatic monthly email sends (one tab per person), for whatever date
+    // range the app asks for, and hands it back to the phone to share.
+    if (body.mode === 'exportTimesheets') {
+      try {
+        const isDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+        if (!isDate(body.startStr) || !isDate(body.endStr) || body.startStr > body.endStr) {
+          res.status(400).json({ error: 'Bad date range' });
+          return;
+        }
+        const spanDays = (Date.parse(body.endStr) - Date.parse(body.startStr)) / 86400000 + 1;
+        if (spanDays > 93) {
+          res.status(400).json({ error: 'Date range too long (3 months max)' });
+          return;
+        }
+        const dbRef = admin.database();
+        const [tsSnap, psSnap, utSnap, rcSnap] = await Promise.all([
+          dbRef.ref('timesheetEntries').once('value'),
+          dbRef.ref('productionShiftRecords').once('value'),
+          dbRef.ref('unitTypes').once('value'),
+          dbRef.ref('receipts').once('value'),
+        ]);
+        const { buffer } = monthlySummaryXlsx(tsSnap.val(), psSnap.val(), utSnap.val(), rcSnap.val(), {
+          startStr: body.startStr,
+          endStr: body.endStr,
+          includeMechanics: body.includeMechanics !== false,
+          includeProduction: body.includeProduction !== false,
+          name: typeof body.name === 'string' ? body.name : '',
+          totalLabel: typeof body.totalLabel === 'string' ? body.totalLabel : undefined,
+        });
+        res.status(200).json({ ok: true, filename: `timesheets-${body.startStr}-to-${body.endStr}.xlsx`, base64: buffer.toString('base64') });
+      } catch (err) {
+        console.error('exportTimesheets failed:', err);
+        res.status(500).json({ error: err.message });
+      }
       return;
     }
 
