@@ -19035,7 +19035,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         }
         lastEmployee = s.employee;
         if (s._blankDay) { rows.push([s.employee, s._blankDay, '', '', '', '', '', '', '', '', '', '']); return; }
-        const hours = s.start && s.end ? (new Date(s.end) - new Date(s.start)) / 1000 / 60 / 60 : 0;
+        // Shift hours round to the nearest half hour (same as mechanic entries); extra tasks and downtime below stay as entered.
+        const hours = s.start && s.end ? Math.round(((new Date(s.end) - new Date(s.start)) / 1000 / 60 / 60) * 2) / 2 : 0;
         const extraHours = (s.extraTasks || []).reduce((sum, t) => sum + (parseFloat(t.hours) || 0), 0);
         const downtimeLog = s.downtimeLog || [];
         const downtimeHours = downtimeLog.reduce((sum, d) => sum + (d.start && d.end ? (new Date(d.end) - new Date(d.start)) / 1000 / 60 / 60 : 0), 0);

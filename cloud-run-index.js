@@ -88,6 +88,15 @@ async function sendEmail({ to, subject, text, attachments }) {
   return res.json();
 }
 
+// Production shift hours, rounded per shift to the nearest half hour — the same
+// rule mechanic clock-in/out entries use. Extra tasks and downtime are NOT
+// rounded; those stay exactly as the employee entered them.
+function shiftPaidHours(s) {
+  if (!s || !s.start || !s.end) return 0;
+  const raw = Math.max(0, (new Date(s.end) - new Date(s.start)) / 1000 / 60 / 60);
+  return Math.round(raw * 2) / 2;
+}
+
 function computeHours(e) {
   if (!e.clockIn || !e.clockOut) return 0;
   let ms = new Date(e.clockOut) - new Date(e.clockIn);
@@ -185,7 +194,7 @@ function timesheetsToCsv(timesheets, startStr, endStr, productionShifts, unitTyp
     const jobsStr = day.entries.flatMap((e) => Object.values(e.jobs || {}).map((j) => `${j.unit}: ${j.hours}h`)).join(' | ');
     const workedThroughBreak = day.entries.some((e) => e.skippedLunch) ? 'Yes' : 'No';
 
-    const shiftHrs = day.shifts.reduce((sum, s) => sum + Math.max(0, (new Date(s.end) - new Date(s.start)) / 1000 / 60 / 60), 0);
+    const shiftHrs = day.shifts.reduce((sum, s) => sum + shiftPaidHours(s), 0);
     const blocks = [...new Set(day.shifts.map((s) => s.block).filter(Boolean))].join(' | ');
     const machines = [...new Set(day.shifts.map((s) => s.machine).filter(Boolean))].join(' | ');
     const productionStr = day.shifts.map((s) => productionSummary(s, unitTypesMap)).filter((p) => p && p !== '—').join(' | ');
@@ -425,7 +434,7 @@ function monthlySummaryXlsx(timesheets, productionShifts, unitTypesMap, receipts
       // first row of the day" rule, so a second block that day gets its
       // own row underneath rather than being squeezed into the first.
       dayShifts.forEach((s) => {
-        const hrs = Math.max(0, (new Date(s.end) - new Date(s.start)) / 1000 / 60 / 60);
+        const hrs = shiftPaidHours(s);
         total += hrs;
         const type = machineType(s.machine, unitTypesMap);
         const fuelTotal = type === 'fuel' ? Object.values(s.fuelLog || {}).flat().reduce((sum, v) => sum + (parseFloat(v) || 0), 0) : 0;
@@ -805,10 +814,16 @@ async function pollSamsaraDiagnostics() {
       const name = a.name || a.equipmentName || a.assetName || '';
       if (!name) return;
       const slug = slugForUnit(name);
-      const secs = [a.obdEngineSeconds, a.gatewayEngineSeconds, a.gatewayJ1939EngineSeconds]
-        .map((s) => (s && s.value) ?? s)
-        .find((s) => typeof s === 'number');
+      // PREFERENCE ORDER matters: OBD (the machine's own meter) first, then the
+      // J1939 counter (only present when someone set a manual engine-runtime offset
+      // in Samsara to match the real meter — it's what the Samsara dashboard shows),
+      // and the plain gateway-powered-on counter LAST (the weakest signal; on LL3 it
+      // ran ~3,200 h ahead of the real hours and made it look badly overdue).
+      const hoursKeys = ['obdEngineSeconds', 'gatewayJ1939EngineSeconds', 'gatewayEngineSeconds'];
+      const srcKey = hoursKeys.find((k) => typeof ((a[k] && a[k].value) ?? a[k]) === 'number');
+      const secs = srcKey ? ((a[srcKey] && a[srcKey].value) ?? a[srcKey]) : undefined;
       if (typeof secs === 'number') {
+        updates[`samsaraDiagnostics/${slug}/hoursSource`] = srcKey; // for troubleshooting: which Samsara counter this unit's hours come from
         updates[`samsaraDiagnostics/${slug}/hours`] = Math.round(secs / 360) / 10; // hours, 1 decimal (shift start/stop need better than whole hours)
         updates[`samsaraDiagnostics/${slug}/updatedAt`] = Date.now();
         matched++;
@@ -1052,7 +1067,7 @@ exports.weeklyBackupAndEmail = async (req, res) => {
         (eqData.data || eqData.equipment || []).forEach((a) => {
           const name = a.name || a.equipmentName || a.assetName || '';
           if (!name) return;
-          const secs = [a.obdEngineSeconds, a.gatewayEngineSeconds, a.gatewayJ1939EngineSeconds]
+          const secs = [a.obdEngineSeconds, a.gatewayJ1939EngineSeconds, a.gatewayEngineSeconds]
             .map((x) => (x && x.value) ?? x)
             .find((x) => typeof x === 'number');
           if (typeof secs !== 'number') return;
@@ -1245,7 +1260,7 @@ if (body.mode === 'samsaraStats') {
       const rawList = equipData.data || equipData.equipment || [];
       rawList.forEach((a) => {
         const name = a.name || a.equipmentName || a.assetName || '';
-        const secs = [a.obdEngineSeconds, a.gatewayEngineSeconds, a.gatewayJ1939EngineSeconds]
+        const secs = [a.obdEngineSeconds, a.gatewayJ1939EngineSeconds, a.gatewayEngineSeconds]
           .map((s) => (s && s.value) ?? s)
           .find((s) => typeof s === 'number');
         if (name && typeof secs === 'number') {
