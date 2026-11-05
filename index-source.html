@@ -5900,6 +5900,11 @@ async function saveFuelTankExtraUnits(list) {
 async function saveFuelTankSubcontractors(list) {
   await firebase.database().ref('fuelTankSubcontractors').set(list);
 }
+// Manual oil-change DATES, for equipment with no Samsara hours (e.g. a genset):
+// oilChangeDates/{slug} = 'YYYY-MM-DD'.
+async function saveOilChangeDate(slug, dateStr) {
+  await firebase.database().ref('oilChangeDates/' + slug).set(dateStr || null);
+}
 async function saveFuelTankReminderSettings(settings) {
   await firebase.database().ref('fuelTankReminderSettings').set(settings);
 }
@@ -7655,6 +7660,8 @@ const MACHINE_ICONS = {
   pickup: '🛻',
   trailer: '📦',
   lightTower: '💡',
+  excavator: '⛏️',
+  genset: '⚡',
 };
 
 // Custom flat-style icons built from real reference photos of the actual
@@ -13779,6 +13786,24 @@ function OilBaselineEditor({ currentBaseline, currentHours, onSave }) {
 }
 
 
+// Date-only oil change tracker for equipment with no Samsara hours (e.g. a genset).
+function OilDateEditor({ currentDate, onSave }) {
+  const [draft, setDraft] = useState(currentDate || '');
+  const [saved, setSaved] = useState(false);
+  return (
+    <div className="flex gap-2">
+      <input
+        type="date"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        className="flex-1 rounded-lg px-3 py-2 text-sm"
+        style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+      />
+      <Btn onClick={() => { if (draft) { onSave(draft); setSaved(true); setTimeout(() => setSaved(false), 2000); } }}>{saved ? 'Saved ✓' : 'Save'}</Btn>
+    </div>
+  );
+}
+
 // --- PNG metadata embedding — lets a map's georeferencing data travel
 // inside the image file itself (a standard tEXt chunk, invisible to any
 // image viewer), instead of needing a separate JSON file alongside it.
@@ -13979,6 +14004,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // Set manually from Unit Numbers, and auto-reset to the unit's current
   // Samsara hours whenever an order tagged oilChangeDue gets closed.
   const [oilChangeBaselines, setOilChangeBaselines] = useState(() => cacheGet('oilChangeBaselines', {}));
+  const [oilChangeDates, setOilChangeDates] = useState(() => cacheGet('oilChangeDates', {}));
   const [editingOilBaselineForUnit, setEditingOilBaselineForUnit] = useState(null);
   // Completion record for watch-only (noQuiz) job-hazard courses, which
   // don't produce a trainingRecords quiz entry — { [slug]: { [courseKey]: timestamp } }.
@@ -15150,13 +15176,19 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   }, []);
 
   useEffect(() => {
+    const dref = firebase.database().ref('oilChangeDates');
+    const don = dref.on('value', (snap) => {
+      const val = snap.val() || {};
+      setOilChangeDates(val);
+      cacheSet('oilChangeDates', val);
+    });
     const ref = firebase.database().ref('oilChangeBaselines');
     const on = ref.on('value', (snap) => {
       const val = snap.val() || {};
       setOilChangeBaselines(val);
       cacheSet('oilChangeBaselines', val);
     });
-    return () => ref.off('value', on);
+    return () => { ref.off('value', on); dref.off('value', don); };
   }, []);
 
 
@@ -16056,6 +16088,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // Manual set from Unit Numbers, and also called automatically whenever
   // an oilChangeDue order for this unit gets closed (see updateOrder) —
   // both paths land here so there's one place that writes this value.
+  // Equipment with no Samsara hours (genset): just the date of the last oil change.
+  const setOilChangeDate = async (unit, dateStr) => {
+    if (!dateStr) return;
+    await saveOilChangeDate(slugForUnit(unit), dateStr).catch(() => alert("Couldn't save that — check your signal and try again."));
+  };
   const setOilChangeBaseline = async (unit, hours) => {
     const slug = slugForUnit(unit);
     const val = parseFloat(hours);
@@ -16240,13 +16277,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // 'production' for job type.
   const MACHINE_TYPE_LABELS = {
     buncher: 'Buncher', processor: 'Processor', skidder: 'Skidder', loader: 'Log Loader',
-    crawler: 'Crawler', grader: 'Grader', winch: 'Winch Truck', fuel: 'Fuel Truck',
+    crawler: 'Crawler', grader: 'Grader', winch: 'Winch Truck', fuel: 'Fuel Truck', excavator: 'Excavator',
   };
   // Support equipment — tagging a unit with one of these is purely for
   // organizing the unit list. Anyone assigned to one of these still gets the
   // plain mechanic clock in/out, same as having no unit at all.
   const SUPPORT_TYPE_LABELS = {
-    truck: 'Service Truck', pickup: 'Pickup', trailer: 'Trailer', lightTower: 'Light Tower',
+    truck: 'Service Truck', pickup: 'Pickup', trailer: 'Trailer', lightTower: 'Light Tower', genset: 'Genset',
   };
   // Which unit types are actual drivable vehicles — this is what gates
   // the "Assigned drivers" feature (Unit Numbers + the map marker
@@ -26357,6 +26394,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const rows = (units || []).filter(Boolean).map((u) => {
       const slug = slugForUnit(u);
       const diag = samsaraDiagnostics[slug];
+      // A genset has no Samsara unit, so it can't have hours — only the date of its last oil change.
+      if (unitTypes[slug] === 'genset') {
+        const d = oilChangeDates[slug] || '';
+        const days = d ? Math.max(0, Math.floor((Date.now() - new Date(d + 'T12:00:00').getTime()) / 86400000)) : null;
+        return { unit: u, slug, manual: true, date: d, days, cur: null, base: null, since: null, left: null, status: 'manual', hasOpenOrder: orders.some((o) => o.unit === u && o.oilChangeDue && o.status !== 'Done'), updatedAt: null };
+      }
       const cur = num(diag && diag.hours);
       const base = num(oilChangeBaselines[slug]);
       const since = cur != null && base != null ? cur - base : null;
@@ -26367,13 +26410,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const hasOpenOrder = orders.some((o) => o.unit === u && o.oilChangeDue && o.status !== 'Done');
       return { unit: u, slug, cur, base, since, left, status, hasOpenOrder, updatedAt: diag && diag.updatedAt };
     });
-    const order = { overdue: 0, soon: 1, ok: 2, nobase: 3, nodata: 4 };
+    const order = { overdue: 0, soon: 1, ok: 2, manual: 3, nobase: 3, nodata: 4 };
     rows.sort((a, b) => order[a.status] - order[b.status] || (a.left ?? 0) - (b.left ?? 0) || String(a.unit).localeCompare(String(b.unit), undefined, { numeric: true }));
     const statusStyle = {
       overdue: { color: '#E07A5F', label: 'OVERDUE' },
       soon: { color: '#E0B04F', label: 'DUE SOON' },
       ok: { color: COLORS.done, label: 'OK' },
       nobase: { color: COLORS.inkDim, label: 'SET LAST CHANGE' },
+      manual: { color: COLORS.inkDim, label: 'DATE ONLY' },
       nodata: { color: COLORS.inkDim, label: 'NO HOURS' },
     };
     const counts = rows.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {});
@@ -26412,10 +26456,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       <span className="font-display font-bold block">{r.unit}</span>
                       <span className="text-xs font-semibold" style={{ color: st.color }}>{st.label}</span>
                     </span>
-                    <span className="text-right font-mono text-sm">{fmtH(r.base)}</span>
-                    <span className="text-right font-mono text-sm">{fmtH(r.cur)}</span>
+                    <span className="text-right font-mono text-sm">{r.manual ? (r.date || '—') : fmtH(r.base)}</span>
+                    <span className="text-right font-mono text-sm">{r.manual ? '—' : fmtH(r.cur)}</span>
                     <span className="text-right font-mono text-sm font-bold" style={{ color: st.color }}>
-                      {r.left == null ? '—' : r.left <= 0 ? `${fmtH(-r.left)} over` : `${fmtH(r.left)} h`}
+                      {r.manual ? (r.days == null ? 'set date' : `${r.days} d ago`) : r.left == null ? '—' : r.left <= 0 ? `${fmtH(-r.left)} over` : `${fmtH(r.left)} h`}
                     </span>
                   </button>
                   {!open && r.status === 'soon' && (
@@ -26430,6 +26474,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       {r.hasOpenOrder
                         ? <p className="text-xs font-semibold mb-2" style={{ color: COLORS.inkDim }}>✓ Oil change work order already open — see the board</p>
                         : <Btn className="mb-3" onClick={() => { if (window.confirm(`Create an oil change work order for ${r.unit}?`)) createOilChangeOrder(r.unit, r.cur, r.base); }}>🛢️ Create oil change work order</Btn>}
+                      {r.manual && (
+                        <div className="mb-1">
+                          <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>
+                            No Samsara unit, so this is tracked by date only.{r.days != null ? ` Last oil change was ${r.days} day${r.days === 1 ? '' : 's'} ago.` : ''}
+                          </p>
+                          <OilDateEditor currentDate={r.date} onSave={(d) => setOilChangeDate(r.unit, d)} />
+                          <Btn variant="ghost" className="mt-2" onClick={() => { if (window.confirm(`Record that ${r.unit} had its oil changed today?`)) setOilChangeDate(r.unit, todayStr()); }}>
+                            Oil changed today
+                          </Btn>
+                        </div>
+                      )}
+                      {!r.manual && (<>
                       <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>
                         {r.since != null ? `${fmtH(r.since)} hrs since last change` : 'Not enough data to work out hours since the last change.'}
                         {r.updatedAt ? ` · Samsara reading ${new Date(r.updatedAt).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: APP_TZ })}` : ''}
@@ -26440,6 +26496,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           Oil changed just now — use {fmtH(r.cur)} hrs
                         </Btn>
                       )}
+                      </>)}
                     </div>
                   )}
                 </div>
