@@ -5893,6 +5893,13 @@ async function saveFuelTankExtraUnits(list) {
 // — for seasonal shutdown, when nothing's running and nothing needs a
 // monthly re-check. Doesn't touch the records themselves, just whether the
 // reminder shows.
+// Subcontractors for the Fuel Tank Ledger: [{ name: 'ABC Logging', units: ['P1', 'Skidder 2'] }].
+// Their pickups and equipment get the same monthly ledger as company units;
+// a record's unit is stored as "ABC Logging: P1" so it can never clash with
+// one of the company's own unit numbers.
+async function saveFuelTankSubcontractors(list) {
+  await firebase.database().ref('fuelTankSubcontractors').set(list);
+}
 async function saveFuelTankReminderSettings(settings) {
   await firebase.database().ref('fuelTankReminderSettings').set(settings);
 }
@@ -6716,6 +6723,7 @@ const OFFLINE_QUEUE_HANDLERS = {
   meta: { setWhole: saveMeta },
   fuelTankExtraUnits: { setWhole: saveFuelTankExtraUnits },
   fuelTankReminderSettings: { setWhole: saveFuelTankReminderSettings },
+  fuelTankSubcontractors: { setWhole: saveFuelTankSubcontractors },
   templates: { setWhole: saveTemplates },
   pins: { setWhole: savePins },
   blocks: { setWhole: saveBlocksList },
@@ -14099,6 +14107,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [newFuelTankUnitName, setNewFuelTankUnitName] = useState('');
   const [fuelTankMonth, setFuelTankMonth] = useState(() => new Date().toISOString().slice(0, 7)); // 'YYYY-MM'
   const [editingFuelTankUnit, setEditingFuelTankUnit] = useState(null);
+  const [fuelTankSubcontractors, setFuelTankSubcontractors] = useState(() => cacheGet('fuelTankSubcontractors', [])); // [{ name, units: [] }]
+  const [fuelTankSubsOpen, setFuelTankSubsOpen] = useState(false);
+  const [addingSubcontractor, setAddingSubcontractor] = useState(false);
+  const [newSubcontractorName, setNewSubcontractorName] = useState('');
+  const [addingSubUnitFor, setAddingSubUnitFor] = useState(null); // company name currently getting a new unit
+  const [newSubUnitName, setNewSubUnitName] = useState('');
   // The Fuel Tank Ledger's row order: only actual vehicles (trucks and
   // pickups — the ones that carry a slip tank), grouped by their letter
   // prefix (all V's together, all S's together, etc.) and sorted
@@ -14127,7 +14141,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // flagged separately, not something this file alone can do). Comes back
   // empty while paused (seasonal shutdown), so every banner/badge that
   // reads from this just naturally goes quiet — nothing else to gate.
-  const fuelTankDueSoonUnits = fuelTankRemindersPaused ? [] : fuelTankLedgerUnits.filter((u) => {
+  const subUnitKey = (company, unit) => `${company}: ${unit}`;
+  const fuelTankSubUnitKeys = fuelTankSubcontractors.flatMap((c) => (c.units || []).map((u) => subUnitKey(c.name, u)));
+  const fuelTankDueSoonUnits = fuelTankRemindersPaused ? [] : [...fuelTankLedgerUnits, ...fuelTankSubUnitKeys].filter((u) => {
     const records = safetyInspections.filter((r) => r.type === 'fuelTank' && r.unit === u);
     if (records.length === 0) return true;
     const latest = records.reduce((a, b) => ((a.dateOfInspection || '') > (b.dateOfInspection || '') ? a : b));
@@ -14587,6 +14603,19 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = (snap.val() || []).filter((u) => typeof u === 'string' && u.trim());
       setFuelTankExtraUnits(val);
       cacheSet('fuelTankExtraUnits', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('fuelTankSubcontractors');
+    const on = ref.on('value', (snap) => {
+      const raw = snap.val() || [];
+      const list = (Array.isArray(raw) ? raw : Object.values(raw))
+        .filter((c) => c && typeof c.name === 'string' && c.name.trim())
+        .map((c) => ({ name: c.name, units: (Array.isArray(c.units) ? c.units : Object.values(c.units || {})).filter((u) => typeof u === 'string' && u.trim()) }));
+      setFuelTankSubcontractors(list);
+      cacheSet('fuelTankSubcontractors', list);
     });
     return () => ref.off('value', on);
   }, []);
@@ -17174,6 +17203,33 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setFuelTankExtraUnits(next);
     cacheSet('fuelTankExtraUnits', next);
     await queueWrite('fuelTankExtraUnits', { kind: 'setWhole', value: next });
+  };
+  const saveSubcontractors = async (next) => {
+    setFuelTankSubcontractors(next);
+    cacheSet('fuelTankSubcontractors', next);
+    await queueWrite('fuelTankSubcontractors', { kind: 'setWhole', value: next });
+  };
+  const addSubcontractor = async (name) => {
+    const trimmed = name.trim();
+    if (!trimmed || fuelTankSubcontractors.some((c) => c.name.toLowerCase() === trimmed.toLowerCase())) return;
+    await saveSubcontractors([...fuelTankSubcontractors, { name: trimmed, units: [] }]);
+  };
+  const addSubcontractorUnit = async (company, unit) => {
+    const trimmed = unit.trim();
+    if (!trimmed) return;
+    await saveSubcontractors(fuelTankSubcontractors.map((c) => (
+      c.name === company && !(c.units || []).some((u) => u.toLowerCase() === trimmed.toLowerCase())
+        ? { ...c, units: [...(c.units || []), trimmed] }
+        : c
+    )));
+  };
+  const removeSubcontractorUnit = async (company, unit) => {
+    if (!window.confirm(`Remove ${unit} from ${company}? Past ledger records for it stay on file.`)) return;
+    await saveSubcontractors(fuelTankSubcontractors.map((c) => (c.name === company ? { ...c, units: (c.units || []).filter((u) => u !== unit) } : c)));
+  };
+  const removeSubcontractor = async (company) => {
+    if (!window.confirm(`Remove ${company} and all its units from the list? Past ledger records stay on file.`)) return;
+    await saveSubcontractors(fuelTankSubcontractors.filter((c) => c.name !== company));
   };
   const toggleFuelTankReminders = async () => {
     const next = !fuelTankRemindersPaused;
@@ -25821,6 +25877,110 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                             </button>
                           );
                         })}
+                      </div>
+
+                      {/* Subcontractors — their pickups and equipment, same monthly ledger, grouped by company */}
+                      <div className="mb-4 rounded-lg" style={{ border: `1px solid ${COLORS.line}` }}>
+                        <button
+                          onClick={() => setFuelTankSubsOpen((x) => !x)}
+                          className="w-full flex items-center justify-between gap-3 px-3 py-3 text-left"
+                        >
+                          <span className="text-sm font-semibold">🚛 Subcontractors{fuelTankSubcontractors.length ? ` (${fuelTankSubcontractors.length})` : ''}</span>
+                          <span className="text-xs font-bold" style={{ color: COLORS.accent }}>
+                            {fuelTankSubUnitKeys.some((k) => fuelTankDueSoonUnits.includes(k)) && !fuelTankSubsOpen ? <span style={{ color: '#E07A5F' }}>Due soon · </span> : null}
+                            {fuelTankSubsOpen ? '▲' : '▼'}
+                          </span>
+                        </button>
+                        {fuelTankSubsOpen && (
+                          <div className="px-3 pb-3 space-y-4">
+                            {fuelTankSubcontractors.length === 0 && (
+                              <p className="text-xs" style={{ color: COLORS.inkDim }}>No subcontractors added yet.</p>
+                            )}
+                            {fuelTankSubcontractors.map((c) => (
+                              <div key={c.name}>
+                                <div className="flex items-center justify-between mb-2">
+                                  <p className="text-xs uppercase tracking-wider font-bold" style={{ color: COLORS.accent }}>{c.name}</p>
+                                  {(isAdmin || isSafety) && (
+                                    <button onClick={() => removeSubcontractor(c.name)} className="text-xs" style={{ color: COLORS.inkDim }}>Remove company</button>
+                                  )}
+                                </div>
+                                <div className="space-y-2">
+                                  {(c.units || []).map((u) => {
+                                    const key = subUnitKey(c.name, u);
+                                    const record = safetyInspections.find((r) => r.type === 'fuelTank' && r.unit === key && r.month === fuelTankMonth);
+                                    const isDueSoon = fuelTankDueSoonUnits.includes(key);
+                                    return (
+                                      <div key={key} className="flex items-stretch gap-2">
+                                        <button
+                                          onClick={() => setEditingFuelTankUnit(key)}
+                                          className="flex-1 flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-left"
+                                          style={{ background: COLORS.surfaceRaised }}
+                                        >
+                                          <span className="text-sm font-semibold">{u}</span>
+                                          <span className="text-xs font-bold" style={{ color: record ? COLORS.accent : isDueSoon ? '#E07A5F' : COLORS.inkDim }}>
+                                            {record ? 'Filled' : isDueSoon ? 'Due soon' : 'Not filled'}
+                                          </span>
+                                        </button>
+                                        {(isAdmin || isSafety) && (
+                                          <button onClick={() => removeSubcontractorUnit(c.name, u)} className="px-2 text-sm" style={{ color: COLORS.inkDim }} aria-label={`Remove ${u}`}>✕</button>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                  {(c.units || []).length === 0 && <p className="text-xs" style={{ color: COLORS.inkDim }}>No pickups or equipment added yet.</p>}
+                                </div>
+                                {(isAdmin || isSafety) && (
+                                  addingSubUnitFor === c.name ? (
+                                    <div className="flex gap-2 mt-2">
+                                      <input
+                                        type="text"
+                                        placeholder="Pickup or equipment # / plate"
+                                        value={newSubUnitName}
+                                        onChange={(e) => setNewSubUnitName(e.target.value)}
+                                        className="flex-1 px-3 py-2 rounded-lg text-sm"
+                                        style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                                      />
+                                      <Btn onClick={async () => { await addSubcontractorUnit(c.name, newSubUnitName); setNewSubUnitName(''); setAddingSubUnitFor(null); }} disabled={!newSubUnitName.trim()}>Add</Btn>
+                                      <Btn variant="ghost" onClick={() => { setAddingSubUnitFor(null); setNewSubUnitName(''); }}>Cancel</Btn>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => { setAddingSubUnitFor(c.name); setNewSubUnitName(''); }}
+                                      className="mt-2 text-xs font-semibold px-3 py-2 rounded-lg"
+                                      style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                                    >
+                                      + Add pickup / equipment
+                                    </button>
+                                  )
+                                )}
+                              </div>
+                            ))}
+                            {(isAdmin || isSafety) && (
+                              addingSubcontractor ? (
+                                <div className="flex gap-2">
+                                  <input
+                                    type="text"
+                                    placeholder="Subcontractor company name"
+                                    value={newSubcontractorName}
+                                    onChange={(e) => setNewSubcontractorName(e.target.value)}
+                                    className="flex-1 px-3 py-2 rounded-lg text-sm"
+                                    style={{ background: COLORS.bg, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
+                                  />
+                                  <Btn onClick={async () => { await addSubcontractor(newSubcontractorName); setNewSubcontractorName(''); setAddingSubcontractor(false); }} disabled={!newSubcontractorName.trim()}>Add</Btn>
+                                  <Btn variant="ghost" onClick={() => { setAddingSubcontractor(false); setNewSubcontractorName(''); }}>Cancel</Btn>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => setAddingSubcontractor(true)}
+                                  className="text-xs font-semibold px-3 py-2 rounded-lg"
+                                  style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}
+                                >
+                                  + Add Subcontractor
+                                </button>
+                              )
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       {(isAdmin || isSafety) && (

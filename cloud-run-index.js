@@ -623,7 +623,7 @@ async function checkShiftReminders() {
 // there can be more than one.
 async function checkFuelTankReminders() {
   const db = admin.database();
-  const [metaSnap, unitTypesSnap, extraUnitsSnap, recordsSnap, rolesSnap, tokensSnap, settingsSnap, sentSnap] = await Promise.all([
+  const [metaSnap, unitTypesSnap, extraUnitsSnap, recordsSnap, rolesSnap, tokensSnap, settingsSnap, sentSnap, subsSnap] = await Promise.all([
     db.ref('meta/units').once('value'),
     db.ref('unitTypes').once('value'),
     db.ref('fuelTankExtraUnits').once('value'),
@@ -632,6 +632,7 @@ async function checkFuelTankReminders() {
     db.ref('pushTokens').once('value'),
     db.ref('fuelTankReminderSettings').once('value'),
     db.ref('fuelTankReminderSent').once('value'),
+    db.ref('fuelTankSubcontractors').once('value'),
   ]);
 
   const settings = settingsSnap.val() || {};
@@ -651,7 +652,12 @@ async function checkFuelTankReminders() {
     const t = unitTypesMap[slugify(u)];
     return t === 'truck' || t === 'pickup';
   });
-  const allUnits = [...vehicleUnits, ...extraUnits];
+  // Subcontractors' pickups/equipment ("ABC Logging: P1") count the same way.
+  const subRaw = subsSnap.val() || [];
+  const subUnits = (Array.isArray(subRaw) ? subRaw : Object.values(subRaw))
+    .filter((co) => co && typeof co.name === 'string')
+    .flatMap((co) => (Array.isArray(co.units) ? co.units : Object.values(co.units || {})).filter((u) => typeof u === 'string' && u.trim()).map((u) => `${co.name}: ${u}`));
+  const allUnits = [...vehicleUnits, ...extraUnits, ...subUnits];
 
   const dueSoon = allUnits.filter((u) => {
     const unitRecords = records.filter((r) => r.type === 'fuelTank' && r.unit === u);
