@@ -5118,6 +5118,8 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
   );
 }
 
+// The Diagnostics page (what each employee sees) is for this one person only.
+const DIAGNOSTICS_OWNER = 'Joe';
 function SidebarMenu({ show, onClose, mechanic, isAdmin, isSafety, isForeman, isProduction, onOpenBoard, onNavigate, onLogout, onCheckUpdates, t }) {
   if (!show) return null;
   const item = (icon, label, onClick, color) => (
@@ -5164,6 +5166,7 @@ function SidebarMenu({ show, onClose, mechanic, isAdmin, isSafety, isForeman, is
             {!isProduction && item('📋', t('checklists'), () => onNavigate('checklists'))}
             {(!isProduction || isAdmin) && item('🛢️', 'Oil Changes', () => onNavigate('oilChanges'))}
             {item('⚙️', 'Settings', () => onNavigate('settings'))}
+            {mechanic === DIAGNOSTICS_OWNER && item('🩺', 'Diagnostics', () => onNavigate('diagnostics'))}
           </div>
 
           <div className="h-px my-4" style={{ background: COLORS.line }} />
@@ -14241,6 +14244,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [oilReminders, setOilReminders] = useState(() => cacheGet('oilChangeReminders', {}));
   const [oilManualHours, setOilManualHours] = useState(() => cacheGet('oilChangeManualHours', {}));
   const [editingOilBaselineForUnit, setEditingOilBaselineForUnit] = useState(null);
+  const [diagExpanded, setDiagExpanded] = useState(null);
+  const [diagSearch, setDiagSearch] = useState('');
   // Completion record for watch-only (noQuiz) job-hazard courses, which
   // don't produce a trainingRecords quiz entry — { [slug]: { [courseKey]: timestamp } }.
   const [receipts, setReceipts] = useState(() => cacheGet('receipts', [])); // [{ id, employee, date, amount, note, photoUrl, createdAt, reimbursed }]
@@ -26827,6 +26832,108 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </div>
           );
         })()}
+        </div>
+      </div>
+    );
+  }
+
+  // Read-only "what does each employee see" page. Only for DIAGNOSTICS_OWNER; nothing here writes anything.
+  if (screen === 'diagnostics') {
+    if (currentMechanic !== DIAGNOSTICS_OWNER) {
+      return (
+        <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8 flex items-center justify-center">
+          {FONT_STYLE}
+          <div className="text-center">
+            <p className="font-display text-lg font-bold mb-4">Not available</p>
+            <Btn onClick={() => setScreen(landingScreenFor(currentMechanic))}>Back</Btn>
+          </div>
+        </div>
+      );
+    }
+    const altLabel = (v) => (v === '__mechanic__' ? 'Mechanic' : v === '__cook__' ? 'Cook' : v);
+    const SCREEN_LABELS = { admin: 'Admin screen', shift: 'Shift screen (clock in / production / driver log)', dashboard: 'Work Order Board' };
+    const people = mechanics.slice().sort((a, b) => a.localeCompare(b)).filter((n) => !diagSearch.trim() || n.toLowerCase().includes(diagSearch.trim().toLowerCase()));
+    const profileFor = (n) => {
+      const adm = admins.includes(n);
+      const role = roleFor(n);
+      const safe = role === 'safety';
+      const unit = assignedUnitFor(n);
+      const utype = unit ? unitTypes[slugForUnit(unit)] : null;
+      const jt = jobTypeFor(n);
+      const prod = usesShiftScreen(jt);
+      const alts = altListFor(n);
+      const hasBoard = !adm && alts.includes('__mechanic__');
+      const landing = adm ? 'admin' : prod ? 'shift' : 'dashboard';
+      // Mirrors the ☰ menu (SidebarMenu) so this shows what that person's menu holds.
+      const menu = [];
+      if (adm || safe) menu.push('Admin');
+      menu.push('Shift');
+      if (hasBoard) menu.push('Work Order Board');
+      if (!adm) menu.push('Timesheets');
+      menu.push('Maps', 'Highway Map');
+      if (!adm) menu.push('Safety');
+      if (adm) menu.push('Unit Numbers', 'Block Numbers');
+      if (!prod) menu.push('Shout-outs', 'Checklists');
+      if (!prod || adm) menu.push('Oil Changes');
+      menu.push('Settings');
+      if (n === DIAGNOSTICS_OWNER) menu.push('Diagnostics');
+      const clock = timesheets.find((t) => t.mechanic === n && !t.clockOut);
+      const log = driverLogs.find((l) => l.driver === n && !l.end);
+      const isVehicle = unit && VEHICLE_UNIT_TYPES.includes(utype);
+      const hrsLeft = isVehicle ? hoursUntilInspectionExpires(unit, n) : null;
+      const valid = isVehicle ? hasValidInspection(unit, n) : null;
+      return { n, adm, role, unit, utype, jt, prod, alts, landing, menu, clock, log, isVehicle, hrsLeft, valid };
+    };
+    const roleColor = { admin: COLORS.accent, foreman: COLORS.progress, safety: COLORS.progress, employee: COLORS.inkDim };
+    return (
+      <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
+        {FONT_STYLE}
+        <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
+        <div className="max-w-3xl mx-auto">
+          <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
+            ← Back
+          </button>
+          <h1 className="font-display text-3xl font-bold mb-1">🩺 Diagnostics</h1>
+          <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>What each person gets when they sign in: their home screen, ☰ menu, unit, job and today's status. Read-only, and only you can see this page.</p>
+          <TextInput value={diagSearch} onChange={(e) => setDiagSearch(e.target.value)} placeholder="Search a name" className="w-full mb-4" />
+          <div className="space-y-2">
+            {people.map((n) => {
+              const d = profileFor(n);
+              const open = diagExpanded === n;
+              return (
+                <div key={n} className="rounded-lg" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+                  <button onClick={() => setDiagExpanded(open ? null : n)} className="w-full flex items-center justify-between gap-2 px-3 py-3 text-left">
+                    <span>
+                      <span className="font-display font-bold block">{n}</span>
+                      <span className="text-xs" style={{ color: COLORS.inkDim }}>{d.unit ? `${d.unit}${d.utype ? ` (${SUPPORT_TYPE_LABELS[d.utype] || MACHINE_TYPE_LABELS[d.utype] || d.utype})` : ''}` : 'No unit assigned'}</span>
+                    </span>
+                    <span className="text-right">
+                      <span className="text-xs font-semibold block uppercase" style={{ color: roleColor[d.role] || COLORS.inkDim }}>{d.role}</span>
+                      <span className="text-xs" style={{ color: COLORS.inkDim }}>Home: {d.landing === 'dashboard' ? 'Board' : d.landing === 'shift' ? 'Shift' : 'Admin'}</span>
+                    </span>
+                  </button>
+                  {open && (
+                    <div className="px-3 pb-3 text-sm space-y-2" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+                      <p className="pt-2"><span style={{ color: COLORS.inkDim }}>Lands on: </span>{SCREEN_LABELS[d.landing]}</p>
+                      <p><span style={{ color: COLORS.inkDim }}>Job type: </span>{d.jt === 'production' ? 'Production operator' : d.jt === 'cook' ? 'Cook' : 'Mechanic / support'}{d.prod ? ' (sees the production menu)' : ''}</p>
+                      <p><span style={{ color: COLORS.inkDim }}>Alternate jobs: </span>{d.alts.length ? d.alts.map(altLabel).join(', ') : 'None'}</p>
+                      <p><span style={{ color: COLORS.inkDim }}>☰ menu: </span>{d.menu.join(' · ')}</p>
+                      <p><span style={{ color: COLORS.inkDim }}>Clocked in now: </span>{d.clock ? `Yes, since ${fmtDate(d.clock.clockIn)} ${fmtTime(d.clock.clockIn)}` : 'No'}</p>
+                      <p><span style={{ color: COLORS.inkDim }}>Open driver log: </span>{d.log ? `Yes, started ${fmtDate(d.log.start)} ${fmtTime(d.log.start)}` : 'No'}</p>
+                      {d.isVehicle && (
+                        <p>
+                          <span style={{ color: COLORS.inkDim }}>Pre-trip on {d.unit}: </span>
+                          {d.valid ? `valid, about ${Math.max(0, Math.round(d.hrsLeft))} h left` : 'none in the last 24 h'}
+                        </p>
+                      )}
+                      <p className="text-xs" style={{ color: COLORS.inkDim }}>If today's job was switched in the app ("Working as today"), their home screen and menu can differ from this for that day.</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {people.length === 0 && <p className="text-sm" style={{ color: COLORS.inkDim }}>No one matches that search.</p>}
+          </div>
         </div>
       </div>
     );
