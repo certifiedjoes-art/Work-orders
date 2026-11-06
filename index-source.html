@@ -8682,7 +8682,7 @@ function DriverRecentLogsSection({ driver, allLogs, onBackfillOffDuty }) {
   );
 }
 
-function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEnd, onUpdateStatusChange, hasValidInspection, inspectionHoursRemaining, onOpenPreTrip, onOpenInspectionMode, isAdmin, documents, onAddDocument, onDeleteDocument, onRenameDocument, uploadingDocument, renewalStatus }) {
+function DriverLogSection({ liveOdometer, driver, openLog, allLogs, onStart, onAddStatus, onEnd, onUpdateStatusChange, hasValidInspection, inspectionHoursRemaining, onOpenPreTrip, onOpenInspectionMode, isAdmin, documents, onAddDocument, onDeleteDocument, onRenameDocument, uploadingDocument, renewalStatus }) {
   const [startingLog, setStartingLog] = useState(false);
   const [odometerStartDraft, setOdometerStartDraft] = useState('');
   const [pendingStatus, setPendingStatus] = useState(null);
@@ -8769,10 +8769,12 @@ function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEn
           <div>
             <label className="block mb-3">
               <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Odometer — start of day</span>
-              <TextInput type="number" inputMode="numeric" value={odometerStartDraft} onChange={(e) => setOdometerStartDraft(e.target.value)} />
+              {liveOdometer != null
+                ? <p className="font-mono text-lg">{liveOdometer} <span className="text-xs" style={{ color: COLORS.inkDim }}>km · from Samsara</span></p>
+                : <TextInput type="number" inputMode="numeric" value={odometerStartDraft} onChange={(e) => setOdometerStartDraft(e.target.value)} />}
             </label>
             <div className="flex gap-2">
-              <Btn onClick={async () => { await onStart(odometerStartDraft); setStartingLog(false); setOdometerStartDraft(''); }}>Start log</Btn>
+              <Btn onClick={async () => { await onStart(liveOdometer != null ? String(liveOdometer) : odometerStartDraft); setStartingLog(false); setOdometerStartDraft(''); }}>Start log</Btn>
               <Btn variant="ghost" onClick={() => setStartingLog(false)}>Cancel</Btn>
             </div>
           </div>
@@ -8883,8 +8885,10 @@ function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEn
                 />
               </label>
               <label className="block mb-3">
-                <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Odometer — end of day</span>
-                <TextInput type="number" inputMode="numeric" value={odometerEndDraft} onChange={(e) => setOdometerEndDraft(e.target.value)} />
+                <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Odometer — end of day (required)</span>
+                {liveOdometer != null
+                  ? <p className="font-mono text-lg">{liveOdometer} <span className="text-xs" style={{ color: COLORS.inkDim }}>km · from Samsara</span></p>
+                  : <TextInput type="number" inputMode="numeric" value={odometerEndDraft} onChange={(e) => setOdometerEndDraft(e.target.value)} />}
               </label>
               <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Sign to confirm this log is accurate:</p>
               <SignaturePad onChange={setSignature} savedSignature={localStorage.getItem('savedSignature_' + driver)} />
@@ -8892,11 +8896,15 @@ function DriverLogSection({ driver, openLog, allLogs, onStart, onAddStatus, onEn
                 <Btn
                   onClick={async () => {
                     if (signature) localStorage.setItem('savedSignature_' + driver, signature);
-                    const ok = await onEnd(odometerEndDraft, signature, endTimeDraft ? new Date(endTimeDraft).toISOString() : null);
+                    const endOdo = liveOdometer != null ? String(liveOdometer) : odometerEndDraft.trim();
+                    const startOdo = parseFloat(openLog && openLog.odometerStart);
+                    if (!endOdo) { alert('Enter your ending odometer.'); return; }
+                    if (!isNaN(startOdo) && parseFloat(endOdo) < startOdo) { alert("Your ending odometer can't be lower than your starting odometer (" + startOdo + ')'); return; }
+                    const ok = await onEnd(endOdo, signature, endTimeDraft ? new Date(endTimeDraft).toISOString() : null);
                     if (ok === false) return; // validation failed — stay open so they can fix the time
                     setEndingLog(false); setOdometerEndDraft(''); setEndTimeDraft(''); setSignature(null);
                   }}
-                  disabled={!signature}
+                  disabled={!signature || (liveOdometer == null && !odometerEndDraft.trim())}
                 >
                   End log
                 </Btn>
@@ -20812,6 +20820,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
           {activeType === 'winch' && (
             <DriverLogSection
+              liveOdometer={(() => { const d = samsaraDiagnostics[slugForUnit(effectiveUnit)]; const k = d && d.odometerKm != null ? Math.round(parseFloat(d.odometerKm)) : NaN; return isNaN(k) ? null : k; })()}
               driver={currentMechanic}
               openLog={openDriverLog}
               allLogs={driverLogs}

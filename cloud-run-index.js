@@ -786,7 +786,7 @@ async function pollLowBatteryFlags(updates) {
 async function pollSamsaraDiagnostics() {
   const db = admin.database();
   const [vehiclesRes, assetsRes] = await Promise.all([
-    fetch('https://api.samsara.com/fleet/vehicles/stats?types=batteryMilliVolts', {
+    fetch('https://api.samsara.com/fleet/vehicles/stats?types=batteryMilliVolts,obdOdometerMeters,gpsOdometerMeters', {
       method: 'GET',
       headers: { 'Authorization': `Bearer ${SAMSARA_API_TOKEN}`, 'Accept': 'application/json' },
     }),
@@ -817,6 +817,12 @@ async function pollSamsaraDiagnostics() {
         updates[`samsaraDiagnostics/${slug}/voltage`] = Math.round(mv / 100) / 10; // millivolts -> volts, 1 decimal
         updates[`samsaraDiagnostics/${slug}/updatedAt`] = Date.now();
         matched++;
+      }
+      // Live odometer (km) for the driver log's start/end-of-day reading —
+      // the truck's own OBD odometer when it reports one, else the GPS one.
+      const meters = (v.obdOdometerMeters && v.obdOdometerMeters.value) ?? (v.gpsOdometerMeters && v.gpsOdometerMeters.value);
+      if (name && typeof meters === 'number') {
+        updates[`samsaraDiagnostics/${slugForUnit(name)}/odometerKm`] = Math.round(meters / 1000);
       }
     });
   } else {
