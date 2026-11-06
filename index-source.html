@@ -10680,6 +10680,161 @@ function NewYardInspectionForm({ knownSites, defaultInspector, submitting, onCan
 // Shared printable table of an inspection's answered items — same idea
 // across all three inspection types, just fed a different item list.
 // entries: [{ label, value: { status, note } }]
+// ---- Sending inspections (single or several) as one PDF via the share sheet ----
+function inspectionPdfSection(record, orders) {
+  const statusLabel = (s) => s === 'reqAtt' ? 'Req. Att.' : s === 'notOk' ? 'Not OK' : s === 'na' ? 'N/A' : s === 'ok' ? 'OK' : '-';
+  const rowsFrom = (labelsInOrder) => labelsInOrder.map(({ label, value }) => ({
+    label, status: statusLabel(value && value.status), note: (value && value.note) || '',
+    flag: !!(value && (value.status === 'reqAtt' || value.status === 'notOk')),
+  }));
+  const reviewed = (verb) => record.reviewedBy
+    ? `${verb} by ${record.reviewedBy} on ${new Date(record.reviewedAt).toLocaleDateString(undefined, { timeZone: APP_TZ })}${record.followUpDate ? ` (dated ${record.followUpDate})` : ''}`
+    : 'Not yet reviewed';
+  if (record.type === 'yard') {
+    const entries = [];
+    YARD_INSPECTION_SECTIONS.forEach((section, sIdx) => {
+      effectiveItemOrder((orders && orders.yard && orders.yard[sIdx]) || null, section.items.length).forEach((iIdx) => {
+        entries.push({ label: `${section.name} - ${section.items[iIdx]}`, value: record.items && record.items[`${sIdx}-${iIdx}`] });
+      });
+    });
+    return { title: `Yard Inspection - ${record.site || ''}`, subtitle: `${fmtDate(record.date)} - Inspected by ${record.inspectedBy || ''}`, rows: rowsFrom(entries), notes: [], footer: reviewed('Reviewed'), signature: record.signature };
+  }
+  if (record.type === 'vehicle' || record.type === 'equipment') {
+    const list = record.type === 'vehicle' ? VEHICLE_INSPECTION_ITEMS : EQUIPMENT_INSPECTION_ITEMS;
+    const entries = effectiveItemOrder(orders && orders[record.type], list.length).map((i) => ({ label: list[i], value: record.items && record.items[i] }));
+    const sub = record.type === 'vehicle'
+      ? `${fmtDate(record.date)}${record.km ? ` - ${record.km} km` : ''} - Inspected by ${record.inspectedBy || ''}`
+      : `${record.machine || ''}${record.hourMeter ? ` - ${record.hourMeter} hrs` : ''} - ${fmtDate(record.date)} - Inspected by ${record.inspectedBy || ''}`;
+    return {
+      title: `${record.type === 'vehicle' ? 'Vehicle' : 'Equipment'} Inspection - Unit ${record.unit || ''}`, subtitle: sub, rows: rowsFrom(entries),
+      notes: record.comments ? ['Comments: ' + record.comments] : [], footer: reviewed('Follow-up'), signature: record.signature,
+    };
+  }
+  // fuel tank ledger entry
+  const rows = [{ label: 'Slip Tank', status: record.slipTank || '-', note: record.slipTank === 'Y' ? [record.slipTankSize, record.constructionStandard, record.dateOfManufacture && ('Mfd ' + record.dateOfManufacture), record.dateOf5YearRetest && ('Retest ' + record.dateOf5YearRetest), record.transportCanadaRetestNum && ('TC# ' + record.transportCanadaRetestNum)].filter(Boolean).join(' | ') : '', flag: false }]
+    .concat(FUEL_TANK_YN_FIELDS.map((f) => ({ label: f.label, status: record[f.key] || '-', note: '', flag: record[f.key] === 'N' })));
+  return {
+    title: `Fuel Tank Ledger - ${record.unit || ''}`, subtitle: `${record.month || ''} - Inspected ${record.dateOfInspection || ''} - Initials ${record.inspectorInitials || ''}`,
+    rows, notes: record.comments ? ['Comments: ' + record.comments] : [], footer: '', signature: null,
+  };
+}
+async function buildInspectionsPdf(records, orders) {
+  const doc = await PDFLib.PDFDocument.create();
+  const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica);
+  const bold = await doc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+  const W = 612, H = 792, M = 46;
+  const clean = (s) => String(s == null ? '' : s).replace(/[^\x20-\x7E]/g, ' ');
+  const wrap = (text, size, maxW, f) => {
+    const out = []; let line = '';
+    clean(text).split(/\s+/).forEach((w) => {
+      const t = line ? line + ' ' + w : w;
+      if (f.widthOfTextAtSize(t, size) > maxW && line) { out.push(line); line = w; } else line = t;
+    });
+    if (line) out.push(line);
+    return out.length ? out : [''];
+  };
+  for (const record of records) {
+    const sec = inspectionPdfSection(record, orders);
+    let page = doc.addPage([W, H]); let y = H - M;
+    const need = (n) => { if (y - n < M) { page = doc.addPage([W, H]); y = H - M; } };
+    page.drawText(clean(sec.title), { x: M, y, size: 16, font: bold }); y -= 18;
+    wrap(sec.subtitle, 10, W - M * 2, font).forEach((l) => { page.drawText(l, { x: M, y, size: 10, font, color: PDFLib.rgb(0.35, 0.35, 0.35) }); y -= 13; });
+    page.drawText('Harder Contracting Ltd.', { x: M, y, size: 8, font, color: PDFLib.rgb(0.5, 0.5, 0.5) }); y -= 16;
+    page.drawText('ITEM', { x: M, y, size: 8, font: bold }); page.drawText('STATUS', { x: M + 300, y, size: 8, font: bold }); page.drawText('NOTES', { x: M + 365, y, size: 8, font: bold });
+    y -= 4; page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.8, color: PDFLib.rgb(0.7, 0.7, 0.7) }); y -= 12;
+    for (const r of sec.rows) {
+      const a = wrap(r.label, 9, 290, font), c = wrap(r.note, 9, W - M - (M + 365), font);
+      const n = Math.max(a.length, c.length); need(n * 11 + 4);
+      const col = r.flag ? PDFLib.rgb(0.75, 0.2, 0.15) : PDFLib.rgb(0, 0, 0);
+      a.forEach((l, i) => page.drawText(l, { x: M, y: y - i * 11, size: 9, font, color: PDFLib.rgb(0, 0, 0) }));
+      page.drawText(clean(r.status), { x: M + 300, y, size: 9, font: r.flag ? bold : font, color: col });
+      c.forEach((l, i) => page.drawText(l, { x: M + 365, y: y - i * 11, size: 9, font, color: PDFLib.rgb(0, 0, 0) }));
+      y -= n * 11 + 4;
+    }
+    y -= 6;
+    for (const t of sec.notes) wrap(t, 10, W - M * 2, font).forEach((l) => { need(14); page.drawText(l, { x: M, y, size: 10, font }); y -= 13; });
+    if (sec.footer) { need(16); y -= 4; page.drawText(clean(sec.footer), { x: M, y, size: 9, font, color: PDFLib.rgb(0.35, 0.35, 0.35) }); y -= 14; }
+    if (sec.signature && String(sec.signature).startsWith('data:image/png')) {
+      try {
+        const img = await doc.embedPng(sec.signature); const h = 45, w = Math.min(160, img.width * (h / img.height));
+        need(h + 16); page.drawText('Signature:', { x: M, y, size: 8, font, color: PDFLib.rgb(0.4, 0.4, 0.4) }); y -= h + 2;
+        page.drawImage(img, { x: M, y, width: w, height: h });
+      } catch (e) {}
+    }
+  }
+  return await doc.save();
+}
+async function sendInspectionsPdf(records, orders) {
+  if (!records.length) return;
+  const bytes = await buildInspectionsPdf(records, orders);
+  const stamp = new Date().toISOString().slice(0, 10);
+  const name = records.length === 1
+    ? `Inspection ${(records[0].unit || records[0].site || '').toString().replace(/[^A-Za-z0-9]+/g, '-')} ${stamp}.pdf`
+    : `Inspections (${records.length}) ${stamp}.pdf`;
+  await shareBytes(bytes, name, 'application/pdf', name.replace('.pdf', ''));
+}
+function SendInspectionButton({ record, orders }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      disabled={busy}
+      onClick={async () => { setBusy(true); try { await sendInspectionsPdf([record], orders); } catch (e) { alert('Could not make the PDF: ' + (e.message || e)); } setBusy(false); }}
+      className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-1.5 rounded-lg"
+      style={{ color: COLORS.bg, background: COLORS.accent }}
+    >
+      {busy ? '...' : '📤 Send'}
+    </button>
+  );
+}
+function InspectionSendPanel({ type, records, orders }) {
+  const [open, setOpen] = useState(false);
+  const [picked, setPicked] = useState({});
+  const [busy, setBusy] = useState(false);
+  const list = records.filter((r) => r.type === type).slice().sort((a, b) =>
+    String(b.date || b.dateOfInspection || b.month || '').localeCompare(String(a.date || a.dateOfInspection || a.month || '')));
+  const label = (r) => r.type === 'yard' ? `${r.site || ''} - ${fmtDate(r.date)}`
+    : r.type === 'fuelTank' ? `${r.unit || ''} - ${r.month || ''}`
+    : `Unit ${r.unit || ''} - ${fmtDate(r.date)}`;
+  const ids = Object.keys(picked).filter((k) => picked[k]);
+  const chosen = list.filter((r) => picked[r.id]);
+  return (
+    <div className="mb-3">
+      <button onClick={() => setOpen((x) => !x)} className="text-xs font-semibold px-3 py-2 rounded-lg"
+        style={{ background: COLORS.surface, color: COLORS.accent, border: `1px solid ${COLORS.accent}` }}>
+        📤 Send inspections {open ? '▲' : '▼'}
+      </button>
+      {open && (
+        <div className="rounded-lg p-3 mt-2" style={{ border: `1px solid ${COLORS.line}`, background: COLORS.surface }}>
+          {list.length === 0 ? <p className="text-xs" style={{ color: COLORS.inkDim }}>Nothing on file yet.</p> : (
+            <>
+              <div className="flex gap-3 mb-2">
+                <button className="text-xs underline" style={{ color: COLORS.accent }} onClick={() => setPicked(Object.fromEntries(list.map((r) => [r.id, true])))}>Select all</button>
+                <button className="text-xs underline" style={{ color: COLORS.inkDim }} onClick={() => setPicked({})}>Clear</button>
+              </div>
+              <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+                {list.map((r) => (
+                  <label key={r.id} className="flex items-center gap-2 py-1.5 text-sm">
+                    <input type="checkbox" checked={!!picked[r.id]} onChange={(e) => setPicked((p) => ({ ...p, [r.id]: e.target.checked }))} />
+                    <span className="flex-1">{label(r)}</span>
+                    {inspectionRecordNeedsAttention(r) && <span className="text-xs" style={{ color: '#E07A5F' }}>⚠️</span>}
+                  </label>
+                ))}
+              </div>
+              <button
+                disabled={busy || chosen.length === 0}
+                onClick={async () => { setBusy(true); try { await sendInspectionsPdf(chosen, orders); } catch (e) { alert('Could not make the PDF: ' + (e.message || e)); } setBusy(false); }}
+                className="mt-3 text-xs font-semibold px-3 py-2 rounded-lg"
+                style={{ background: COLORS.accent, color: COLORS.bg, opacity: chosen.length === 0 ? 0.5 : 1 }}
+              >
+                {busy ? 'Building PDF...' : `📤 Send ${chosen.length || ''} selected`}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 function PrintableInspectionItemRows({ entries }) {
   const statusLabel = (status) => status === 'reqAtt' ? 'Req. Att.' : status === 'notOk' ? 'Not OK' : status === 'na' ? 'N/A' : status === 'ok' ? 'OK' : '—';
   return (
@@ -10789,13 +10944,14 @@ function YardInspectionDetail({ record, isAdmin, onReview, onUpdateItem, onDelet
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <div className="flex items-center justify-between mb-3 no-print">
         <button onClick={onBack} className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>← Back to list</button>
+<div className="flex gap-2"><SendInspectionButton record={record} orders={{ yard: sectionOrders }} />
         <button
           onClick={() => window.print()}
           className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-1.5 rounded-lg"
           style={{ color: COLORS.accent, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}
         >
           🖨️ Export
-        </button>
+        </button></div>
       </div>
       <PrintPortal>
         <PrintableYardInspection record={record} sectionOrders={sectionOrders} />
@@ -11068,13 +11224,14 @@ function VehicleInspectionDetail({ record, isAdmin, onReview, onUpdateItem, onDe
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <div className="flex items-center justify-between mb-3 no-print">
         <button onClick={onBack} className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>← Back to list</button>
+<div className="flex gap-2"><SendInspectionButton record={record} orders={{ vehicle: itemOrder }} />
         <button
           onClick={() => window.print()}
           className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-1.5 rounded-lg"
           style={{ color: COLORS.accent, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}
         >
           🖨️ Export
-        </button>
+        </button></div>
       </div>
       <PrintPortal>
         <PrintableVehicleInspection record={record} itemOrder={itemOrder} />
@@ -11306,13 +11463,14 @@ function EquipmentInspectionDetail({ record, isAdmin, onReview, onUpdateItem, on
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <div className="flex items-center justify-between mb-3 no-print">
         <button onClick={onBack} className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>← Back to list</button>
+<div className="flex gap-2"><SendInspectionButton record={record} orders={{ equipment: itemOrder }} />
         <button
           onClick={() => window.print()}
           className="font-display text-xs uppercase tracking-wider font-semibold px-3 py-1.5 rounded-lg"
           style={{ color: COLORS.accent, background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}
         >
           🖨️ Export
-        </button>
+        </button></div>
       </div>
       <PrintPortal>
         <PrintableEquipmentInspection record={record} itemOrder={itemOrder} />
@@ -25518,6 +25676,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               expanded={inspectionsExpanded}
               onToggle={() => setInspectionsExpanded((x) => !x)}
             >
+              {safetyInspectionType && !viewingSafetyInspectionId && !editingFuelTankUnit && !newYardInspectionOpen && !newVehicleInspectionOpen && !newEquipmentInspectionOpen && (
+                <InspectionSendPanel type={safetyInspectionType} records={safetyInspections} orders={inspectionChecklistOrder} />
+              )}
               {!safetyInspectionType ? (
                 <div className="space-y-2">
                   {SAFETY_INSPECTION_TYPES.map((type) => {
