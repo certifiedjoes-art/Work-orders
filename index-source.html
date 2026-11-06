@@ -16545,6 +16545,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   };
   const hasAltRole = (name) => altListFor(name).length > 0;
   const jobTypeForValue = (value) => (value === '__mechanic__' ? 'mechanic' : jobTypeForUnit(value, unitTypes));
+  // The oil-overdue banner is for mechanics only: whoever is signed in and working as a mechanic
+  // today (their assigned unit isn't a production machine, or they picked Mechanic as today's job).
+  const oilBannerUnits = (currentMechanic && (todaysJobChoice ? jobTypeForValue(todaysJobChoice) : jobTypeFor(currentMechanic)) === 'mechanic') ? oilOverdueUnits : [];
   // The full list of options someone with alternates can choose from today
   // — their primary first, then each configured alternate — each resolved
   // to a real label and job type, ready to drive a dropdown directly.
@@ -19934,7 +19937,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         </svg>
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
+        <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -20240,7 +20243,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         <FireworksOverlay show={showFireworks} />
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
+        <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -20550,7 +20553,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         <FireworksOverlay show={showFireworks} />
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
+        <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -21149,7 +21152,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
+        <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <SidebarMenu
           show={showSidebar}
           onClose={() => setShowSidebar(false)}
@@ -21559,7 +21562,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
+        <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <div className="max-w-3xl mx-auto">
           <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
             {t('backToBoard')}
@@ -22023,7 +22026,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
+        <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <SidebarMenu
           show={showSidebar}
           onClose={() => setShowSidebar(false)}
@@ -23174,7 +23177,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
+        <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <SidebarMenu
           show={showSidebar}
           onClose={() => setShowSidebar(false)}
@@ -23430,7 +23433,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
+        <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <SidebarMenu
           show={showSidebar}
           onClose={() => setShowSidebar(false)}
@@ -23559,7 +23562,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
+        <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <div className="max-w-2xl mx-auto">
           <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
             {t('backToBoard')}
@@ -24747,7 +24750,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
+        <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <div className="max-w-3xl mx-auto">
           <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
             {t('backToBoard')}
@@ -26795,7 +26798,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         <FireworksOverlay show={showFireworks} />
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
+        <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -26946,7 +26949,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         <FireworksOverlay show={showFireworks} />
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
+        <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -27064,7 +27067,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         <FireworksOverlay show={showFireworks} />
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
+        <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
