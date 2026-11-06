@@ -13101,7 +13101,7 @@ function PrintableDriverLog({ log, driverName }) {
         {(log.odometerStart || log.odometerEnd) && (
           <div style={{ fontSize: 12, textAlign: 'right', color: '#555' }}>
             {log.odometerStart && <p>Odometer start: {log.odometerStart}</p>}
-            {log.odometerEnd && <p>Odometer end: {log.odometerEnd}</p>}
+            {log.odometerEnd && <p>Odometer end: {log.odometerEnd}{log.odometerEndFromNextLog ? " (from next log's start)" : ''}</p>}
           </div>
         )}
       </div>
@@ -18151,6 +18151,45 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setEditingDriverLogId(null);
     return true;
   };
+  // One-time clean-up for OLD logs that were closed with no ending odometer
+  // (new logs now get theirs from Samsara). For each such log, take the START
+  // odometer of the next log — same truck if the log has one on record, else the
+  // same driver — and use it as this log's end. Never touches a log that already
+  // has an ending odometer, and skips anything that would make the end lower
+  // than the start. Filled-in values are flagged so they read as "from next
+  // log's start" rather than as something recorded at the time.
+  const missingEndOdometerFixes = () => {
+    const num = (v) => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+    const sorted = driverLogs.slice().sort((a, b) => new Date(a.start) - new Date(b.start));
+    const fixes = [];
+    sorted.forEach((log) => {
+      if (!log.end || (log.odometerEnd !== undefined && log.odometerEnd !== null && String(log.odometerEnd).trim() !== '')) return;
+      const startOdo = num(log.odometerStart);
+      const later = sorted.filter((o) => o.id !== log.id && new Date(o.start) > new Date(log.start) && num(o.odometerStart) != null);
+      const sameTruck = log.unit ? later.find((o) => o.unit === log.unit) : null;
+      const next = sameTruck || later.find((o) => o.driver === log.driver);
+      if (!next) return;
+      const endOdo = num(next.odometerStart);
+      if (startOdo != null && endOdo < startOdo) return;
+      fixes.push({ log, endOdo, next, basis: sameTruck ? 'same truck' : 'same driver' });
+    });
+    return fixes;
+  };
+  const fillMissingEndOdometers = async () => {
+    const fixes = missingEndOdometerFixes();
+    if (fixes.length === 0) { alert('No old logs need an ending odometer filled in.'); return; }
+    const lines = fixes.slice(0, 12).map((f) => `${f.log.driver} · ${fmtDate(f.log.start)} → ${f.endOdo} (start of ${fmtDate(f.next.start)}, ${f.basis})`).join('\n');
+    if (!window.confirm(`Fill in the missing ending odometer on ${fixes.length} old log${fixes.length === 1 ? '' : 's'} using the next log's starting odometer?\n\n${lines}${fixes.length > 12 ? '\n…and ' + (fixes.length - 12) + ' more' : ''}`)) return;
+    const patchById = {};
+    fixes.forEach((f) => { patchById[f.log.id] = { odometerEnd: String(f.endOdo), odometerEndFromNextLog: true }; });
+    const next = driverLogs.map((l) => (patchById[l.id] ? { ...l, ...patchById[l.id] } : l));
+    setDriverLogs(next);
+    cacheSet('driverLogs', next);
+    for (const id of Object.keys(patchById)) {
+      await queueWrite('driverLogs', { kind: 'patch', entryId: id, patch: patchById[id] });
+    }
+    alert(`Filled in ${fixes.length} ending odometer${fixes.length === 1 ? '' : 's'}.`);
+  };
   const deleteDriverLog = async (logId) => {
     const log = driverLogs.find((l) => l.id === logId);
     await deleteOneDriverLog(logId);
@@ -22653,6 +22692,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               renewalStatus={permitRenewalStatus}
             />
           </div>
+          {isAdmin && (() => {
+            const n = missingEndOdometerFixes().length;
+            if (n === 0) return null;
+            return (
+              <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+                <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>{n} old log{n === 1 ? ' has' : 's have'} no ending odometer. Fill each from the next log's starting odometer (you'll see the list first).</p>
+                <Btn variant="ghost" onClick={fillMissingEndOdometers}>Fill missing end odometers ({n})</Btn>
+              </div>
+            );
+          })()}
           {driverNames.length > 0 && (
             <div className="mb-4">
               <p className="font-display text-xs font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Drivers</p>
