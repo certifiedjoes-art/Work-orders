@@ -8174,14 +8174,16 @@ function PreTripInspectionDetail({ inspection, onDelete }) {
   );
 }
 
-function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel, units, unitTypes }) {
-  const [unitsData, setUnitsData] = useState([
+function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel, units, unitTypes, trailerOnly }) {
+  // trailerOnly: a trailer got switched midday — inspect just the trailer and record it as its own
+  // inspection (it never touches the truck's 24-hour pre-trip).
+  const [unitsData, setUnitsData] = useState(trailerOnly ? [] : [
     { unitName: truckUnitName, unitType: 'truck', items: TRUCK_PRETRIP_ITEMS.map((def) => ({ ...def, status: null, severity: null, note: '', photos: [] })) },
   ]);
   const [expandedUnitIndex, setExpandedUnitIndex] = useState(0);
-  const [addingTrailer, setAddingTrailer] = useState(false);
+  const [addingTrailer, setAddingTrailer] = useState(!!trailerOnly);
   const [newTrailerName, setNewTrailerName] = useState('');
-  const [trailerEntryMode, setTrailerEntryMode] = useState('dropdown');
+  const [trailerEntryMode, setTrailerEntryMode] = useState((units || []).some((u) => u && (unitTypes || {})[slugForUnit(u)] === 'trailer') ? 'dropdown' : 'manual');
 
   // Trailers already added to this inspection are dropped from the picker so
   // the same one can't be added twice.
@@ -8220,14 +8222,17 @@ function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel, unit
   const allAnswered = unitsData.every((u) => u.items.every((item) => item.status !== null));
   const deficienciesMissingSeverity = unitsData.some((u) => u.items.some((item) => item.status === 'deficiency' && !item.severity));
   const hasMajor = unitsData.some((u) => u.items.some((item) => item.status === 'deficiency' && item.severity === 'major'));
-  const readyToSign = allAnswered && !deficienciesMissingSeverity;
+  const readyToSign = unitsData.length > 0 && allAnswered && !deficienciesMissingSeverity;
 
   return (
     <div className="p-5 font-body" style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }}>
       <div className="flex items-center justify-between mb-4">
-        <h1 className="font-display text-xl font-bold">Pre-Trip Inspection</h1>
+        <h1 className="font-display text-xl font-bold">{trailerOnly ? 'Trailer Pre-Trip' : 'Pre-Trip Inspection'}</h1>
         <button onClick={onCancel} className="text-2xl" style={{ color: COLORS.inkDim }}>✕</button>
       </div>
+      {trailerOnly && unitsData.length === 0 && (
+        <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>Switched trailers? Pick the trailer you just hooked up, inspect it and sign. It is recorded as its own inspection.</p>
+      )}
 
       {unitsData.map((u, unitIdx) => (
         <PreTripUnitSection
@@ -8279,7 +8284,7 @@ function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel, unit
           )}
           <div className="flex gap-2">
             <Btn onClick={addTrailer} disabled={!newTrailerName.trim()}>Add trailer</Btn>
-            <Btn variant="ghost" onClick={() => { setAddingTrailer(false); setNewTrailerName(''); setTrailerEntryMode('dropdown'); }}>Cancel</Btn>
+            <Btn variant="ghost" onClick={() => { if (trailerOnly && unitsData.length === 0) { onCancel(); return; } setAddingTrailer(false); setNewTrailerName(''); setTrailerEntryMode('dropdown'); }}>Cancel</Btn>
           </div>
         </div>
       ) : (
@@ -8717,7 +8722,7 @@ function DriverRecentLogsSection({ driver, allLogs, onBackfillOffDuty }) {
   );
 }
 
-function DriverLogSection({ liveOdometer, driver, openLog, allLogs, onStart, onAddStatus, onEnd, onUpdateStatusChange, hasValidInspection, inspectionHoursRemaining, onOpenPreTrip, onOpenInspectionMode, isAdmin, documents, onAddDocument, onDeleteDocument, onRenameDocument, uploadingDocument, renewalStatus }) {
+function DriverLogSection({ liveOdometer, driver, openLog, allLogs, onStart, onAddStatus, onEnd, onUpdateStatusChange, hasValidInspection, inspectionHoursRemaining, onOpenPreTrip, onOpenTrailerPreTrip, onOpenInspectionMode, isAdmin, documents, onAddDocument, onDeleteDocument, onRenameDocument, uploadingDocument, renewalStatus }) {
   const [startingLog, setStartingLog] = useState(false);
   const [odometerStartDraft, setOdometerStartDraft] = useState('');
   const [pendingStatus, setPendingStatus] = useState(null);
@@ -8824,6 +8829,7 @@ function DriverLogSection({ liveOdometer, driver, openLog, allLogs, onStart, onA
             )}
             <Btn onClick={() => setStartingLog(true)}>Start driver log</Btn>
             <button onClick={onOpenPreTrip} className="block w-full text-center text-xs underline mt-3" style={{ color: COLORS.inkDim }}>Redo pre-trip inspection</button>
+            <Btn variant="ghost" onClick={onOpenTrailerPreTrip} className="w-full mt-3">🔗 Switched trailers? Trailer pre-trip</Btn>
           </div>
         )
       ) : (
@@ -8898,6 +8904,10 @@ function DriverLogSection({ liveOdometer, driver, openLog, allLogs, onStart, onA
                 </div>
               ))}
             </div>
+          )}
+
+          {!endingLog && (
+            <Btn variant="ghost" onClick={onOpenTrailerPreTrip} className="w-full mb-3">🔗 Switched trailers? Trailer pre-trip</Btn>
           )}
 
           {endingLog ? (
@@ -14600,6 +14610,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [showAllMechanics, setShowAllMechanics] = useState(false);
   const [todaysJobChoice, setTodaysJobChoice] = useState(null); // null (use primary) | a specific unit name | '__mechanic__' — only relevant for people with alternates set; resets naturally on reload, which is fine since it's re-asked whenever there's no open shift yet
   const [showPreTripForm, setShowPreTripForm] = useState(false);
+  const [preTripTrailerOnly, setPreTripTrailerOnly] = useState(false);
   const [showInspectionMode, setShowInspectionMode] = useState(false);
   const [showProductionClockOutReview, setShowProductionClockOutReview] = useState(false);
   const [showSwitchMachine, setShowSwitchMachine] = useState(false);
@@ -16704,7 +16715,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // (or an empty) unit name, so it silently never shows up under the
   // truck it was actually done on. Re-fetching fresh right before opening
   // the form — same pattern as login — closes that window.
-  const openPreTripForm = async () => {
+  const openPreTripForm = async (trailerOnly) => {
     try {
       const [uaSnap, utSnap] = await Promise.all([
         firebase.database().ref('unitAssignments').once('value'),
@@ -16720,6 +16731,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       // Offline — nothing fresher available than what's already loaded;
       // fall back to whatever's currently in state/cache.
     }
+    setPreTripTrailerOnly(trailerOnly === true); // a click event passed in by mistake counts as false
     setShowPreTripForm(true);
   };
 
@@ -20831,10 +20843,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           truckUnitName={effectiveUnit}
           units={units}
           unitTypes={unitTypes}
-          onCancel={() => setShowPreTripForm(false)}
+          trailerOnly={preTripTrailerOnly}
+          onCancel={() => { setShowPreTripForm(false); setPreTripTrailerOnly(false); }}
           onSubmit={async (unitsData, signature) => {
             await submitPreTripInspection(unitsData, signature);
             setShowPreTripForm(false);
+            setPreTripTrailerOnly(false);
           }}
         />
       );
@@ -21226,6 +21240,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 return 24 - elapsedHrs;
               })()}
               onOpenPreTrip={openPreTripForm}
+              onOpenTrailerPreTrip={() => openPreTripForm(true)}
               onOpenInspectionMode={() => setShowInspectionMode(true)}
               isAdmin={isAdmin}
               documents={driverDocuments}
