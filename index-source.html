@@ -2522,6 +2522,20 @@ function LowVoltageBanner({ lowUnits }) {
   );
 }
 
+// Red banner on every screen while any machine is past its oil-change interval,
+// so it stays in front of the mechanics until the work order is closed.
+function OilOverdueBanner({ overdueUnits }) {
+  if (!overdueUnits || overdueUnits.length === 0) return null;
+  return (
+    <div
+      className="font-display font-bold text-sm uppercase tracking-wide text-center py-2.5 px-4 mb-4 rounded-lg"
+      style={{ background: COLORS.danger, color: '#1B1F19' }}
+    >
+      🛢️ Oil change overdue — {overdueUnits.map((u) => `${u.name} (${u.over > 0 ? '+' + u.over + ' hrs' : 'due now'})`).join(', ')}
+    </div>
+  );
+}
+
 function PinModalOverlay({ pinModal, pinInput, setPinInput, pinError, onSubmit, onCancel, onForgot, t }) {
   const tr = t || ((k) => translations.en[k] || k);
   if (!pinModal) return null;
@@ -16488,6 +16502,19 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       return isLowVoltage(diag.voltage, is12VoltUnit(unit)) ? { name: unit, voltage: diag.voltage } : null;
     })
     .filter(Boolean);
+  // Machines past the oil-change interval (same test the auto work order uses). Clears as soon
+  // as the oil change work order is closed and the new baseline is recorded.
+  const oilOverdueUnits = units
+    .map((unit) => {
+      const slug = slugForUnit(unit);
+      const diag = samsaraDiagnostics[slug];
+      const baseline = oilChangeBaselines[slug];
+      if (!diag || diag.hours == null || baseline == null) return null;
+      const interval = productionSettings.oilChangeIntervalHours || DEFAULT_OIL_CHANGE_INTERVAL_HOURS;
+      if (!isOilChangeDue(diag.hours, baseline, interval)) return null;
+      return { name: unit, over: Math.round(diag.hours - baseline - interval) };
+    })
+    .filter(Boolean);
   // Job type is now fully derived from the unit itself — no separate stored
   // choice. Only an actual production-type unit makes someone 'production';
   // a truck/pickup/trailer/light tower (or nothing at all) is 'mechanic' —
@@ -19907,6 +19934,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         </svg>
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
+        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -20212,6 +20240,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         <FireworksOverlay show={showFireworks} />
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
+        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -20521,6 +20550,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         <FireworksOverlay show={showFireworks} />
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
+        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -21119,6 +21149,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
+        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
         <SidebarMenu
           show={showSidebar}
           onClose={() => setShowSidebar(false)}
@@ -21528,6 +21559,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
+        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
         <div className="max-w-3xl mx-auto">
           <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
             {t('backToBoard')}
@@ -21991,6 +22023,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
+        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
         <SidebarMenu
           show={showSidebar}
           onClose={() => setShowSidebar(false)}
@@ -23141,6 +23174,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
+        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
         <SidebarMenu
           show={showSidebar}
           onClose={() => setShowSidebar(false)}
@@ -23396,6 +23430,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
+        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
         <SidebarMenu
           show={showSidebar}
           onClose={() => setShowSidebar(false)}
@@ -23524,6 +23559,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
+        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
         <div className="max-w-2xl mx-auto">
           <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
             {t('backToBoard')}
@@ -24711,6 +24747,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
+        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
         <div className="max-w-3xl mx-auto">
           <button onClick={() => setScreen(landingScreenFor(currentMechanic))} className="font-display text-xs uppercase tracking-wider mb-6 focus:outline-none hover:opacity-70 transition-opacity" style={{ color: COLORS.inkDim }}>
             {t('backToBoard')}
@@ -26758,6 +26795,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         <FireworksOverlay show={showFireworks} />
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
+        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -26908,6 +26946,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         <FireworksOverlay show={showFireworks} />
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
+        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
@@ -27025,6 +27064,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         <FireworksOverlay show={showFireworks} />
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
+        <OilOverdueBanner overdueUnits={oilOverdueUnits} />
         <PinModalOverlay
           pinModal={pinModal}
           pinInput={pinInput}
