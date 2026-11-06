@@ -320,6 +320,78 @@
      CONFIG. See the setup instructions provided alongside this file.
      ==================================================================== -->
 <script>
+  // ---- "View as" read-only guard (Diagnostics page) ----
+  // While window.__viewAs is set, every way this page can save something is turned into a no-op:
+  // Firebase database writes, Storage uploads, signing out, and any non-GET network call
+  // (e.g. emails / PDF sends). Reading still works, so the owner sees exactly what the employee sees.
+  window.__viewAs = null;
+  function installViewAsGuard(fb) {
+    const note = () => { try { if (window.__viewAsBar) window.__viewAsBar.flash(); } catch (e) { /* ignore */ } };
+    const wrap = (proto, name, fallback) => {
+      if (!proto || typeof proto[name] !== 'function') return;
+      const orig = proto[name];
+      proto[name] = function () {
+        if (window.__viewAs) { note(); return fallback.call(this, orig, arguments); }
+        return orig.apply(this, arguments);
+      };
+    };
+    try {
+      const R = fb.database.Reference.prototype;
+      ['set', 'update', 'remove', 'setPriority', 'setWithPriority'].forEach((m) => wrap(R, m, () => Promise.resolve()));
+      // push() with a value writes; push() with no value only makes a new key, so keep the key and skip the write.
+      wrap(R, 'push', function (orig) { return orig.call(this); });
+      wrap(R, 'transaction', () => Promise.resolve({ committed: false, snapshot: { val: () => null, exists: () => false } }));
+    } catch (e) { /* ignore */ }
+    try {
+      const S = fb.storage.Reference.prototype;
+      ['put', 'putString'].forEach((m) => wrap(S, m, () => Promise.reject(new Error('Read-only preview: nothing was uploaded'))));
+    } catch (e) { /* ignore */ }
+    try { wrap(fb.auth.Auth.prototype, 'signOut', () => Promise.resolve()); } catch (e) { /* ignore */ }
+    try {
+      const origFetch = window.fetch;
+      window.fetch = function (input, init) {
+        const method = ((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+        if (window.__viewAs && method !== 'GET' && method !== 'HEAD') {
+          note();
+          return Promise.resolve(new Response(JSON.stringify({ error: 'Read-only preview: nothing was sent' }), { status: 403, headers: { 'Content-Type': 'application/json' } }));
+        }
+        return origFetch.apply(this, arguments);
+      };
+    } catch (e) { /* ignore */ }
+  }
+  // The orange bar shown on every screen while previewing as someone. Plain DOM so it sits above all screens.
+  window.__viewAsBar = (function () {
+    let bar = null, msg = null, timer = null;
+    return {
+      show(name) {
+        if (!bar) {
+          bar = document.createElement('div');
+          bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483000;height:40px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 12px;background:#E8622C;color:#fff;font:600 13px sans-serif;';
+          msg = document.createElement('span');
+          const btn = document.createElement('button');
+          btn.textContent = 'Exit preview';
+          btn.style.cssText = 'background:#fff;color:#E8622C;border:0;border-radius:6px;padding:5px 10px;font:700 12px sans-serif;';
+          btn.onclick = () => { if (window.__exitViewAs) window.__exitViewAs(); };
+          bar.appendChild(msg); bar.appendChild(btn);
+        }
+        msg.textContent = '👁 Viewing as ' + name + ' · read-only';
+        if (!bar.parentNode) document.body.appendChild(bar);
+        document.body.style.paddingTop = '40px';
+      },
+      flash() {
+        if (!msg) return;
+        const name = window.__viewAs || '';
+        msg.textContent = '🚫 Preview only: not saved';
+        clearTimeout(timer);
+        timer = setTimeout(() => { if (window.__viewAs) msg.textContent = '👁 Viewing as ' + name + ' · read-only'; }, 2500);
+      },
+      hide() {
+        if (bar && bar.parentNode) bar.parentNode.removeChild(bar);
+        document.body.style.paddingTop = '';
+      },
+    };
+  })();
+
   const firebaseConfig = {
     apiKey: "AIzaSyAcKWZYgawRHLBIqbUWPPYHmP812_4gODI",
     authDomain: "harder-contracting.firebaseapp.com",
@@ -339,6 +411,7 @@
       'and paste in your project\'s config values. See the setup guide for step-by-step instructions.</p></div></div>';
   } else {
     firebase.initializeApp(firebaseConfig);
+    installViewAsGuard(firebase);
     window.__persistenceStatus = 'pending';
     firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL)
       .then(() => { window.__persistenceStatus = 'ok'; })
@@ -14557,6 +14630,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   }, [productionSettings.sessionHours]);
   useEffect(() => {
     try {
+      if (window.__viewAs) return; // previewing as someone: never store them as the signed-in person
       if (currentMechanic) {
         sessionHadUserRef.current = true;
         localStorage.setItem('sessionMechanic', currentMechanic);
@@ -16269,6 +16343,31 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   };
   const isForeman = !!currentMechanic && roleFor(currentMechanic) === 'foreman';
   const isSafety = !!currentMechanic && roleFor(currentMechanic) === 'safety';
+  // ---- Diagnostics "View as": open the app exactly as another employee sees it, read-only ----
+  const viewAsSavedRef = useRef(null);
+  const startViewAs = async (name) => {
+    if (currentMechanic !== DIAGNOSTICS_OWNER || !name || name === currentMechanic || window.__viewAs) return;
+    viewAsSavedRef.current = { owner: currentMechanic, todaysJobChoice };
+    window.__viewAs = name;          // turn the write-blocking guard on before anything else changes
+    window.__viewAsBar.show(name);
+    setTodaysJobChoice(null);
+    setCurrentMechanic(name);
+    setScreen(await freshLandingScreenFor(name));
+  };
+  const exitViewAs = () => {
+    const saved = viewAsSavedRef.current;
+    if (!saved) return;
+    viewAsSavedRef.current = null;
+    window.__viewAs = null;          // guard off first, so the owner's own session is restored normally
+    window.__viewAsBar.hide();
+    setTodaysJobChoice(saved.todaysJobChoice);
+    setCurrentMechanic(saved.owner);
+    setScreen('diagnostics');
+  };
+  useEffect(() => {
+    window.__exitViewAs = exitViewAs;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
   const setRoleFor = async (name, role) => {
     await firebase.database().ref('roles/' + slugForMechanic(name)).set(role);
     // /admins is the actual access-control source of truth everywhere else
@@ -26894,7 +26993,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             ← Back
           </button>
           <h1 className="font-display text-3xl font-bold mb-1">🩺 Diagnostics</h1>
-          <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>What each person gets when they sign in: their home screen, ☰ menu, unit, job and today's status. Read-only, and only you can see this page.</p>
+          <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>What each person gets when they sign in: their home screen, ☰ menu, unit, job and today's status. Tap a name, then "View the app as" to open the real screens exactly as they see them. Nothing you do there is saved, and only you can see this page.</p>
           <TextInput value={diagSearch} onChange={(e) => setDiagSearch(e.target.value)} placeholder="Search a name" className="w-full mb-4" />
           <div className="space-y-2">
             {people.map((n) => {
@@ -26925,6 +27024,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           <span style={{ color: COLORS.inkDim }}>Pre-trip on {d.unit}: </span>
                           {d.valid ? `valid, about ${Math.max(0, Math.round(d.hrsLeft))} h left` : 'none in the last 24 h'}
                         </p>
+                      )}
+                      {n !== currentMechanic && (
+                        <Btn onClick={() => startViewAs(n)} className="w-full">👁 View the app as {n} (read-only)</Btn>
                       )}
                       <p className="text-xs" style={{ color: COLORS.inkDim }}>If today's job was switched in the app ("Working as today"), their home screen and menu can differ from this for that day.</p>
                     </div>
