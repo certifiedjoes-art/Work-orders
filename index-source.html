@@ -2531,7 +2531,7 @@ function OilOverdueBanner({ overdueUnits }) {
       className="font-display font-bold text-sm uppercase tracking-wide text-center py-2.5 px-4 mb-4 rounded-lg"
       style={{ background: COLORS.danger, color: '#1B1F19' }}
     >
-      🛢️ Oil change overdue — {overdueUnits.map((u) => `${u.name} (${u.over > 0 ? '+' + u.over + ' hrs' : 'due now'})`).join(', ')}
+      🛢️ Oil change overdue — {overdueUnits.map((u) => `${u.name} (${u.over > 0 ? '+' + u.over + (u.days ? ' days' : ' hrs') : 'due now'})`).join(', ')}
     </div>
   );
 }
@@ -5921,6 +5921,24 @@ async function saveFuelTankSubcontractors(list) {
 // oilChangeDates/{slug} = 'YYYY-MM-DD'.
 async function saveOilChangeDate(slug, dateStr) {
   await firebase.database().ref('oilChangeDates/' + slug).set(dateStr || null);
+}
+// Time-based oil reminder for motorized support units with no Samsara hours (genset, light tower):
+// oilChangeReminders/{slug} = { on: true, days: 14 }, and the optional hours the mechanic typed
+// at the last oil change (record only) in oilChangeManualHours/{slug}.
+async function saveOilReminder(slug, cfg) {
+  await firebase.database().ref('oilChangeReminders/' + slug).set(cfg || null);
+}
+async function saveOilManualHours(slug, hours) {
+  await firebase.database().ref('oilChangeManualHours/' + slug).set(hours == null ? null : hours);
+}
+// Unit types that can use the time-based oil reminder (never trailers — they have no engine).
+const TIMED_OIL_TYPES = ['genset', 'lightTower'];
+const DEFAULT_OIL_REMINDER_DAYS = 14;
+const OIL_REMINDER_SOON_DAYS = 2;
+// Whole days between two YYYY-MM-DD strings (b minus a), done in UTC so DST never shifts it.
+function wholeDaysBetween(a, b) {
+  const pa = a.split('-').map(Number), pb = b.split('-').map(Number);
+  return Math.round((Date.UTC(pb[0], pb[1] - 1, pb[2]) - Date.UTC(pa[0], pa[1] - 1, pa[2])) / 86400000);
 }
 async function saveFuelTankReminderSettings(settings) {
   await firebase.database().ref('fuelTankReminderSettings').set(settings);
@@ -13969,20 +13987,42 @@ function OilBaselineEditor({ currentBaseline, currentHours, onSave }) {
 }
 
 
-// Date-only oil change tracker for equipment with no Samsara hours (e.g. a genset).
-function OilDateEditor({ currentDate, onSave }) {
-  const [draft, setDraft] = useState(currentDate || '');
+// Oil change editor for equipment with no Samsara hours (genset, light tower): date, optional hours
+// (record only), and an optional "remind me again in N days" switch that is off unless turned on.
+function ManualOilEditor({ currentDate, currentHours, reminder, onSave }) {
+  const [date, setDate] = useState(currentDate || '');
+  const [hours, setHours] = useState(currentHours != null ? String(currentHours) : '');
+  const [remindOn, setRemindOn] = useState(!!(reminder && reminder.on));
+  const [days, setDays] = useState(String((reminder && reminder.days) || DEFAULT_OIL_REMINDER_DAYS));
   const [saved, setSaved] = useState(false);
+  const save = (d) => {
+    if (!d) return;
+    onSave({ date: d, hours, remindOn, days });
+    setDate(d);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+  const inputStyle = { background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
   return (
-    <div className="flex gap-2">
-      <input
-        type="date"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        className="flex-1 rounded-lg px-3 py-2 text-sm"
-        style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
-      />
-      <Btn onClick={() => { if (draft) { onSave(draft); setSaved(true); setTimeout(() => setSaved(false), 2000); } }}>{saved ? 'Saved ✓' : 'Save'}</Btn>
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="flex-1 rounded-lg px-3 py-2 text-sm" style={inputStyle} />
+        <input type="number" inputMode="decimal" value={hours} onChange={(e) => setHours(e.target.value)} placeholder="Hours (optional)" className="w-36 rounded-lg px-3 py-2 text-sm" style={inputStyle} />
+      </div>
+      <label className="flex items-center gap-2 text-sm cursor-pointer">
+        <input type="checkbox" checked={remindOn} onChange={(e) => setRemindOn(e.target.checked)} />
+        <span>Remind me again in</span>
+        <input
+          type="number" inputMode="numeric" min="1" value={days} disabled={!remindOn}
+          onChange={(e) => setDays(e.target.value)}
+          className="w-16 rounded-lg px-2 py-1 text-sm text-center" style={{ ...inputStyle, opacity: remindOn ? 1 : 0.5 }}
+        />
+        <span>days</span>
+      </label>
+      <div className="flex gap-2">
+        <Btn onClick={() => save(date)}>{saved ? 'Saved ✓' : 'Save'}</Btn>
+        <Btn variant="ghost" onClick={() => { if (window.confirm('Record that the oil was changed today?')) save(localDateStr()); }}>Oil changed today</Btn>
+      </div>
     </div>
   );
 }
@@ -14188,6 +14228,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // Samsara hours whenever an order tagged oilChangeDue gets closed.
   const [oilChangeBaselines, setOilChangeBaselines] = useState(() => cacheGet('oilChangeBaselines', {}));
   const [oilChangeDates, setOilChangeDates] = useState(() => cacheGet('oilChangeDates', {}));
+  const [oilReminders, setOilReminders] = useState(() => cacheGet('oilChangeReminders', {}));
+  const [oilManualHours, setOilManualHours] = useState(() => cacheGet('oilChangeManualHours', {}));
   const [editingOilBaselineForUnit, setEditingOilBaselineForUnit] = useState(null);
   // Completion record for watch-only (noQuiz) job-hazard courses, which
   // don't produce a trainingRecords quiz entry — { [slug]: { [courseKey]: timestamp } }.
@@ -15374,7 +15416,19 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       setOilChangeBaselines(val);
       cacheSet('oilChangeBaselines', val);
     });
-    return () => { ref.off('value', on); dref.off('value', don); };
+    const rref = firebase.database().ref('oilChangeReminders');
+    const ron = rref.on('value', (snap) => {
+      const val = snap.val() || {};
+      setOilReminders(val);
+      cacheSet('oilChangeReminders', val);
+    });
+    const href = firebase.database().ref('oilChangeManualHours');
+    const hon = href.on('value', (snap) => {
+      const val = snap.val() || {};
+      setOilManualHours(val);
+      cacheSet('oilChangeManualHours', val);
+    });
+    return () => { ref.off('value', on); dref.off('value', don); rref.off('value', ron); href.off('value', hon); };
   }, []);
 
 
@@ -16279,6 +16333,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (!dateStr) return;
     await saveOilChangeDate(slugForUnit(unit), dateStr).catch(() => alert("Couldn't save that — check your signal and try again."));
   };
+  // Genset / light tower oil change: date, optional hours (record only), and the time-based
+  // reminder switch + days, all saved together from the one editor.
+  const setManualOilChange = async (unit, { date, hours, remindOn, days }) => {
+    if (!date) return;
+    const slug = slugForUnit(unit);
+    const fail = () => alert("Couldn't save that — check your signal and try again.");
+    await saveOilChangeDate(slug, date).catch(fail);
+    const h = parseFloat(hours);
+    if (!isNaN(h)) await saveOilManualHours(slug, h).catch(fail);
+    const d = parseInt(days, 10);
+    await saveOilReminder(slug, remindOn ? { on: true, days: d > 0 ? d : DEFAULT_OIL_REMINDER_DAYS } : null).catch(fail);
+  };
+  const setOilReminderOnly = async (unit, remindOn, days) => {
+    const d = parseInt(days, 10);
+    await saveOilReminder(slugForUnit(unit), remindOn ? { on: true, days: d > 0 ? d : DEFAULT_OIL_REMINDER_DAYS } : null)
+      .catch(() => alert("Couldn't save that — check your signal and try again."));
+  };
   const setOilChangeBaseline = async (unit, hours) => {
     const slug = slugForUnit(unit);
     const val = parseFloat(hours);
@@ -16504,9 +16575,26 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     .filter(Boolean);
   // Machines past the oil-change interval (same test the auto work order uses). Clears as soon
   // as the oil change work order is closed and the new baseline is recorded.
+  // Time-based oil reminder (genset / light tower with no Samsara hours). Returns null unless the
+  // unit is an eligible type, has no Samsara hours, has the reminder switched on and a last-change date.
+  const timedOilInfo = (unit) => {
+    const slug = slugForUnit(unit);
+    if (!TIMED_OIL_TYPES.includes(unitTypes[slug])) return null;
+    const diag = samsaraDiagnostics[slug];
+    if (diag && diag.hours != null) return null;
+    const cfg = oilReminders[slug];
+    const date = oilChangeDates[slug];
+    if (!cfg || !cfg.on || !date) return null;
+    const days = Number(cfg.days) > 0 ? Number(cfg.days) : DEFAULT_OIL_REMINDER_DAYS;
+    const daysSince = wholeDaysBetween(date, localDateStr());
+    const daysLeft = days - daysSince;
+    return { slug, date, days, daysSince, daysLeft, overdue: daysLeft <= 0, soon: daysLeft > 0 && daysLeft <= OIL_REMINDER_SOON_DAYS };
+  };
   const oilOverdueUnits = units
     .map((unit) => {
       const slug = slugForUnit(unit);
+      const timed = timedOilInfo(unit);
+      if (timed) return timed.overdue ? { name: unit, over: -timed.daysLeft, days: true } : null;
       const diag = samsaraDiagnostics[slug];
       const baseline = oilChangeBaselines[slug];
       if (!diag || diag.hours == null || baseline == null) return null;
@@ -19614,6 +19702,45 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [samsaraDiagnostics, oilChangeBaselines, units.join(','), productionSettings.oilChangeIntervalHours]);
 
+  // Same idea for genset / light tower units on the time-based reminder: once the number of days
+  // is up, create the one oil change work order for this cycle (fixed id built from the last-change
+  // date, so two phones writing at once overwrite each other instead of making two).
+  useEffect(() => {
+    if (!isAdmin && !isForeman) return;
+    units.forEach((unit) => {
+      const timed = timedOilInfo(unit);
+      if (!timed || !timed.overdue) return;
+      if (orders.some((o) => o.unit === unit && o.oilChangeDue && o.status !== 'Done')) return;
+      const autoId = `oil-due-${timed.slug}-${timed.date}`;
+      if (orders.some((o) => o.id === autoId)) return;
+      if (oilAutoInFlight.current[autoId]) return;
+      oilAutoInFlight.current[autoId] = true;
+      (async () => {
+        const descriptionField = await buildLocalizedField(
+          `Oil change due — ${timed.daysSince} days since last change (time-based reminder, ${timed.days} days).`,
+          lang
+        );
+        await saveOneOrder({
+          id: autoId,
+          unit,
+          description: descriptionField,
+          workedOnBy: [],
+          hours: '',
+          dueDate: '',
+          dateCreated: localDateStr(),
+          status: 'Open',
+          notes: [],
+          createdBy: 'Oil reminder',
+          onBoard: true,
+          media: [],
+          oilChangeDue: true,
+          autoGenerated: true,
+        });
+      })();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oilReminders, oilChangeDates, samsaraDiagnostics, unitTypes, units.join(','), orders.length]);
+
   // Tidies up duplicate auto-generated oil change orders from before the one-per-cycle fix:
   // keeps the oldest open one per unit and removes the untouched extras.
   useEffect(() => {
@@ -19740,6 +19867,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const currentHours = samsaraDiagnostics[slug] && samsaraDiagnostics[slug].hours;
       if (currentHours != null && !isNaN(parseFloat(currentHours))) {
         await setOilChangeBaseline(order.unit, currentHours);
+      } else if (TIMED_OIL_TYPES.includes(unitTypes[slug])) {
+        // No Samsara hours (genset / light tower): closing the work order counts as the oil change
+        // today, which also restarts the countdown if the time-based reminder is on.
+        await saveOilChangeDate(slug, localDateStr()).catch(() => {});
       }
     }
   };
@@ -23353,6 +23484,27 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         )}
                       </div>
                       )}
+                      {TIMED_OIL_TYPES.includes(unitTypes[slugForUnit(u)]) && !(samsaraDiagnostics[slugForUnit(u)] && samsaraDiagnostics[slugForUnit(u)].hours != null) ? (
+                      <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+                        <button
+                          onClick={() => setEditingOilBaselineForUnit(editingOilBaselineForUnit === u ? null : u)}
+                          className="text-xs font-display uppercase tracking-wider underline"
+                          style={{ color: COLORS.inkDim }}
+                        >
+                          🛢️ Last oil change: {oilChangeDates[slugForUnit(u)] || 'Not set'}{oilReminders[slugForUnit(u)] && oilReminders[slugForUnit(u)].on ? ` · reminder ${oilReminders[slugForUnit(u)].days} days` : ' · reminder off'}
+                        </button>
+                        {editingOilBaselineForUnit === u && (
+                          <div className="rounded-lg p-2 mt-2" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+                            <ManualOilEditor
+                              currentDate={oilChangeDates[slugForUnit(u)]}
+                              currentHours={oilManualHours[slugForUnit(u)]}
+                              reminder={oilReminders[slugForUnit(u)]}
+                              onSave={(v) => setManualOilChange(u, v)}
+                            />
+                          </div>
+                        )}
+                      </div>
+                      ) : (
                       <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${COLORS.line}` }}>
                         <button
                           onClick={() => setEditingOilBaselineForUnit(editingOilBaselineForUnit === u ? null : u)}
@@ -23371,6 +23523,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           </div>
                         )}
                       </div>
+                      )}
                       {unitTypes[slugForUnit(u)] && (
                       <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${COLORS.line}` }}>
                         <label className="flex items-center justify-between gap-2 text-xs cursor-pointer">
@@ -26673,10 +26826,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const slug = slugForUnit(u);
       const diag = samsaraDiagnostics[slug];
       // A genset has no Samsara unit, so it can't have hours — only the date of its last oil change.
-      if (unitTypes[slug] === 'genset') {
+      if (unitTypes[slug] === 'genset' || (unitTypes[slug] === 'lightTower' && !(diag && diag.hours != null))) {
         const d = oilChangeDates[slug] || '';
-        const days = d ? Math.max(0, Math.floor((Date.now() - new Date(d + 'T12:00:00').getTime()) / 86400000)) : null;
-        return { unit: u, slug, manual: true, date: d, days, cur: null, base: null, since: null, left: null, status: 'manual', hasOpenOrder: orders.some((o) => o.unit === u && o.oilChangeDue && o.status !== 'Done'), updatedAt: null };
+        const days = d ? Math.max(0, wholeDaysBetween(d, localDateStr())) : null;
+        const timed = timedOilInfo(u);
+        const status = timed ? (timed.overdue ? 'overdue' : timed.soon ? 'soon' : 'ok') : 'manual';
+        return { unit: u, slug, manual: true, date: d, days, timed, cur: null, base: null, since: null, left: null, status, hasOpenOrder: orders.some((o) => o.unit === u && o.oilChangeDue && o.status !== 'Done'), updatedAt: null };
       }
       const cur = num(diag && diag.hours);
       const base = num(oilChangeBaselines[slug]);
@@ -26737,7 +26892,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     <span className="text-right font-mono text-sm">{r.manual ? (r.date || '—') : fmtH(r.base)}</span>
                     <span className="text-right font-mono text-sm">{r.manual ? '—' : fmtH(r.cur)}</span>
                     <span className="text-right font-mono text-sm font-bold" style={{ color: st.color }}>
-                      {r.manual ? (r.days == null ? 'set date' : `${r.days} d ago`) : r.left == null ? '—' : r.left <= 0 ? `${fmtH(-r.left)} over` : `${fmtH(r.left)} h`}
+                      {r.manual ? (r.timed ? (r.timed.daysLeft <= 0 ? `${-r.timed.daysLeft} d over` : `${r.timed.daysLeft} d`) : (r.days == null ? 'set date' : `${r.days} d ago`)) : r.left == null ? '—' : r.left <= 0 ? `${fmtH(-r.left)} over` : `${fmtH(r.left)} h`}
                     </span>
                   </button>
                   {!open && r.status === 'soon' && (
@@ -26755,12 +26910,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       {r.manual && (
                         <div className="mb-1">
                           <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>
-                            No Samsara unit, so this is tracked by date only.{r.days != null ? ` Last oil change was ${r.days} day${r.days === 1 ? '' : 's'} ago.` : ''}
+                            No Samsara hours, so this is tracked by date.{r.days != null ? ` Last oil change was ${r.days} day${r.days === 1 ? '' : 's'} ago${oilManualHours[r.slug] != null ? ` (at ${oilManualHours[r.slug]} hrs)` : ''}.` : ''}
+                            {r.timed ? ` Reminder is on: due ${r.timed.days} days after each change.` : ' Time-based reminder is off.'}
                           </p>
-                          <OilDateEditor currentDate={r.date} onSave={(d) => setOilChangeDate(r.unit, d)} />
-                          <Btn variant="ghost" className="mt-2" onClick={() => { if (window.confirm(`Record that ${r.unit} had its oil changed today?`)) setOilChangeDate(r.unit, todayStr()); }}>
-                            Oil changed today
-                          </Btn>
+                          <ManualOilEditor
+                            key={`${r.slug}-${r.date}-${oilReminders[r.slug] ? oilReminders[r.slug].days : 'off'}`}
+                            currentDate={r.date}
+                            currentHours={oilManualHours[r.slug]}
+                            reminder={oilReminders[r.slug]}
+                            onSave={(v) => setManualOilChange(r.unit, v)}
+                          />
                         </div>
                       )}
                       {!r.manual && (<>
