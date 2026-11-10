@@ -13636,6 +13636,9 @@ function PrintableProductionShift({ shift, unitTypes }) {
         <div>
           <p style={{ fontWeight: 700, fontSize: 16 }}>{shift.employee}</p>
           <p style={{ fontSize: 12, color: '#555' }}>{fmtDate(shift.end || shift.start)} · {shift.machine}{!shift.end ? ' · Still open' : ''}</p>
+          {shift.groupId && (shift.switchedFrom || shift.switchedTo) && (
+            <p style={{ fontSize: 11, color: '#555' }}>Part of a day on more than one machine{shift.switchedFrom ? ` · switched from ${shift.switchedFrom}` : ''}{shift.switchedTo ? ` · then switched to ${shift.switchedTo}` : ''}</p>
+          )}
         </div>
         {hours !== null && (
           <div style={{ fontSize: 12, textAlign: 'right', color: '#555' }}>
@@ -18694,13 +18697,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     }
   };
 
-  const startProductionShift = async (machineOverride) => {
+  const startProductionShift = async (machineOverride, link) => {
     const entry = {
       id: uid(),
       employee: currentMechanic,
       employeeRole: roleFor(currentMechanic),
       machine: machineOverride || assignedUnitFor(currentMechanic),
-      block: '',
+      block: (link && link.block) || '',
       start: new Date().toISOString(),
       end: null,
       startHours: '',
@@ -18715,6 +18718,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       notes: '',
       downtimeLog: [],
     };
+    // Quick switch: this stretch belongs to the same day's timesheet as the one it follows.
+    if (link && link.groupId) { entry.groupId = link.groupId; entry.switchedFrom = link.switchedFrom || ''; }
     // Start hours: the last saved Samsara reading goes in right away (so
     // clocking in is never slowed down), then a fresh reading replaces it a
     // moment later — unless the operator has already typed their own.
@@ -18800,6 +18805,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     // today's reading — hours stay as typed in that case.
     const hoursPatch = endOverride ? {} : await autoEndHoursPatch(openProductionShift);
     await patchOpenProductionShift({ end: endIso, signature: signatureDataUrl, signedAt: signedIso, ...hoursPatch });
+    // Earlier stretches of the same day (quick switches) get this same signature, so the whole day is signed.
+    if (openProductionShift && openProductionShift.groupId) {
+      const gid = openProductionShift.groupId;
+      const earlier = productionShifts.filter((x) => x.groupId === gid && x.id !== openProductionShift.id && x.employee === openProductionShift.employee && !x.signature);
+      for (const x of earlier) await patchOneProductionShift(x.id, { signature: signatureDataUrl, signedAt: signedIso });
+    }
     if (!endOverride && openProductionShift) refreshEndHoursInBackground(openProductionShift.id, openProductionShift.machine);
     if (openProductionShift && TRACK_ELIGIBLE_TYPES.includes(machineType(openProductionShift.machine, unitTypes))) {
       await endMachineTrack('productionShift', openProductionShift.id);
@@ -18815,6 +18826,26 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // step, so nothing about that machine's numbers gets skipped) and opens
   // a fresh one, so each machine's production stays cleanly separated
   // instead of one shift's tallies mixing work from two different jobs.
+  // QUICK SWITCH (used by the Switch Machine button): ends this machine's stretch and starts the next
+  // one at once — no signature, no review. All of a day's stretches share a groupId so they read as one
+  // timesheet, while each keeps its own machine, block, hours, tallies and GPS track. The operator signs
+  // once at final clock-out (confirmProductionClockOut copies that signature onto every stretch).
+  const quickSwitchMachine = async (newMachine) => {
+    const cur = openProductionShift;
+    setShowSwitchMachine(false);
+    if (!cur || !newMachine || newMachine === cur.machine) return;
+    const switchIso = new Date().toISOString();
+    const groupId = cur.groupId || cur.id;
+    const hoursPatch = await autoEndHoursPatch(cur);
+    await patchOneProductionShift(cur.id, { end: switchIso, groupId, switchedTo: newMachine, ...hoursPatch });
+    refreshEndHoursInBackground(cur.id, cur.machine);
+    if (TRACK_ELIGIBLE_TYPES.includes(machineType(cur.machine, unitTypes))) {
+      await endMachineTrack('productionShift', cur.id);
+    }
+    setTodaysJobChoice(newMachine);
+    // Each machine picks its own block (machines can be in completely different places), so it starts blank.
+    await startProductionShift(newMachine, { groupId, block: '', switchedFrom: cur.machine });
+  };
   const requestMachineSwitch = (newMachine) => {
     if (!openProductionShift || !newMachine || newMachine === openProductionShift.machine) {
       setShowSwitchMachine(false);
@@ -21305,13 +21336,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   <div className="w-full p-5" style={{ background: COLORS.bg, borderRadius: '16px 16px 0 0', border: `2px solid ${COLORS.line}`, borderBottom: 'none' }} onClick={(e) => e.stopPropagation()}>
                     <h2 className="font-display text-lg font-bold mb-1">Switch machine</h2>
                     <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>
-                      Moving to a different kind of machine finalizes today's numbers on this one first, then opens a fresh shift — keeping each machine's production separate. Switching between two units of the same type just relabels this shift.
-                    </p>
+                      Switches right away and keeps everything on today's one timesheet. This machine's numbers and block stay with it, and the new machine starts its own. You sign once when you clock out.</p>
                     <div className="space-y-2">
                       {altOptionsFor(currentMechanic).filter((opt) => opt.value !== '__mechanic__' && opt.value !== openProductionShift.machine).map((opt) => (
                         <button
                           key={opt.value}
-                          onClick={() => requestMachineSwitch(opt.value)}
+                          onClick={() => quickSwitchMachine(opt.value)}
                           className="w-full text-left rounded-lg p-3 font-display font-semibold"
                           style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
                         >
@@ -28113,6 +28143,9 @@ function ProductionShiftCard({ shift, unitTypes, isAdmin, onEdit, onConfirmHours
       </div>
       {!shift.end && (
         <p className="text-xs font-mono mb-2" style={{ color: COLORS.accent }}>🟢 Still clocked in</p>
+      )}
+      {shift.groupId && (shift.switchedFrom || shift.switchedTo) && (
+        <p className="text-xs font-mono mb-2" style={{ color: COLORS.accent }}>🔄 {shift.machine}: part of a day on more than one machine{shift.switchedFrom ? ` · from ${shift.switchedFrom}` : ''}{shift.switchedTo ? ` · then ${shift.switchedTo}` : ''}</p>
       )}
       {hours != null && (
         <p className="text-xs font-mono mb-2 flex flex-wrap items-center gap-2" style={{ color: hours > 24 && !shift.hoursConfirmedGood ? '#E07A5F' : hours > 16 && !shift.hoursConfirmedGood ? COLORS.progress : COLORS.accent }}>
