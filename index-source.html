@@ -14322,6 +14322,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [editingOilBaselineForUnit, setEditingOilBaselineForUnit] = useState(null);
   const [diagExpanded, setDiagExpanded] = useState(null);
   const [diagSearch, setDiagSearch] = useState('');
+  const [stuckTracks, setStuckTracks] = useState(null);
+  const [stuckStatus, setStuckStatus] = useState('');
   // Completion record for watch-only (noQuiz) job-hazard courses, which
   // don't produce a trainingRecords quiz entry — { [slug]: { [courseKey]: timestamp } }.
   const [receipts, setReceipts] = useState(() => cacheGet('receipts', [])); // [{ id, employee, date, amount, note, photoUrl, createdAt, reimbursed }]
@@ -26979,6 +26981,40 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         </div>
       );
     }
+    // GPS tracks left "open" long after the shift ended make the recorder re-download them on every run
+    // (that was most of the Firebase bill). This finds them (open for over 24 h) and closes them by writing
+    // only a past endedAt — nothing is deleted, and the points list is never downloaded again to do it.
+    const checkStuckTracks = async () => {
+      setStuckStatus('Checking…');
+      try {
+        const snap = await firebase.database().ref('machineTrackRecords').orderByChild('endedAt').equalTo(null).once('value');
+        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        const list = Object.values(snap.val() || {})
+          .filter((t) => t && t.id && !t.endedAt && t.startedAt && new Date(t.startedAt).getTime() < cutoff)
+          .map((t) => {
+            const pts = Array.isArray(t.points) ? t.points : Object.values(t.points || {});
+            const shift = productionShifts.find((x) => x.id === (t.shiftId || t.id));
+            const endIso = shift && shift.end ? shift.end : new Date(new Date(t.startedAt).getTime() + 12 * 60 * 60 * 1000).toISOString();
+            return { id: t.id, machine: t.machine, employee: t.employee, startedAt: t.startedAt, points: pts.length, endIso };
+          });
+        setStuckTracks(list);
+        setStuckStatus(list.length ? '' : 'None stuck. Every open track started in the last 24 hours.');
+      } catch (e) {
+        setStuckStatus("Couldn't check. Check your signal and try again.");
+      }
+    };
+    const closeStuckTracks = async () => {
+      const list = stuckTracks || [];
+      if (!list.length) return;
+      if (!window.confirm(`Close ${list.length} stuck GPS track${list.length === 1 ? '' : 's'}? Nothing is deleted. They just stop being recorded.`)) return;
+      setStuckStatus('Closing…');
+      let done = 0;
+      for (const t of list) {
+        try { await firebase.database().ref('machineTrackRecords/' + t.id + '/endedAt').set(t.endIso); done++; } catch (e) { /* left open, shown again on the next check */ }
+      }
+      setStuckTracks([]);
+      setStuckStatus(`Closed ${done} of ${list.length}. The recorder skips them from its next run.`);
+    };
     const altLabel = (v) => (v === '__mechanic__' ? 'Mechanic' : v === '__cook__' ? 'Cook' : v);
     const SCREEN_LABELS = { admin: 'Admin screen', shift: 'Shift screen (clock in / production / driver log)', dashboard: 'Work Order Board' };
     const people = mechanics.slice().sort((a, b) => a.localeCompare(b)).filter((n) => !diagSearch.trim() || n.toLowerCase().includes(diagSearch.trim().toLowerCase()));
@@ -27024,6 +27060,20 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </button>
           <h1 className="font-display text-3xl font-bold mb-1">🩺 Diagnostics</h1>
           <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>What each person gets when they sign in: their home screen, ☰ menu, unit, job and today's status. Tap a name, then "View the app as" to open the real screens exactly as they see them. Nothing you do there is saved, and only you can see this page.</p>
+          <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+            <p className="font-display font-semibold text-sm mb-1">🛰️ Stuck GPS tracks</p>
+            <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Tracks still "open" from over a day ago make the server download them again and again, which drives up the Firebase bill. This finds them and closes them.</p>
+            <Btn onClick={checkStuckTracks}>Check for stuck tracks</Btn>
+            {stuckStatus && <p className="text-xs mt-2" style={{ color: COLORS.inkDim }}>{stuckStatus}</p>}
+            {stuckTracks && stuckTracks.length > 0 && (
+              <div className="mt-2">
+                {stuckTracks.map((t) => (
+                  <p key={t.id} className="text-xs font-mono mb-1">{t.machine} · {t.employee} · started {fmtDate(t.startedAt)} · {t.points.toLocaleString()} points</p>
+                ))}
+                <Btn onClick={closeStuckTracks} className="mt-2 w-full">Close these {stuckTracks.length} tracks</Btn>
+              </div>
+            )}
+          </div>
           <TextInput value={diagSearch} onChange={(e) => setDiagSearch(e.target.value)} placeholder="Search a name" className="w-full mb-4" />
           <div className="space-y-2">
             {people.map((n) => {
