@@ -8611,7 +8611,7 @@ function DriverDocumentsPanel({ driver, documents, canEdit, onAdd, onDelete, onR
 // vector lines, so it stays sharp when printed. A log spanning exactly two days
 // gets one continuous 48-hour grid (same as the app); longer ones get a grid per
 // day, continuing onto extra pages if needed.
-async function buildDriverLogsPdf(driver, logs) {
+async function buildDriverLogsPdf(driver, logs, preTrips) {
   const doc = await PDFLib.PDFDocument.create();
   const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica);
   const bold = await doc.embedFont(PDFLib.StandardFonts.HelveticaBold);
@@ -8773,6 +8773,107 @@ async function buildDriverLogsPdf(driver, logs) {
     text(driver, M + 230, y - 26, 10, font);
     text('Sent from the Harder Contracting driver log app', PW - M - textW('Sent from the Harder Contracting driver log app', 7), M - 14, 7, font, rgb(0.5, 0.5, 0.5));
   }
+
+  // ----- Pre-trip inspections (last 24 hours), one page per unit, after the logs -----
+  const embedSig = async (sig) => {
+    if (!sig || typeof sig !== 'string' || !sig.startsWith('data:image/')) return null;
+    try {
+      const bin = atob(sig.split(',')[1]);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return sig.startsWith('data:image/png') ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+    } catch (e) { return null; }
+  };
+  const trips = [...(preTrips || [])].sort((a, b) => a.time.localeCompare(b.time));
+  for (const insp of trips) {
+    const sigImg = await embedSig(insp.signature);
+    for (const u of (insp.units || [])) {
+      let page = doc.addPage([PW, PH]);
+      let y = PH - M;
+      const text = (str, x, yy, size, f, color) => page.drawText(safe(str), { x, y: yy, size, font: f || font, color: color || rgb(0.1, 0.1, 0.1) });
+      const textW = (str, size, f) => (f || font).widthOfTextAtSize(safe(str), size);
+      const hl = (x1, x2, yy, th, color) => page.drawLine({ start: { x: x1, y: yy }, end: { x: x2, y: yy }, thickness: th, color: color || rgb(0.6, 0.6, 0.6) });
+      const head = (cont) => {
+        text('Harder Contracting Ltd.', M, y - 12, 10, font, rgb(0.35, 0.35, 0.35));
+        text('PRE-TRIP INSPECTION' + (cont ? ' (continued)' : ''), M, y - 30, 18, bold);
+        text(insp.driver || driver, PW - M - textW(insp.driver || driver, 16, bold), y - 24, 16, bold);
+        y -= 44;
+        hl(M, PW - M, y, 1.2, rgb(0.2, 0.2, 0.2));
+        y -= 16;
+      };
+      head(false);
+      const items = u.items || [];
+      const bad = items.filter((it) => it.status === 'deficiency');
+      const major = bad.filter((it) => it.severity === 'major').length;
+      const info = [
+        ['UNIT', u.unitName + (u.unitType === 'trailer' ? ' (trailer)' : u.unitType === 'truck' ? ' (truck)' : '')],
+        ['DATE', dayLabel(insp.time)],
+        ['TIME', hm(insp.time)],
+        ['RESULT', bad.length === 0 ? 'All OK (' + items.length + ' items)' : bad.length + ' defect' + (bad.length > 1 ? 's' : '') + (major ? ' (' + major + ' major)' : '')],
+      ];
+      const cw = (PW - 2 * M) / info.length;
+      info.forEach((f, i) => {
+        text(f[0], M + i * cw, y - 4, 7, bold, rgb(0.4, 0.4, 0.4));
+        text(f[1], M + i * cw, y - 18, i === 3 ? 11 : 12, bold, i === 3 && bad.length ? rgb(0.8, 0.15, 0.1) : undefined);
+      });
+      y -= 34;
+
+      // Items in two columns, grouped by section where the item has one.
+      const colX = [M, M + (PW - 2 * M) / 2 + 8];
+      const colW = (PW - 2 * M) / 2 - 8;
+      const rowsPerCol = 30;
+      let col = 0, rowY = y;
+      const bottomLimit = M + 90; // keep room for the signature block
+      let lastSection = null;
+      const flow = [];
+      items.forEach((it) => {
+        if (it.section && it.section !== lastSection) { flow.push({ heading: it.section }); lastSection = it.section; }
+        flow.push({ it });
+      });
+      for (const entry of flow) {
+        const need = entry.heading ? 30 : (entry.it.status === 'deficiency' && entry.it.note ? 24 : 13);
+        if (rowY - need < bottomLimit) {
+          if (col === 0) { col = 1; rowY = y; }
+          else { page = doc.addPage([PW, PH]); y = PH - M; head(true); col = 0; rowY = y; }
+        }
+        const x = colX[col];
+        if (entry.heading) {
+          text(String(entry.heading).toUpperCase(), x, rowY - 10, 7.5, bold, rgb(0.4, 0.4, 0.4));
+          rowY -= 16;
+          continue;
+        }
+        const it = entry.it;
+        const isBad = it.status === 'deficiency';
+        const tag = isBad ? (it.severity === 'major' ? 'MAJOR' : 'minor') : (it.status === 'good' ? 'OK' : '-');
+        const tagCol = isBad ? rgb(0.8, 0.15, 0.1) : rgb(0.1, 0.45, 0.15);
+        text(tag, x, rowY - 9, 8.5, bold, tagCol);
+        let label = safe(it.label);
+        while (label.length > 4 && textW(label, 8.5) > colW - 44) label = label.slice(0, -2);
+        text(label, x + 38, rowY - 9, 8.5, isBad ? bold : font);
+        rowY -= 13;
+        if (isBad && it.note) {
+          let note = safe(it.note);
+          while (note.length > 4 && textW(note, 7.5) > colW - 44) note = note.slice(0, -2);
+          text('Note: ' + note, x + 38, rowY - 8, 7.5, font, rgb(0.3, 0.3, 0.3));
+          rowY -= 11;
+        }
+      }
+
+      // Signature at the foot of the last page of this unit's inspection.
+      const sy = M + 78;
+      hl(M, PW - M, sy, 0.6, rgb(0.7, 0.7, 0.7));
+      text('DRIVER SIGNATURE', M, sy - 12, 8, bold, rgb(0.4, 0.4, 0.4));
+      if (sigImg) {
+        const sc = Math.min(200 / sigImg.width, 44 / sigImg.height);
+        page.drawImage(sigImg, { x: M, y: sy - 16 - sigImg.height * sc, width: sigImg.width * sc, height: sigImg.height * sc });
+      } else {
+        text(insp.signature ? 'Signed (image not available)' : 'Not signed', M, sy - 36, 10, bold, insp.signature ? rgb(0.1, 0.1, 0.1) : rgb(0.8, 0.15, 0.1));
+      }
+      text(insp.driver || driver, M + 230, sy - 36, 10, font);
+      text('Signed ' + dayLabel(insp.signedAt || insp.time) + ' ' + hm(insp.signedAt || insp.time), M + 230, sy - 50, 8, font, rgb(0.4, 0.4, 0.4));
+      text('Sent from the Harder Contracting driver log app', PW - M - textW('Sent from the Harder Contracting driver log app', 7), M - 14, 7, font, rgb(0.5, 0.5, 0.5));
+    }
+  }
   return doc.save();
 }
 
@@ -8782,20 +8883,52 @@ function bytesToBase64(bytes) {
   return btoa(bin);
 }
 
+// One past daily log in a list: tap to show or hide its duty grid (read-only,
+// no dragging), plus time in/out, km start/end and whether it's signed. The
+// driver can look back at any of the last 14 days after the log is closed.
+function PastLogRow({ log, defaultOpen }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <div className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised }}>
+      <button type="button" onClick={() => setOpen(!open)} className="w-full text-left">
+        <div className="flex items-center justify-between">
+          <span className="font-semibold text-sm">{fmtDate(log.start)}</span>
+          <span className="text-xs" style={{ color: log.signature ? COLORS.done : '#E07A5F' }}>{log.signature ? '✓ Signed' : 'Not signed'}</span>
+        </div>
+        <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>
+          {driverDaySummaryLabel(log.statusChanges)}{!log.end ? ' · Still open' : ''} · {open ? 'Hide grid ▲' : 'Show grid ▼'}
+        </p>
+      </button>
+      {open && (
+        <div className="mt-3">
+          <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>
+            In {fmtTime(log.start)} · Out {log.end ? fmtTime(log.end) : 'still open'}
+            {(log.odometerStart || log.odometerEnd) ? ` · KM ${log.odometerStart || '?'} → ${log.odometerEnd || '?'}` : ''}
+          </p>
+          <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${COLORS.line}` }}>
+            <DriverLogGrid log={log} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Roadside / scale stop: the driver types the officer's email and the last 14
 // days of this driver's logs go out as a plain-text email via the backend.
-function EmailLogsPanel({ driver, allLogs }) {
+function EmailLogsPanel({ driver, allLogs, preTrips }) {
   const [open, setOpen] = useState(false);
   const [to, setTo] = useState(() => { try { return localStorage.getItem('lastLogEmailTo') || ''; } catch (e) { return ''; } });
   const [state, setState] = useState('idle'); // idle | sending | sent | error
   const [msg, setMsg] = useState('');
+  const [what, setWhat] = useState('both'); // 'both' | 'logs' | 'pretrip'
 
   const send = async () => {
     const addr = to.trim();
     if (!/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(addr)) { setState('error'); setMsg("That email address doesn't look right."); return; }
     const dates = [];
     for (let i = 0; i < 14; i++) { const d = new Date(); d.setDate(d.getDate() - i); dates.push(localDateStr(d)); }
-    const logs = (allLogs || [])
+    const allMyLogs = (allLogs || [])
       .filter((l) => l.driver === driver && l.start && dates.includes(l.start.slice(0, 10)))
       .sort((a, b) => a.start.localeCompare(b.start))
       .map((l) => ({
@@ -8803,7 +8936,24 @@ function EmailLogsPanel({ driver, allLogs }) {
         statusChanges: (l.statusChanges || []).map((c) => ({ time: c.time, status: c.status, note: c.note || '' })),
         signature: l.signature || null,
       }));
-    if (logs.length === 0) { setState('error'); setMsg('No logs in the last 14 days to send.'); return; }
+    const logs = what === 'pretrip' ? [] : allMyLogs;
+    // Pre-trips from the last 24 hours (the truck's and any trailer swapped in midday).
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const trips = what === 'logs' ? [] : (preTrips || [])
+      .filter((t) => t && t.driver === driver && t.time && new Date(t.time).getTime() >= cutoff)
+      .sort((a, b) => a.time.localeCompare(b.time))
+      .map((t) => ({
+        id: t.id, driver: t.driver, time: t.time, signedAt: t.signedAt || t.time, signature: t.signature || null,
+        units: (t.units || []).map((u) => ({
+          unitName: u.unitName, unitType: u.unitType,
+          items: (u.items || []).map((it) => ({ label: it.label, section: it.section || '', status: it.status, severity: it.severity || null, note: it.note || '' })),
+        })),
+      }));
+    if (logs.length === 0 && trips.length === 0) {
+      setState('error');
+      setMsg(what === 'logs' ? 'No logs in the last 14 days to send.' : what === 'pretrip' ? 'No pre-trip in the last 24 hours to send.' : 'No logs or pre-trips to send.');
+      return;
+    }
     setState('sending'); setMsg('');
     try {
       const ctl = new AbortController();
@@ -8812,18 +8962,22 @@ function EmailLogsPanel({ driver, allLogs }) {
       // didn't load or the build fails, the backend still sends the text version.
       let pdfBase64 = null;
       try {
-        if (typeof PDFLib !== 'undefined') pdfBase64 = bytesToBase64(await buildDriverLogsPdf(driver, logs));
+        if (typeof PDFLib !== 'undefined') pdfBase64 = bytesToBase64(await buildDriverLogsPdf(driver, logs, trips));
       } catch (e) { console.error('driver log PDF failed', e); }
       const lightLogs = logs.map((l) => ({ ...l, signature: undefined }));
       const res = await fetch(CLOUD_FUNCTION_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctl.signal,
-        body: JSON.stringify({ key: APP_SECRET, mode: 'emailDriverLogs', to: addr, driver, logs: lightLogs, pdfBase64 }),
+        body: JSON.stringify({ key: APP_SECRET, mode: 'emailDriverLogs', to: addr, driver, logs: lightLogs, preTripCount: trips.length, pdfBase64 }),
       });
       clearTimeout(timer);
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.ok) throw new Error(json.error || ('HTTP ' + res.status));
       try { localStorage.setItem('lastLogEmailTo', addr); } catch (e) {}
-      setState('sent'); setMsg(`Sent ${json.count || logs.length} log${(json.count || logs.length) === 1 ? '' : 's'} to ${addr}.`);
+      const nL = logs.length, nT = trips.length;
+      const parts = [];
+      if (nL) parts.push(`${nL} log${nL === 1 ? '' : 's'}`);
+      if (nT) parts.push(`${nT} pre-trip${nT === 1 ? '' : 's'}`);
+      setState('sent'); setMsg(`Sent ${parts.join(' and ')} to ${addr}.`);
     } catch (e) {
       setState('error');
       setMsg(e && e.name === 'AbortError' ? 'Took too long — check your signal and try again.' : "Couldn't send — needs a connection (" + ((e && e.message) || 'try again') + ').');
@@ -8831,12 +8985,23 @@ function EmailLogsPanel({ driver, allLogs }) {
   };
 
   if (!open) {
-    return <Btn variant="ghost" onClick={() => { setOpen(true); setState('idle'); setMsg(''); }}>📧 Email my last 14 logs</Btn>;
+    return <Btn variant="ghost" onClick={() => { setOpen(true); setState('idle'); setMsg(''); }}>📧 Email logs / pre-trip</Btn>;
   }
   return (
     <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.accent}` }}>
-      <p className="text-sm font-semibold mb-1">Email my last 14 days of logs</p>
-      <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Type the email address to send them to.</p>
+      <p className="text-sm font-semibold mb-2">What do you want to send?</p>
+      <div className="flex gap-1 mb-1">
+        {[['both', 'Logs + pre-trip'], ['logs', 'Logs only'], ['pretrip', 'Pre-trip only']].map(([k, label]) => (
+          <button key={k} type="button" onClick={() => { setWhat(k); if (state !== 'sending') { setState('idle'); setMsg(''); } }}
+            className="flex-1 text-xs font-semibold px-2 py-2 rounded-lg"
+            style={{ background: what === k ? COLORS.accent : COLORS.surface, color: what === k ? '#1B1F19' : COLORS.ink, border: `1px solid ${what === k ? COLORS.accent : COLORS.line}` }}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>
+        {what === 'logs' ? 'The last 14 days of logs.' : what === 'pretrip' ? 'Pre-trips from the last 24 hours.' : 'The last 14 days of logs, then pre-trips from the last 24 hours.'} Type the email address to send to.
+      </p>
       <TextInput type="email" inputMode="email" autoCapitalize="none" autoCorrect="off" value={to}
         onChange={(e) => { setTo(e.target.value); if (state !== 'sending') { setState('idle'); setMsg(''); } }}
         placeholder="officer@example.com" className="w-full mb-2" />
@@ -8849,7 +9014,7 @@ function EmailLogsPanel({ driver, allLogs }) {
   );
 }
 
-function InspectionModeScreen({ driver, allLogs, onExit, documents, renewalStatus }) {
+function InspectionModeScreen({ driver, allLogs, preTrips, onExit, documents, renewalStatus }) {
   const [confirmingExit, setConfirmingExit] = useState(false);
   const [exitPin, setExitPin] = useState('');
   const [exitError, setExitError] = useState('');
@@ -8942,24 +9107,14 @@ function InspectionModeScreen({ driver, allLogs, onExit, documents, renewalStatu
         <p className="text-sm mb-6" style={{ color: COLORS.inkDim }}>No logs on record.</p>
       )}
 
-      <div className="mb-4"><EmailLogsPanel driver={driver} allLogs={allLogs} /></div>
+      <div className="mb-4"><EmailLogsPanel driver={driver} allLogs={allLogs} preTrips={preTrips} /></div>
 
       <p className="text-xs uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Last 14 days</p>
       {recentLogs.length === 0 ? (
         <p className="text-sm" style={{ color: COLORS.inkDim }}>No logs in the last 14 days.</p>
       ) : (
         <div className="space-y-2">
-          {recentLogs.map((l) => (
-            <div key={l.id} className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised }}>
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-sm">{fmtDate(l.start)}</span>
-                <span className="text-xs" style={{ color: l.signature ? COLORS.done : '#E07A5F' }}>{l.signature ? '✓ Signed' : 'Not signed'}</span>
-              </div>
-              <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>
-                {driverDaySummaryLabel(l.statusChanges)}{!l.end ? ' · Still open' : ''}
-              </p>
-            </div>
-          ))}
+          {recentLogs.map((l) => <PastLogRow key={l.id} log={l} />)}
         </div>
       )}
     </div>
@@ -8971,7 +9126,7 @@ function InspectionModeScreen({ driver, allLogs, onExit, documents, renewalStatu
 // this shows exactly that, flags any gaps, and lets a stretch of no
 // driving get backfilled as a full day of Off Duty, all covered by one
 // signature rather than needing to sign each day separately.
-function DriverRecentLogsSection({ driver, allLogs, onBackfillOffDuty }) {
+function DriverRecentLogsSection({ driver, allLogs, preTrips, onBackfillOffDuty }) {
   const [backfilling, setBackfilling] = useState(false);
   const [signature, setSignature] = useState(null);
 
@@ -8994,7 +9149,7 @@ function DriverRecentLogsSection({ driver, allLogs, onBackfillOffDuty }) {
     <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>Recent Logs</p>
       <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>Alberta requires the last 14 days of logs to be on hand.</p>
-      <div className="mb-4"><EmailLogsPanel driver={driver} allLogs={allLogs} /></div>
+      <div className="mb-4"><EmailLogsPanel driver={driver} allLogs={allLogs} preTrips={preTrips} /></div>
 
       {missingDates.length > 0 && (
         <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.accent}` }}>
@@ -9029,17 +9184,7 @@ function DriverRecentLogsSection({ driver, allLogs, onBackfillOffDuty }) {
         <p className="text-sm" style={{ color: COLORS.inkDim }}>No logs yet.</p>
       ) : (
         <div className="space-y-2">
-          {recentLogs.map((l) => (
-            <div key={l.id} className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised }}>
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-sm">{fmtDate(l.start)}</span>
-                <span className="text-xs" style={{ color: l.signature ? COLORS.done : '#E07A5F' }}>{l.signature ? '✓ Signed' : 'Not signed'}</span>
-              </div>
-              <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>
-                {driverDaySummaryLabel(l.statusChanges)}{!l.end ? ' · Still open' : ''}
-              </p>
-            </div>
-          ))}
+          {recentLogs.map((l, idx) => <PastLogRow key={l.id} log={l} defaultOpen={idx === 0} />)}
         </div>
       )}
     </div>
@@ -21244,6 +21389,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         <InspectionModeScreen
           driver={currentMechanic}
           allLogs={driverLogs}
+          preTrips={preTripInspections}
           onExit={() => setShowInspectionMode(false)}
           documents={driverDocuments}
           renewalStatus={permitRenewalStatus}
@@ -21640,6 +21786,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             <DriverRecentLogsSection
               driver={currentMechanic}
               allLogs={driverLogs}
+              preTrips={preTripInspections}
               onBackfillOffDuty={backfillOffDutyDriverLogs}
             />
           )}
@@ -23509,7 +23656,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       </button>
                       {isOpen && (
                         <div className="p-4 pt-0">
-                          <div className="mb-3"><EmailLogsPanel key={name} driver={name} allLogs={driverLogs} /></div>
+                          <div className="mb-3"><EmailLogsPanel key={name} driver={name} allLogs={driverLogs} preTrips={preTripInspections} /></div>
                           {logsThisWeek.length === 0 ? (
                             <p className="text-sm" style={{ color: COLORS.inkDim }}>No logs this week.</p>
                           ) : (
