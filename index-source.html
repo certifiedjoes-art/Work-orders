@@ -15496,8 +15496,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return () => { if (onTs) tsRef.off('value', onTs); };
   }, []);
 
+  // Everyone except admin only downloads the last 30 days of driver logs and
+  // pre-trips. Record ids start with a base36 timestamp (see uid()), so a key
+  // range query works without any database index, and older phones don't have
+  // to chew through the whole history on every open.
+  const slimHistory = !admins.includes(currentMechanic);
+  const historyCutoffKey = () => (Date.now() - 30 * 24 * 3600 * 1000).toString(36);
   useEffect(() => {
-    const ref = firebase.database().ref('driverLogRecords');
+    const base = firebase.database().ref('driverLogRecords');
+    const ref = slimHistory ? base.orderByKey().startAt(historyCutoffKey()) : base;
     let on = null;
     (async () => {
       await selfHealMigration('driverLogs', 'driverLogRecords', 'driver logs');
@@ -15509,7 +15516,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       });
     })();
     return () => { if (on) ref.off('value', on); };
-  }, []);
+  }, [slimHistory]);
 
   useEffect(() => {
     const ref = firebase.database().ref('driverLogApprovals');
@@ -15522,7 +15529,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   }, []);
 
   useEffect(() => {
-    const ref = firebase.database().ref('inspectionRecords');
+    const base = firebase.database().ref('inspectionRecords');
+    const ref = slimHistory ? base.orderByKey().startAt(historyCutoffKey()) : base;
     let on = null;
     (async () => {
       await selfHealMigration('preTripInspections', 'inspectionRecords', 'pre-trip inspections');
@@ -15533,7 +15541,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       });
     })();
     return () => { if (on) ref.off('value', on); };
-  }, []);
+  }, [slimHistory]);
 
   useEffect(() => {
     const ref = firebase.database().ref('mapRecords');
