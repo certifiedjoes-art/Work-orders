@@ -19185,6 +19185,32 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (driverLogBusyRef.current) return;
     driverLogBusyRef.current = true;
     try {
+    // One log per day: if he already closed a log that started today, reopen it
+    // instead of starting a second one.
+    const todayStr = localDateStr(new Date());
+    const earlier = (driverLogs || [])
+      .filter((l) => l.driver === currentMechanic && l.end && localDateStr(new Date(l.start)) === todayStr)
+      .sort((a, b) => new Date(b.start) - new Date(a.start))[0];
+    if (earlier) {
+      if (!confirm("You already have a log for today. Continue it?\n\nYour Off Duty at the end will be changed to On Duty, and you'll sign again when you finish for good.")) return;
+      const loc2 = await getPhoneLocation();
+      const changes = [...(earlier.statusChanges || [])].sort((a, b) => new Date(a.time) - new Date(b.time));
+      const closeIdx = changes.length - 1;
+      const closing = changes[closeIdx];
+      let nextChanges;
+      if (closing && closing.status === 'off' && closeIdx > 0) {
+        const before = changes[closeIdx - 1];
+        if (before.status === 'onDuty') nextChanges = changes.slice(0, closeIdx); // that On Duty just keeps running
+        else nextChanges = [...changes.slice(0, closeIdx), { ...closing, status: 'onDuty', note: 'Continuing shift', ...(loc2 ? { loc: loc2 } : {}) }];
+      } else {
+        nextChanges = [...changes, { id: uid(), status: 'onDuty', time: earlier.end, note: 'Continuing shift', ...(loc2 ? { loc: loc2 } : {}) }];
+      }
+      const patch = { end: null, odometerEnd: '', signature: null, signedAt: null, statusChanges: nextChanges };
+      if (unit && unit !== earlier.unit) { patch.unit = unit; patch.plate = (unitPlates || {})[slugForUnit(unit)] || ''; }
+      await patchOneDriverLog(earlier.id, patch);
+      await checkLogBookMismatch(currentMechanic, todayStr, { ...earlier, ...patch });
+      return;
+    }
     const loc = await getPhoneLocation();
     const now = new Date().toISOString();
     const entry = {
