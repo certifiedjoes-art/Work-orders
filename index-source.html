@@ -6007,6 +6007,47 @@ async function saveOilReminder(slug, cfg) {
 async function saveOilManualHours(slug, hours) {
   await firebase.database().ref('oilChangeManualHours/' + slug).set(hours == null ? null : hours);
 }
+// Home terminal is remembered per driver (driverHomeTerminals/{name}) and licence plate per
+// unit (unitPlates/{unit}); both are copied onto each new driver log when it starts, so
+// old logs keep what was true at the time. Blank home terminal falls back to the default.
+const DEFAULT_HOME_TERMINAL = 'La Crete, Alberta';
+async function saveDriverHomeTerminal(driver, value) {
+  await firebase.database().ref('driverHomeTerminals/' + slugForMechanic(driver)).set(value || null);
+}
+async function saveUnitPlate(unit, value) {
+  await firebase.database().ref('unitPlates/' + slugForUnit(unit)).set(value || null);
+}
+// Trailers a driver had on a given log: any trailer in that driver's pre-trips from 24 h before the
+// log started (or since their previous log ended, whichever is later) up to the log's end. A midday
+// trailer swap therefore lists both trailers. Plates come from the pre-trip record, else the saved unit plate.
+function trailersForLog(log, driverLogs, preTrips, unitPlates) {
+  if (!log || !log.start) return [];
+  const startMs = new Date(log.start).getTime();
+  let from = startMs - 24 * 60 * 60 * 1000;
+  (driverLogs || []).forEach((l) => {
+    if (l && l.id !== log.id && l.driver === log.driver && l.end) {
+      const e = new Date(l.end).getTime();
+      if (e <= startMs && e > from) from = e;
+    }
+  });
+  const to = log.end ? new Date(log.end).getTime() : Date.now();
+  const out = [];
+  const idx = {};
+  (preTrips || [])
+    .filter((t) => t && t.driver === log.driver && t.time)
+    .sort((a, b) => a.time.localeCompare(b.time))
+    .forEach((t) => {
+      const ms = new Date(t.time).getTime();
+      if (ms < from || ms > to) return;
+      (t.units || []).forEach((u) => {
+        if (!u || u.unitType !== 'trailer' || !u.unitName) return;
+        const plate = u.plate || (unitPlates || {})[slugForUnit(u.unitName)] || '';
+        if (idx[u.unitName] === undefined) { idx[u.unitName] = out.length; out.push({ unitName: u.unitName, plate }); }
+        else if (plate) out[idx[u.unitName]].plate = plate;
+      });
+    });
+  return out;
+}
 // Unit types that can use the time-based oil reminder (never trailers — they have no engine).
 const TIMED_OIL_TYPES = ['genset', 'lightTower'];
 const DEFAULT_OIL_REMINDER_DAYS = 14;
@@ -8069,6 +8110,66 @@ function driverDaySummaryLabel(statusChanges) {
   return `${list.length} status changes`;
 }
 
+// Company details printed at the top of every emailed log / pre-trip page.
+// Name and address reuse TRAINING_EMPLOYER; add a phone number and/or email in
+// the contact line below; it prints on every page under the address.
+const COMPANY_CONTACT = 'office@hardercontracting.ca   |   Ed 780-926-6375   |   Joe 780-285-1361';
+
+// Where the phone is right now, for stamping each duty-status change (log
+// start, every change, log end). Returns { lat, lng, acc, place? } or null if
+// location is off / denied / too slow — logging a status never waits more
+// than a few seconds for it and never fails because of it. The place name
+// comes from OpenStreetMap's free reverse-geocoding lookup (cached by ~100 m
+// square so a yard or camp is only looked up once); if that lookup fails the
+// coordinates are still kept and shown instead.
+const __placeCache = {};
+async function getPhoneLocation() {
+  if (typeof navigator === 'undefined' || !navigator.geolocation) return null;
+  const pos = await new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    setTimeout(() => finish(null), 5000);
+    try {
+      navigator.geolocation.getCurrentPosition((p) => finish(p), () => finish(null), { enableHighAccuracy: true, timeout: 4500, maximumAge: 60000 });
+    } catch (e) { finish(null); }
+  });
+  if (!pos || !pos.coords || typeof pos.coords.latitude !== 'number') return null;
+  const lat = Math.round(pos.coords.latitude * 1e5) / 1e5;
+  const lng = Math.round(pos.coords.longitude * 1e5) / 1e5;
+  const loc = { lat, lng, acc: Math.round(pos.coords.accuracy || 0) };
+  const key = lat.toFixed(3) + ',' + lng.toFixed(3);
+  let place = __placeCache[key];
+  if (place === undefined) {
+    try { place = localStorage.getItem('placeCache_' + key) || undefined; } catch (e) { place = undefined; }
+  }
+  if (place === undefined) {
+    place = '';
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 2500);
+      const res = await fetch('https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=14&accept-language=en&lat=' + lat + '&lon=' + lng, { signal: ctl.signal });
+      clearTimeout(timer);
+      if (res.ok) {
+        const j = await res.json();
+        const a = (j && j.address) || {};
+        const where = a.hamlet || a.village || a.town || a.city || a.municipality || a.county || '';
+        const road = a.road || '';
+        place = [road, where].filter(Boolean).join(', ').slice(0, 80);
+        if (place) { try { localStorage.setItem('placeCache_' + key, place); } catch (e) {} }
+      }
+    } catch (e) { place = ''; }
+  }
+  __placeCache[key] = place;
+  if (place) loc.place = place;
+  return loc;
+}
+// What to show for a saved location: the place name, else the coordinates.
+function locLabel(loc) {
+  if (!loc) return '';
+  if (loc.place) return loc.place;
+  return typeof loc.lat === 'number' ? loc.lat.toFixed(4) + ', ' + loc.lng.toFixed(4) : '';
+}
+
 // Turns a list of discrete status-change timestamps into total hours spent
 // in each status — each segment runs from one change to the next, with the
 // final (or only, if still open) segment running until endTime/now.
@@ -8250,11 +8351,11 @@ function PreTripInspectionDetail({ inspection, onDelete }) {
   );
 }
 
-function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel, units, unitTypes, trailerOnly }) {
+function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel, units, unitTypes, trailerOnly, unitPlates }) {
   // trailerOnly: a trailer got switched midday — inspect just the trailer and record it as its own
   // inspection (it never touches the truck's 24-hour pre-trip).
   const [unitsData, setUnitsData] = useState(trailerOnly ? [] : [
-    { unitName: truckUnitName, unitType: 'truck', items: TRUCK_PRETRIP_ITEMS.map((def) => ({ ...def, status: null, severity: null, note: '', photos: [] })) },
+    { unitName: truckUnitName, unitType: 'truck', plate: (unitPlates || {})[slugForUnit(truckUnitName || '')] || '', items: TRUCK_PRETRIP_ITEMS.map((def) => ({ ...def, status: null, severity: null, note: '', photos: [] })) },
   ]);
   const [expandedUnitIndex, setExpandedUnitIndex] = useState(0);
   const [addingTrailer, setAddingTrailer] = useState(!!trailerOnly);
@@ -8287,9 +8388,12 @@ function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel, unit
       items: u.items.map((item, ii) => (ii !== itemIdx ? item : { ...item, photos: [...(item.photos || []), dataUrl] })),
     })));
   };
+  const setUnitPlateDraft = (unitIdx, value) => {
+    setUnitsData((prev) => prev.map((u, ui) => (ui !== unitIdx ? u : { ...u, plate: value.toUpperCase() })));
+  };
   const addTrailer = () => {
     if (!newTrailerName.trim()) return;
-    setUnitsData((prev) => [...prev, { unitName: newTrailerName.trim(), unitType: 'trailer', items: TRAILER_PRETRIP_ITEMS.map((def) => ({ ...def, status: null, severity: null, note: '', photos: [] })) }]);
+    setUnitsData((prev) => [...prev, { unitName: newTrailerName.trim(), unitType: 'trailer', plate: (unitPlates || {})[slugForUnit(newTrailerName.trim())] || '', items: TRAILER_PRETRIP_ITEMS.map((def) => ({ ...def, status: null, severity: null, note: '', photos: [] })) }]);
     setExpandedUnitIndex(unitsData.length);
     setNewTrailerName('');
     setAddingTrailer(false);
@@ -8371,6 +8475,19 @@ function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel, unit
         >
           + Add a trailer
         </button>
+      )}
+
+      {unitsData.length > 0 && (
+        <div className="rounded-lg p-4 mb-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+          <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Licence plates</p>
+          {unitsData.map((u, ui) => (
+            <label key={ui} className="flex items-center gap-2 mb-2">
+              <span className="text-sm shrink-0" style={{ width: 110 }}>{u.unitType === 'trailer' ? '🚚' : '🚛'} {u.unitName}</span>
+              <TextInput value={u.plate || ''} onChange={(e) => setUnitPlateDraft(ui, e.target.value)} placeholder="Plate number" autoCapitalize="characters" className="flex-1" />
+            </label>
+          ))}
+          {unitsData.some((u) => !(u.plate || '').trim()) && <p className="text-xs" style={{ color: '#E07A5F' }}>Roadside inspectors ask for these. Fill in any that are blank.</p>}
+        </div>
       )}
 
       {hasMajor && (
@@ -8625,6 +8742,17 @@ async function buildDriverLogsPdf(driver, logs, preTrips) {
   const STATUS_NAME = { off: 'Off Duty', sleeper: 'Sleeper Berth', driving: 'Driving', onDuty: 'On Duty' };
   const ROWS = ['off', 'sleeper', 'driving', 'onDuty'];
   const sorted = [...logs].sort((a, b) => a.start.localeCompare(b.start));
+  // Company name, address and contact at the top of every page; returns how far down it used.
+  const letterhead = (pg, yTop) => {
+    pg.drawText(safe(TRAINING_EMPLOYER.name), { x: M, y: yTop - 11, size: 11, font: bold, color: rgb(0.1, 0.1, 0.1) });
+    pg.drawText(safe(TRAINING_EMPLOYER.address.replace(/\s{2,}/g, ' ')), { x: M, y: yTop - 23, size: 8.5, font, color: rgb(0.35, 0.35, 0.35) });
+    if (COMPANY_CONTACT) pg.drawText(safe(COMPANY_CONTACT), { x: M, y: yTop - 34, size: 8.5, font, color: rgb(0.35, 0.35, 0.35) });
+  };
+  const fitText = (str, size, maxW, f) => {
+    let t = safe(str);
+    while (t.length > 3 && (f || font).widthOfTextAtSize(t, size) > maxW) t = t.slice(0, -2);
+    return t;
+  };
 
   for (const log of sorted) {
     let page = doc.addPage([PW, PH]);
@@ -8636,16 +8764,16 @@ async function buildDriverLogsPdf(driver, logs, preTrips) {
     const newPage = () => {
       page = doc.addPage([PW, PH]);
       y = PH - M;
-      text('Harder Contracting Ltd. - Driver Daily Log (continued) - ' + driver + ' - ' + dayLabel(log.start), M, y - 10, 9, bold);
+      text(TRAINING_EMPLOYER.name + ' - Driver Daily Log (continued) - ' + driver + ' - ' + dayLabel(log.start), M, y - 10, 9, bold);
       y -= 26;
     };
     const ensure = (need) => { if (y - need < M) newPage(); };
 
     // ----- Header -----
-    text('Harder Contracting Ltd.', M, y - 12, 10, font, rgb(0.35, 0.35, 0.35));
-    text('DRIVER DAILY LOG', M, y - 30, 18, bold);
-    text(driver, PW - M - textW(driver, 16, bold), y - 24, 16, bold);
-    y -= 44;
+    letterhead(page, y);
+    text('DRIVER DAILY LOG', M, y - 58, 18, bold);
+    text(driver, PW - M - textW(driver, 16, bold), y - 54, 16, bold);
+    y -= 70;
     hline(M, PW - M, y, 1.2, rgb(0.2, 0.2, 0.2));
     y -= 16;
     const kmS = parseFloat(log.odometerStart), kmE = parseFloat(log.odometerEnd);
@@ -8664,7 +8792,17 @@ async function buildDriverLogsPdf(driver, logs, preTrips) {
       text(f[1], M + i * colW, y - 18, i === 0 ? 10 : 12, bold);
       if (f[2]) text(f[2], M + i * colW, y - 28, 8, font, rgb(0.3, 0.3, 0.3));
     });
-    y -= 36;
+    y -= 38;
+    // Second header row: unit, licence plate, home terminal, trailers (one line each).
+    [['UNIT', log.unit || '-', 0, 105], ['LICENCE PLATE', log.plate || '-', 110, 105], ['HOME TERMINAL LOCATION', log.homeTerminal || '-', 220, 180]].forEach((f) => {
+      text(f[0], M + f[2], y - 4, 7, bold, rgb(0.4, 0.4, 0.4));
+      text(fitText(f[1], 12, f[3], bold), M + f[2], y - 18, 12, bold);
+    });
+    const trl = (log.trailers || []).slice(0, 3);
+    text(trl.length > 1 ? 'TRAILERS' : 'TRAILER', M + 410, y - 4, 7, bold, rgb(0.4, 0.4, 0.4));
+    if (trl.length === 0) text('-', M + 410, y - 18, 12, bold);
+    trl.forEach((t, i) => text(fitText(t.unitName + (t.plate ? '  -  ' + t.plate : '  -  plate not recorded'), trl.length > 1 ? 9.5 : 12, PW - M - (M + 410), bold), M + 410, y - 18 - i * 11, trl.length > 1 ? 9.5 : 12, bold));
+    y -= 36 + Math.max(0, trl.length - 1) * 8;
 
     // ----- Grid(s) -----
     const dayGrids = computeDayGrids(log);
@@ -8735,6 +8873,7 @@ async function buildDriverLogsPdf(driver, logs, preTrips) {
     if (changes.length) {
       ensure(30);
       text('DUTY CHANGES', M, y - 8, 8, bold, rgb(0.4, 0.4, 0.4));
+      text('LOCATION (PHONE GPS)', M + 460, y - 8, 8, bold, rgb(0.4, 0.4, 0.4));
       y -= 14;
       for (let i = 0; i < changes.length; i++) {
         ensure(13);
@@ -8745,7 +8884,9 @@ async function buildDriverLogsPdf(driver, logs, preTrips) {
         text(hm(c.time) + (sameDay ? '' : ' (' + dayLabel(c.time) + ')'), M, y - 9, 9, bold);
         text(STATUS_NAME[c.status] || c.status, M + 120, y - 9, 9);
         text(dur, M + 240, y - 9, 9);
-        if (c.note) text(String(c.note).slice(0, 90), M + 290, y - 9, 9, font, rgb(0.3, 0.3, 0.3));
+        if (c.note) text(fitText(c.note, 9, 160), M + 290, y - 9, 9, font, rgb(0.3, 0.3, 0.3));
+        const where = c.loc ? (c.loc.place || (typeof c.loc.lat === 'number' ? c.loc.lat.toFixed(4) + ', ' + c.loc.lng.toFixed(4) : '')) : '';
+        if (where) text(fitText(where, 9, PW - M - (M + 460)), M + 460, y - 9, 9, font, rgb(0.15, 0.3, 0.55));
         y -= 13;
       }
       y -= 6;
@@ -8794,10 +8935,10 @@ async function buildDriverLogsPdf(driver, logs, preTrips) {
       const textW = (str, size, f) => (f || font).widthOfTextAtSize(safe(str), size);
       const hl = (x1, x2, yy, th, color) => page.drawLine({ start: { x: x1, y: yy }, end: { x: x2, y: yy }, thickness: th, color: color || rgb(0.6, 0.6, 0.6) });
       const head = (cont) => {
-        text('Harder Contracting Ltd.', M, y - 12, 10, font, rgb(0.35, 0.35, 0.35));
-        text('PRE-TRIP INSPECTION' + (cont ? ' (continued)' : ''), M, y - 30, 18, bold);
-        text(insp.driver || driver, PW - M - textW(insp.driver || driver, 16, bold), y - 24, 16, bold);
-        y -= 44;
+        letterhead(page, y);
+        text('PRE-TRIP INSPECTION' + (cont ? ' (continued)' : ''), M, y - 58, 18, bold);
+        text(insp.driver || driver, PW - M - textW(insp.driver || driver, 16, bold), y - 54, 16, bold);
+        y -= 70;
         hl(M, PW - M, y, 1.2, rgb(0.2, 0.2, 0.2));
         y -= 16;
       };
@@ -8807,6 +8948,7 @@ async function buildDriverLogsPdf(driver, logs, preTrips) {
       const major = bad.filter((it) => it.severity === 'major').length;
       const info = [
         ['UNIT', u.unitName + (u.unitType === 'trailer' ? ' (trailer)' : u.unitType === 'truck' ? ' (truck)' : '')],
+        ['LICENCE PLATE', u.plate || '-'],
         ['DATE', dayLabel(insp.time)],
         ['TIME', hm(insp.time)],
         ['RESULT', bad.length === 0 ? 'All OK (' + items.length + ' items)' : bad.length + ' defect' + (bad.length > 1 ? 's' : '') + (major ? ' (' + major + ' major)' : '')],
@@ -8814,7 +8956,7 @@ async function buildDriverLogsPdf(driver, logs, preTrips) {
       const cw = (PW - 2 * M) / info.length;
       info.forEach((f, i) => {
         text(f[0], M + i * cw, y - 4, 7, bold, rgb(0.4, 0.4, 0.4));
-        text(f[1], M + i * cw, y - 18, i === 3 ? 11 : 12, bold, i === 3 && bad.length ? rgb(0.8, 0.15, 0.1) : undefined);
+        text(f[1], M + i * cw, y - 18, i === 4 ? 11 : 12, bold, i === 4 && bad.length ? rgb(0.8, 0.15, 0.1) : undefined);
       });
       y -= 34;
 
@@ -8886,7 +9028,7 @@ function bytesToBase64(bytes) {
 // One past daily log in a list: tap to show or hide its duty grid (read-only,
 // no dragging), plus time in/out, km start/end and whether it's signed. The
 // driver can look back at any of the last 14 days after the log is closed.
-function PastLogRow({ log, defaultOpen }) {
+function PastLogRow({ log, defaultOpen, trailers }) {
   const [open, setOpen] = useState(!!defaultOpen);
   return (
     <div className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised }}>
@@ -8905,9 +9047,28 @@ function PastLogRow({ log, defaultOpen }) {
             In {fmtTime(log.start)} · Out {log.end ? fmtTime(log.end) : 'still open'}
             {(log.odometerStart || log.odometerEnd) ? ` · KM ${log.odometerStart || '?'} → ${log.odometerEnd || '?'}` : ''}
           </p>
+          {(log.unit || log.plate || log.homeTerminal) && (
+            <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>
+              {log.unit ? `Unit ${log.unit}` : ''}{log.plate ? ` · Plate ${log.plate}` : ''}{log.homeTerminal ? ` · Home terminal location: ${log.homeTerminal}` : ''}
+            </p>
+          )}
+          {(trailers || []).length > 0 && (
+            <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>
+              Trailer{trailers.length > 1 ? 's' : ''}: {trailers.map((t) => t.unitName + (t.plate ? ' (' + t.plate + ')' : '')).join(', ')}
+            </p>
+          )}
           <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${COLORS.line}` }}>
             <DriverLogGrid log={log} />
           </div>
+          {(log.statusChanges || []).some((c) => c.loc) && (
+            <div className="mt-2 space-y-1">
+              {[...(log.statusChanges || [])].sort((a, b) => new Date(a.time) - new Date(b.time)).map((c) => (
+                <p key={c.id} className="text-xs" style={{ color: COLORS.inkDim }}>
+                  <span className="font-mono">{fmtTime(c.time)}</span> {DUTY_STATUS_LABELS[c.status]}{c.loc ? ' · 📍 ' + locLabel(c.loc) : ''}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -8916,7 +9077,7 @@ function PastLogRow({ log, defaultOpen }) {
 
 // Roadside / scale stop: the driver types the officer's email and the last 14
 // days of this driver's logs go out as a plain-text email via the backend.
-function EmailLogsPanel({ driver, allLogs, preTrips }) {
+function EmailLogsPanel({ driver, allLogs, preTrips, unitPlates }) {
   const [open, setOpen] = useState(false);
   const [to, setTo] = useState(() => { try { return localStorage.getItem('lastLogEmailTo') || ''; } catch (e) { return ''; } });
   const [state, setState] = useState('idle'); // idle | sending | sent | error
@@ -8933,7 +9094,9 @@ function EmailLogsPanel({ driver, allLogs, preTrips }) {
       .sort((a, b) => a.start.localeCompare(b.start))
       .map((l) => ({
         start: l.start, end: l.end || null, odometerStart: l.odometerStart || '', odometerEnd: l.odometerEnd || '',
-        statusChanges: (l.statusChanges || []).map((c) => ({ time: c.time, status: c.status, note: c.note || '' })),
+        unit: l.unit || '', plate: l.plate || (unitPlates || {})[slugForUnit(l.unit || '')] || '', homeTerminal: l.homeTerminal || '',
+        trailers: trailersForLog(l, allLogs, preTrips, unitPlates),
+        statusChanges: (l.statusChanges || []).map((c) => ({ time: c.time, status: c.status, note: c.note || '', loc: c.loc || null })),
         signature: l.signature || null,
       }));
     const logs = what === 'pretrip' ? [] : allMyLogs;
@@ -8945,7 +9108,7 @@ function EmailLogsPanel({ driver, allLogs, preTrips }) {
       .map((t) => ({
         id: t.id, driver: t.driver, time: t.time, signedAt: t.signedAt || t.time, signature: t.signature || null,
         units: (t.units || []).map((u) => ({
-          unitName: u.unitName, unitType: u.unitType,
+          unitName: u.unitName, unitType: u.unitType, plate: u.plate || (unitPlates || {})[slugForUnit(u.unitName || '')] || '',
           items: (u.items || []).map((it) => ({ label: it.label, section: it.section || '', status: it.status, severity: it.severity || null, note: it.note || '' })),
         })),
       }));
@@ -9014,7 +9177,7 @@ function EmailLogsPanel({ driver, allLogs, preTrips }) {
   );
 }
 
-function InspectionModeScreen({ driver, allLogs, preTrips, onExit, documents, renewalStatus }) {
+function InspectionModeScreen({ driver, allLogs, preTrips, unitPlates, onExit, documents, renewalStatus }) {
   const [confirmingExit, setConfirmingExit] = useState(false);
   const [exitPin, setExitPin] = useState('');
   const [exitError, setExitError] = useState('');
@@ -9107,14 +9270,14 @@ function InspectionModeScreen({ driver, allLogs, preTrips, onExit, documents, re
         <p className="text-sm mb-6" style={{ color: COLORS.inkDim }}>No logs on record.</p>
       )}
 
-      <div className="mb-4"><EmailLogsPanel driver={driver} allLogs={allLogs} preTrips={preTrips} /></div>
+      <div className="mb-4"><EmailLogsPanel driver={driver} allLogs={allLogs} preTrips={preTrips} unitPlates={unitPlates} /></div>
 
       <p className="text-xs uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Last 14 days</p>
       {recentLogs.length === 0 ? (
         <p className="text-sm" style={{ color: COLORS.inkDim }}>No logs in the last 14 days.</p>
       ) : (
         <div className="space-y-2">
-          {recentLogs.map((l) => <PastLogRow key={l.id} log={l} />)}
+          {recentLogs.map((l) => <PastLogRow key={l.id} log={l} trailers={trailersForLog(l, myLogs, preTrips, unitPlates)} />)}
         </div>
       )}
     </div>
@@ -9126,7 +9289,7 @@ function InspectionModeScreen({ driver, allLogs, preTrips, onExit, documents, re
 // this shows exactly that, flags any gaps, and lets a stretch of no
 // driving get backfilled as a full day of Off Duty, all covered by one
 // signature rather than needing to sign each day separately.
-function DriverRecentLogsSection({ driver, allLogs, preTrips, onBackfillOffDuty }) {
+function DriverRecentLogsSection({ driver, allLogs, preTrips, unitPlates, onBackfillOffDuty }) {
   const [backfilling, setBackfilling] = useState(false);
   const [signature, setSignature] = useState(null);
 
@@ -9149,7 +9312,7 @@ function DriverRecentLogsSection({ driver, allLogs, preTrips, onBackfillOffDuty 
     <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>Recent Logs</p>
       <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>Alberta requires the last 14 days of logs to be on hand.</p>
-      <div className="mb-4"><EmailLogsPanel driver={driver} allLogs={allLogs} preTrips={preTrips} /></div>
+      <div className="mb-4"><EmailLogsPanel driver={driver} allLogs={allLogs} preTrips={preTrips} unitPlates={unitPlates} /></div>
 
       {missingDates.length > 0 && (
         <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.accent}` }}>
@@ -9184,14 +9347,54 @@ function DriverRecentLogsSection({ driver, allLogs, preTrips, onBackfillOffDuty 
         <p className="text-sm" style={{ color: COLORS.inkDim }}>No logs yet.</p>
       ) : (
         <div className="space-y-2">
-          {recentLogs.map((l, idx) => <PastLogRow key={l.id} log={l} defaultOpen={idx === 0} />)}
+          {recentLogs.map((l, idx) => <PastLogRow key={l.id} log={l} defaultOpen={idx === 0} trailers={trailersForLog(l, myLogs, preTrips, unitPlates)} />)}
         </div>
       )}
     </div>
   );
 }
 
-function DriverLogSection({ liveOdometer, driver, openLog, allLogs, onStart, onAddStatus, onEnd, onUpdateStatusChange, hasValidInspection, inspectionHoursRemaining, onOpenPreTrip, onOpenTrailerPreTrip, onOpenInspectionMode, isAdmin, documents, onAddDocument, onDeleteDocument, onRenameDocument, uploadingDocument, renewalStatus }) {
+// Unit, licence plate and home terminal for the driver's log. Plate is kept per unit and
+// home terminal per driver — they stay put until someone changes them here.
+function LogVehicleInfo({ unit, plate, homeTerminal, trailers, onSavePlate, onSaveHome }) {
+  const [editing, setEditing] = useState(null); // 'plate' | 'home' | null
+  const [draft, setDraft] = useState('');
+  const row = (label, value, key, onSave, placeholder) => (
+    <div className="flex items-center justify-between gap-2 text-sm py-1">
+      <span className="text-xs shrink-0" style={{ color: COLORS.inkDim, width: 112 }}>{label}</span>
+      {editing === key ? (
+        <div className="flex gap-2 flex-1 items-center">
+          <TextInput value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={placeholder} className="flex-1" autoCapitalize={key === 'plate' ? 'characters' : 'words'} />
+          <Btn onClick={async () => { await onSave(draft); setEditing(null); }}>Save</Btn>
+          <Btn variant="ghost" onClick={() => setEditing(null)}>Cancel</Btn>
+        </div>
+      ) : (
+        <React.Fragment>
+          <span className="flex-1 font-semibold break-words">{value || <span style={{ color: '#E07A5F' }}>not set</span>}</span>
+          <button type="button" onClick={() => { setDraft(value || ''); setEditing(key); }} className="text-xs underline shrink-0" style={{ color: COLORS.accent }}>{value ? 'Change' : 'Set'}</button>
+        </React.Fragment>
+      )}
+    </div>
+  );
+  return (
+    <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+      <div className="flex items-center justify-between gap-2 text-sm py-1">
+        <span className="text-xs shrink-0" style={{ color: COLORS.inkDim, width: 112 }}>Unit</span>
+        <span className="flex-1 font-semibold">{unit || <span style={{ color: COLORS.inkDim }}>no unit selected</span>}</span>
+      </div>
+      {unit ? row('Licence plate', plate, 'plate', onSavePlate, 'e.g. ABC 1234') : null}
+      {(trailers || []).length > 0 && (
+        <div className="flex items-start justify-between gap-2 text-sm py-1">
+          <span className="text-xs shrink-0" style={{ color: COLORS.inkDim, width: 112 }}>Trailer{trailers.length > 1 ? 's' : ''}</span>
+          <span className="flex-1 font-semibold break-words">{trailers.map((t) => t.unitName + (t.plate ? ' — ' + t.plate : ' — plate not set')).join(', ')}</span>
+        </div>
+      )}
+      {row('Home terminal location', homeTerminal, 'home', onSaveHome, DEFAULT_HOME_TERMINAL)}
+    </div>
+  );
+}
+
+function DriverLogSection({ liveOdometer, driver, unitName, plate, homeTerminal, trailers, onSavePlate, onSaveHome, openLog, allLogs, onStart, onAddStatus, onEnd, onUpdateStatusChange, hasValidInspection, inspectionHoursRemaining, onOpenPreTrip, onOpenTrailerPreTrip, onOpenInspectionMode, isAdmin, documents, onAddDocument, onDeleteDocument, onRenameDocument, uploadingDocument, renewalStatus }) {
   const [startingLog, setStartingLog] = useState(false);
   const [odometerStartDraft, setOdometerStartDraft] = useState('');
   const [pendingStatus, setPendingStatus] = useState(null);
@@ -9250,6 +9453,7 @@ function DriverLogSection({ liveOdometer, driver, openLog, allLogs, onStart, onA
       </div>
       <p className="text-xs mb-4 no-print" style={{ color: COLORS.inkDim }}>Separate from your regular clock — this tracks hours of service.</p>
       <div className="no-print">
+        <LogVehicleInfo unit={unitName} plate={plate} homeTerminal={homeTerminal} trailers={trailers} onSavePlate={(v) => onSavePlate(unitName, v)} onSaveHome={onSaveHome} />
         <DriverDocumentsPanel
           driver={driver}
           documents={documents}
@@ -13838,6 +14042,9 @@ function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange,
   const [closeAt, setCloseAt] = useState('');
   const [odometerStart, setOdometerStart] = useState(log.odometerStart || '');
   const [odometerEnd, setOdometerEnd] = useState(log.odometerEnd || '');
+  const [unitDraft, setUnitDraft] = useState(log.unit || '');
+  const [plateDraft, setPlateDraft] = useState(log.plate || '');
+  const [homeDraft, setHomeDraft] = useState(log.homeTerminal || '');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [addingMissed, setAddingMissed] = useState(false);
   const [missedStatus, setMissedStatus] = useState('off');
@@ -13875,6 +14082,18 @@ function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange,
         <label className="block">
           <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Odometer end</span>
           <TextInput type="number" inputMode="numeric" value={odometerEnd} onChange={(e) => setOdometerEnd(e.target.value)} />
+        </label>
+        <label className="block">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Unit</span>
+          <TextInput value={unitDraft} onChange={(e) => setUnitDraft(e.target.value)} />
+        </label>
+        <label className="block">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Licence plate</span>
+          <TextInput value={plateDraft} onChange={(e) => setPlateDraft(e.target.value)} />
+        </label>
+        <label className="block col-span-2">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Home terminal location</span>
+          <TextInput value={homeDraft} onChange={(e) => setHomeDraft(e.target.value)} placeholder={DEFAULT_HOME_TERMINAL} />
         </label>
       </div>
 
@@ -13917,6 +14136,11 @@ function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange,
               <div className="text-xs">
                 <span className="font-mono">{fmtDate(c.time)} {fmtTime(c.time)}</span> — {DUTY_STATUS_LABELS[c.status]}
                 {c.note && <span style={{ color: COLORS.inkDim }}> · {c.note}</span>}
+                {c.loc && (
+                  <div style={{ color: COLORS.inkDim }}>
+                    📍 {locLabel(c.loc)}{typeof c.loc.lat === 'number' && <a href={`https://www.google.com/maps?q=${c.loc.lat},${c.loc.lng}`} target="_blank" rel="noopener noreferrer" className="underline ml-1" style={{ color: COLORS.accent }}>map</a>}
+                  </div>
+                )}
               </div>
               <div className="flex gap-2 shrink-0">
                 <button onClick={() => setEditingChangeId(c.id)} className="text-xs underline" style={{ color: COLORS.accent }}>Edit</button>
@@ -13975,7 +14199,7 @@ function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange,
         </div>
       ) : (
         <div className="flex gap-2 flex-wrap">
-          <Btn onClick={() => onSave({ odometerStart, odometerEnd })}>Save changes</Btn>
+          <Btn onClick={() => onSave({ odometerStart, odometerEnd, unit: unitDraft.trim(), plate: plateDraft.trim().toUpperCase(), homeTerminal: homeDraft.trim() })}>Save changes</Btn>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
           <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>Delete log</button>
         </div>
@@ -14712,6 +14936,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [oilChangeDates, setOilChangeDates] = useState(() => cacheGet('oilChangeDates', {}));
   const [oilReminders, setOilReminders] = useState(() => cacheGet('oilChangeReminders', {}));
   const [oilManualHours, setOilManualHours] = useState(() => cacheGet('oilChangeManualHours', {}));
+  const [driverHomeTerminals, setDriverHomeTerminals] = useState(() => cacheGet('driverHomeTerminals', {}));
+  const [unitPlates, setUnitPlates] = useState(() => cacheGet('unitPlates', {}));
   const [editingOilBaselineForUnit, setEditingOilBaselineForUnit] = useState(null);
   const [diagExpanded, setDiagExpanded] = useState(null);
   const [diagSearch, setDiagSearch] = useState('');
@@ -15919,6 +16145,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     return () => { ref.off('value', on); dref.off('value', don); rref.off('value', ron); href.off('value', hon); };
   }, []);
 
+
+  useEffect(() => {
+    const hRef = firebase.database().ref('driverHomeTerminals');
+    const hOn = hRef.on('value', (snap) => { const val = snap.val() || {}; setDriverHomeTerminals(val); cacheSet('driverHomeTerminals', val); });
+    const pRef = firebase.database().ref('unitPlates');
+    const pOn = pRef.on('value', (snap) => { const val = snap.val() || {}; setUnitPlates(val); cacheSet('unitPlates', val); });
+    return () => { hRef.off('value', hOn); pRef.off('value', pOn); };
+  }, []);
 
   useEffect(() => {
     const ref = firebase.database().ref('receipts');
@@ -18747,6 +18981,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const now = new Date().toISOString();
     const record = { id: uid(), driver: currentMechanic, time: now, units: unitsData, signature, signedAt: now };
     await saveOneInspection(record);
+    // Remember any plate that was typed or changed so it comes up next time (and shows on the log).
+    for (const u of unitsData) {
+      const plate = (u.plate || '').trim().toUpperCase();
+      if (plate && plate !== ((unitPlates || {})[slugForUnit(u.unitName || '')] || '')) {
+        try { await saveUnitPlate(u.unitName, plate); } catch (e) { /* the inspection itself is already saved */ }
+      }
+    }
 
     // One work order per unit that had any deficiencies — every item found
     // on that unit, minor or major, goes into its own work order tagged to
@@ -18806,30 +19047,62 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await patchOneTimesheetEntry(dayEntries[0].id, { logBookMismatchHours: mismatch });
   };
 
+  // Taps are ignored while a status change is still waiting on the phone's
+  // location (a few seconds at most), so two quick taps can't overwrite each other.
+  const driverLogBusyRef = useRef(false);
+  const myHomeTerminal = (driverHomeTerminals || {})[slugForMechanic(currentMechanic)] || DEFAULT_HOME_TERMINAL;
+  // Changing either one also updates the log that's open right now; closed logs keep what they had.
+  const saveMyHomeTerminal = async (value) => {
+    const v = (value || '').trim();
+    try {
+      await saveDriverHomeTerminal(currentMechanic, v);
+      if (openDriverLog) await patchOneDriverLog(openDriverLog.id, { homeTerminal: v || DEFAULT_HOME_TERMINAL });
+    } catch (e) { alert("Couldn't save — check your signal and try again."); }
+  };
+  const savePlateForUnit = async (unitName, value) => {
+    const v = (value || '').trim().toUpperCase();
+    if (!unitName) return;
+    try {
+      await saveUnitPlate(unitName, v);
+      if (openDriverLog && (openDriverLog.unit || '') === unitName) await patchOneDriverLog(openDriverLog.id, { plate: v });
+    } catch (e) { alert("Couldn't save — check your signal and try again."); }
+  };
   const startDriverLog = async (odometerStart, unit) => {
+    if (driverLogBusyRef.current) return;
+    driverLogBusyRef.current = true;
+    try {
+    const loc = await getPhoneLocation();
     const now = new Date().toISOString();
     const entry = {
       id: uid(),
       driver: currentMechanic,
       unit: unit || '',
+      plate: (unitPlates || {})[slugForUnit(unit || '')] || '',
+      homeTerminal: myHomeTerminal,
       start: now,
       end: null,
       odometerStart: odometerStart || '',
       odometerEnd: '',
-      statusChanges: [{ id: uid(), status: 'off', time: now, note: 'Starting shift' }],
+      statusChanges: [{ id: uid(), status: 'off', time: now, note: 'Starting shift', ...(loc ? { loc } : {}) }],
       signature: null,
       signedAt: null,
     };
     await saveOneDriverLog(entry);
     await checkLogBookMismatch(currentMechanic, localDateStr(new Date(now)), entry);
+    } finally { driverLogBusyRef.current = false; }
   };
 
   const addDriverStatusChange = async (status, note) => {
     if (!openDriverLog) return;
-    const change = { id: uid(), status, time: new Date().toISOString(), note: note || '' };
+    if (driverLogBusyRef.current) return;
+    driverLogBusyRef.current = true;
+    try {
+    const loc = await getPhoneLocation();
+    const change = { id: uid(), status, time: new Date().toISOString(), note: note || '', ...(loc ? { loc } : {}) };
     const nextChanges = [...(openDriverLog.statusChanges || []), change];
     await patchOneDriverLog(openDriverLog.id, { statusChanges: nextChanges });
     await checkLogBookMismatch(currentMechanic, localDateStr(new Date(openDriverLog.start)), { ...openDriverLog, statusChanges: nextChanges });
+    } finally { driverLogBusyRef.current = false; }
   };
 
   const endDriverLog = async (odometerEnd, signature, endIso) => {
@@ -18843,8 +19116,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       if (isNaN(endMs) || endMs < lastChange) { alert("The finish time can't be before your last log entry (" + fmtDate(new Date(lastChange).toISOString()) + ' ' + fmtTime(new Date(lastChange).toISOString()) + ').'); return false; }
       if (endMs > Date.now() + 60000) { alert("That time hasn't happened yet."); return false; }
     }
+    if (driverLogBusyRef.current) return false;
+    driverLogBusyRef.current = true;
+    try {
     const now = endIso || new Date().toISOString();
-    const finalStatus = { id: uid(), status: 'off', time: now, note: 'Ending shift' };
+    // Only stamp where the phone is if the log is closing right now (or within
+    // 10 minutes of now) — a back-dated close would show the wrong place.
+    const closingNow = !endIso || Math.abs(Date.now() - new Date(endIso).getTime()) < 10 * 60 * 1000;
+    const loc = closingNow ? await getPhoneLocation() : null;
+    const finalStatus = { id: uid(), status: 'off', time: now, note: 'Ending shift', ...(loc ? { loc } : {}) };
     const nextChanges = [...(openDriverLog.statusChanges || []), finalStatus];
     await patchOneDriverLog(openDriverLog.id, {
       end: now,
@@ -18855,6 +19135,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     });
     await checkLogBookMismatch(currentMechanic, localDateStr(new Date(openDriverLog.start)), { ...openDriverLog, end: now, statusChanges: nextChanges });
     return true;
+    } finally { driverLogBusyRef.current = false; }
   };
 
   // Fills in any of the last 14 calendar days that have no log at all, as a
@@ -21374,6 +21655,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           units={units}
           unitTypes={unitTypes}
           trailerOnly={preTripTrailerOnly}
+          unitPlates={unitPlates}
           onCancel={() => { setShowPreTripForm(false); setPreTripTrailerOnly(false); }}
           onSubmit={async (unitsData, signature) => {
             await submitPreTripInspection(unitsData, signature);
@@ -21390,6 +21672,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           driver={currentMechanic}
           allLogs={driverLogs}
           preTrips={preTripInspections}
+          unitPlates={unitPlates}
           onExit={() => setShowInspectionMode(false)}
           documents={driverDocuments}
           renewalStatus={permitRenewalStatus}
@@ -21756,6 +22039,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             <DriverLogSection
               liveOdometer={(() => { const d = samsaraDiagnostics[slugForUnit(effectiveUnit)]; const k = d && d.odometerKm != null ? Math.round(parseFloat(d.odometerKm)) : NaN; return isNaN(k) ? null : k; })()}
               driver={currentMechanic}
+              unitName={openDriverLog ? (openDriverLog.unit || effectiveUnit) : effectiveUnit}
+              plate={openDriverLog && openDriverLog.plate != null ? openDriverLog.plate : ((unitPlates || {})[slugForUnit(openDriverLog ? (openDriverLog.unit || effectiveUnit) : effectiveUnit)] || '')}
+              homeTerminal={openDriverLog && openDriverLog.homeTerminal ? openDriverLog.homeTerminal : myHomeTerminal}
+              trailers={openDriverLog ? trailersForLog(openDriverLog, driverLogs, preTripInspections, unitPlates) : []}
+              onSavePlate={savePlateForUnit}
+              onSaveHome={saveMyHomeTerminal}
               openLog={openDriverLog}
               allLogs={driverLogs}
               onStart={(odo) => startDriverLog(odo, effectiveUnit)}
@@ -21787,6 +22076,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               driver={currentMechanic}
               allLogs={driverLogs}
               preTrips={preTripInspections}
+              unitPlates={unitPlates}
               onBackfillOffDuty={backfillOffDutyDriverLogs}
             />
           )}
@@ -23656,7 +23946,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       </button>
                       {isOpen && (
                         <div className="p-4 pt-0">
-                          <div className="mb-3"><EmailLogsPanel key={name} driver={name} allLogs={driverLogs} preTrips={preTripInspections} /></div>
+                          <div className="mb-3"><EmailLogsPanel key={name} driver={name} allLogs={driverLogs} preTrips={preTripInspections} unitPlates={unitPlates} /></div>
                           {logsThisWeek.length === 0 ? (
                             <p className="text-sm" style={{ color: COLORS.inkDim }}>No logs this week.</p>
                           ) : (
