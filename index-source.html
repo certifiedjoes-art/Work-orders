@@ -14096,6 +14096,8 @@ function DriverLogEditCard({ log, trailers, isWeekApproved, onSave, onDelete, on
   const [missedTime, setMissedTime] = useState('');
   const [missedNote, setMissedNote] = useState('');
   const [editingChangeId, setEditingChangeId] = useState(null);
+  const [removeTarget, setRemoveTarget] = useState(null);
+  const [removeReady, setRemoveReady] = useState(false);
 
   const sorted = [...(log.statusChanges || [])].sort((a, b) => new Date(a.time) - new Date(b.time));
 
@@ -14217,12 +14219,34 @@ function DriverLogEditCard({ log, trailers, isWeekApproved, onSave, onDelete, on
               <div className="flex gap-2 shrink-0">
                 <button onClick={() => setEditingChangeId(c.id)} className="text-xs underline" style={{ color: COLORS.accent }}>Edit</button>
                 {onSplitLog && rowIdx > 0 && <button onClick={() => onSplitLog(log, c.id)} className="text-xs underline" style={{ color: COLORS.accent }}>Split</button>}
-                <button onClick={() => onRemoveChange(c.id)} className="text-xs underline" style={{ color: '#E07A5F' }}>Remove</button>
+                <button onClick={() => { setRemoveTarget(c); setRemoveReady(false); setTimeout(() => setRemoveReady(true), 900); }} className="text-xs underline" style={{ color: '#E07A5F' }}>Remove</button>
               </div>
             </div>
           )
         )}
       </div>
+
+      {removeTarget && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center px-4" style={{ background: 'rgba(0,0,0,0.75)', paddingTop: '18vh' }}>
+          <div className="w-full max-w-sm rounded-xl p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
+            <p className="font-display font-semibold mb-2">Remove this entry?</p>
+            <p className="text-sm font-mono mb-1">{fmtDate(removeTarget.time)} {fmtTime(removeTarget.time)}</p>
+            <p className="text-sm mb-4">{DUTY_STATUS_LABELS[removeTarget.status] || removeTarget.status}{removeTarget.note ? ' · ' + removeTarget.note : ''}</p>
+            <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>This can't be undone.</p>
+            <Btn onClick={() => setRemoveTarget(null)} className="w-full mb-10">Keep it</Btn>
+            <div className="flex justify-start">
+              <button
+                disabled={!removeReady}
+                onClick={() => { const id = removeTarget.id; setRemoveTarget(null); onRemoveChange(id); }}
+                className="text-sm underline px-3 py-2"
+                style={{ color: removeReady ? '#E07A5F' : COLORS.inkDim, opacity: removeReady ? 1 : 0.4 }}
+              >
+                Yes, remove it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {addingMissed ? (
         <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised }}>
