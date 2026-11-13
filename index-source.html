@@ -8604,6 +8604,65 @@ function DriverDocumentsPanel({ driver, documents, canEdit, onAdd, onDelete, onR
   );
 }
 
+// Roadside / scale stop: the driver types the officer's email and the last 14
+// days of this driver's logs go out as a plain-text email via the backend.
+function EmailLogsPanel({ driver, allLogs }) {
+  const [open, setOpen] = useState(false);
+  const [to, setTo] = useState(() => { try { return localStorage.getItem('lastLogEmailTo') || ''; } catch (e) { return ''; } });
+  const [state, setState] = useState('idle'); // idle | sending | sent | error
+  const [msg, setMsg] = useState('');
+
+  const send = async () => {
+    const addr = to.trim();
+    if (!/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(addr)) { setState('error'); setMsg("That email address doesn't look right."); return; }
+    const dates = [];
+    for (let i = 0; i < 14; i++) { const d = new Date(); d.setDate(d.getDate() - i); dates.push(localDateStr(d)); }
+    const logs = (allLogs || [])
+      .filter((l) => l.driver === driver && l.start && dates.includes(l.start.slice(0, 10)))
+      .sort((a, b) => a.start.localeCompare(b.start))
+      .map((l) => ({
+        start: l.start, end: l.end || null, odometerStart: l.odometerStart || '', odometerEnd: l.odometerEnd || '',
+        statusChanges: (l.statusChanges || []).map((c) => ({ time: c.time, status: c.status, note: c.note || '' })),
+      }));
+    if (logs.length === 0) { setState('error'); setMsg('No logs in the last 14 days to send.'); return; }
+    setState('sending'); setMsg('');
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 30000);
+      const res = await fetch(CLOUD_FUNCTION_URL, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctl.signal,
+        body: JSON.stringify({ key: APP_SECRET, mode: 'emailDriverLogs', to: addr, driver, logs }),
+      });
+      clearTimeout(timer);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error(json.error || ('HTTP ' + res.status));
+      try { localStorage.setItem('lastLogEmailTo', addr); } catch (e) {}
+      setState('sent'); setMsg(`Sent ${json.count || logs.length} log${(json.count || logs.length) === 1 ? '' : 's'} to ${addr}.`);
+    } catch (e) {
+      setState('error');
+      setMsg(e && e.name === 'AbortError' ? 'Took too long — check your signal and try again.' : "Couldn't send — needs a connection (" + ((e && e.message) || 'try again') + ').');
+    }
+  };
+
+  if (!open) {
+    return <Btn variant="ghost" onClick={() => { setOpen(true); setState('idle'); setMsg(''); }}>📧 Email my last 14 logs</Btn>;
+  }
+  return (
+    <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.accent}` }}>
+      <p className="text-sm font-semibold mb-1">Email my last 14 days of logs</p>
+      <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Type the email address to send them to.</p>
+      <TextInput type="email" inputMode="email" autoCapitalize="none" autoCorrect="off" value={to}
+        onChange={(e) => { setTo(e.target.value); if (state !== 'sending') { setState('idle'); setMsg(''); } }}
+        placeholder="officer@example.com" className="w-full mb-2" />
+      {msg && <p className="text-xs mb-2" style={{ color: state === 'sent' ? COLORS.done : '#E07A5F' }}>{msg}</p>}
+      <div className="flex gap-2">
+        <Btn onClick={send} disabled={state === 'sending' || !to.trim()}>{state === 'sending' ? 'Sending…' : (state === 'sent' ? 'Send again' : 'Send')}</Btn>
+        <Btn variant="ghost" onClick={() => setOpen(false)}>Close</Btn>
+      </div>
+    </div>
+  );
+}
+
 function InspectionModeScreen({ driver, allLogs, onExit, documents, renewalStatus }) {
   const [confirmingExit, setConfirmingExit] = useState(false);
   const [exitPin, setExitPin] = useState('');
@@ -8697,6 +8756,8 @@ function InspectionModeScreen({ driver, allLogs, onExit, documents, renewalStatu
         <p className="text-sm mb-6" style={{ color: COLORS.inkDim }}>No logs on record.</p>
       )}
 
+      <div className="mb-4"><EmailLogsPanel driver={driver} allLogs={allLogs} /></div>
+
       <p className="text-xs uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Last 14 days</p>
       {recentLogs.length === 0 ? (
         <p className="text-sm" style={{ color: COLORS.inkDim }}>No logs in the last 14 days.</p>
@@ -8747,6 +8808,7 @@ function DriverRecentLogsSection({ driver, allLogs, onBackfillOffDuty }) {
     <div className="rounded-lg p-5 mb-8" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
       <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>Recent Logs</p>
       <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>Alberta requires the last 14 days of logs to be on hand.</p>
+      <div className="mb-4"><EmailLogsPanel driver={driver} allLogs={allLogs} /></div>
 
       {missingDates.length > 0 && (
         <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.accent}` }}>
@@ -27007,13 +27069,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const list = stuckTracks || [];
       if (!list.length) return;
       if (!window.confirm(`Close ${list.length} stuck GPS track${list.length === 1 ? '' : 's'}? Nothing is deleted. They just stop being recorded.`)) return;
-      setStuckStatus('Closing…');
+      // Each write gets 25 seconds to be confirmed by Firebase; the screen shows which track it is on and,
+      // if one fails or times out, the reason, so a stall is never silent.
+      const withTimeout = (promise, ms) => Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('no answer from Firebase after ' + Math.round(ms / 1000) + ' seconds')), ms))]);
       let done = 0;
-      for (const t of list) {
-        try { await firebase.database().ref('machineTrackRecords/' + t.id + '/endedAt').set(t.endIso); done++; } catch (e) { /* left open, shown again on the next check */ }
+      const problems = [];
+      for (let i = 0; i < list.length; i++) {
+        const t = list[i];
+        setStuckStatus(`Closing ${i + 1} of ${list.length} (${t.machine})…`);
+        try {
+          await withTimeout(firebase.database().ref('machineTrackRecords/' + t.id + '/endedAt').set(t.endIso), 25000);
+          done++;
+        } catch (e) {
+          problems.push(`${t.machine}: ${e && e.message ? e.message : 'failed'}`);
+        }
       }
-      setStuckTracks([]);
-      setStuckStatus(`Closed ${done} of ${list.length}. The recorder skips them from its next run.`);
+      setStuckTracks(null);
+      setStuckStatus(`Closed ${done} of ${list.length}.${problems.length ? ' Problems: ' + problems.join('; ') + '. Tap "Check for stuck tracks" to see what is still open.' : ' The recorder skips them from its next run.'}`);
     };
     const altLabel = (v) => (v === '__mechanic__' ? 'Mechanic' : v === '__cook__' ? 'Cook' : v);
     const SCREEN_LABELS = { admin: 'Admin screen', shift: 'Shift screen (clock in / production / driver log)', dashboard: 'Work Order Board' };
