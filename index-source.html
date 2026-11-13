@@ -8604,6 +8604,184 @@ function DriverDocumentsPanel({ driver, documents, canEdit, onAdd, onDelete, onR
   );
 }
 
+// One page per daily log, for emailing to an officer: header (driver, date,
+// time in/out, odometer start/end), the duty-status grid drawn the way the app
+// draws it (Off / Sleeper / Driving / On Duty, with each row's total), the list
+// of duty changes, and the driver's signature. Drawn straight into the PDF as
+// vector lines, so it stays sharp when printed. A log spanning exactly two days
+// gets one continuous 48-hour grid (same as the app); longer ones get a grid per
+// day, continuing onto extra pages if needed.
+async function buildDriverLogsPdf(driver, logs) {
+  const doc = await PDFLib.PDFDocument.create();
+  const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica);
+  const bold = await doc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+  const rgb = PDFLib.rgb;
+  const PW = 792, PH = 612, M = 36;
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const safe = (t) => String(t == null ? '' : t).replace(/[—–]/g, '-').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[\r\n]+/g, ' ').replace(/[^\x20-\x7E -ÿ]/g, '');
+  const hm = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  const dayLabel = (t) => new Date(t).toLocaleDateString('en-CA', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+  const fmtH = (h) => { const m = Math.round(h * 60); return Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0'); };
+  const STATUS_NAME = { off: 'Off Duty', sleeper: 'Sleeper Berth', driving: 'Driving', onDuty: 'On Duty' };
+  const ROWS = ['off', 'sleeper', 'driving', 'onDuty'];
+  const sorted = [...logs].sort((a, b) => a.start.localeCompare(b.start));
+
+  for (const log of sorted) {
+    let page = doc.addPage([PW, PH]);
+    let y = PH - M; // top cursor
+    const text = (str, x, yy, size, f, color) => page.drawText(safe(str), { x, y: yy, size, font: f || font, color: color || rgb(0.1, 0.1, 0.1) });
+    const textW = (str, size, f) => (f || font).widthOfTextAtSize(safe(str), size);
+    const hline = (x1, x2, yy, th, color) => page.drawLine({ start: { x: x1, y: yy }, end: { x: x2, y: yy }, thickness: th, color: color || rgb(0.6, 0.6, 0.6) });
+    const vline = (xx, y1, y2, th, color) => page.drawLine({ start: { x: xx, y: y1 }, end: { x: xx, y: y2 }, thickness: th, color: color || rgb(0.6, 0.6, 0.6) });
+    const newPage = () => {
+      page = doc.addPage([PW, PH]);
+      y = PH - M;
+      text('Harder Contracting Ltd. - Driver Daily Log (continued) - ' + driver + ' - ' + dayLabel(log.start), M, y - 10, 9, bold);
+      y -= 26;
+    };
+    const ensure = (need) => { if (y - need < M) newPage(); };
+
+    // ----- Header -----
+    text('Harder Contracting Ltd.', M, y - 12, 10, font, rgb(0.35, 0.35, 0.35));
+    text('DRIVER DAILY LOG', M, y - 30, 18, bold);
+    text(driver, PW - M - textW(driver, 16, bold), y - 24, 16, bold);
+    y -= 44;
+    hline(M, PW - M, y, 1.2, rgb(0.2, 0.2, 0.2));
+    y -= 16;
+    const kmS = parseFloat(log.odometerStart), kmE = parseFloat(log.odometerEnd);
+    const kmDriven = !isNaN(kmS) && !isNaN(kmE) && kmE >= kmS ? Math.round((kmE - kmS) * 10) / 10 : null;
+    const fields = [
+      ['DATE', dayLabel(log.start)],
+      ['TIME IN', hm(log.start)],
+      ['TIME OUT', log.end ? hm(log.end) : 'Still open', log.end && dayLabel(log.end) !== dayLabel(log.start) ? dayLabel(log.end) : ''],
+      ['KM START', log.odometerStart ? String(log.odometerStart) : '-'],
+      ['KM END', log.odometerEnd ? String(log.odometerEnd) : '-'],
+      ['KM DRIVEN', kmDriven != null ? String(kmDriven) : '-'],
+    ];
+    const colW = (PW - 2 * M) / fields.length;
+    fields.forEach((f, i) => {
+      text(f[0], M + i * colW, y - 4, 7, bold, rgb(0.4, 0.4, 0.4));
+      text(f[1], M + i * colW, y - 18, i === 0 ? 10 : 12, bold);
+      if (f[2]) text(f[2], M + i * colW, y - 28, 8, font, rgb(0.3, 0.3, 0.3));
+    });
+    y -= 36;
+
+    // ----- Grid(s) -----
+    const dayGrids = computeDayGrids(log);
+    const views = dayGrids.length === 2
+      ? [{ dayStart: dayGrids[0].dayStart, dayEnd: dayGrids[1].dayEnd, dataEnd: dayGrids[1].dataEnd, points: [...dayGrids[0].points, ...dayGrids[1].points.filter((p) => !p.fixed)], startCumDriving: dayGrids[0].startCumDriving, startCumOnDuty: dayGrids[0].startCumOnDuty }]
+      : dayGrids;
+    if (views.length === 0) {
+      text('No status changes logged.', M, y - 12, 10);
+      y -= 24;
+    }
+    const labelW = 78, totW = 46;
+    const gridW = PW - 2 * M - labelW - totW;
+    const rowH = 22;
+    for (const v of views) {
+      ensure(18 + 14 + rowH * 4 + 12);
+      const spanDays = Math.max(1, Math.round((v.dayEnd.getTime() - v.dayStart.getTime()) / DAY_MS));
+      const range = spanDays * DAY_MS;
+      const gx = M + labelW;
+      const xOf = (t) => gx + ((new Date(t) - v.dayStart) / range) * gridW;
+      text(dayLabel(v.dayStart.toISOString()) + (spanDays > 1 ? ' to ' + dayLabel(new Date(v.dayEnd.getTime() - 1000).toISOString()) : ''), M, y - 10, 9, bold);
+      y -= 14;
+      const top = y - 10; // axis labels sit in this 10pt strip
+      const gridTop = top, gridBottom = top - rowH * 4;
+      // hour labels + vertical lines
+      for (let h = 0; h <= 24 * spanDays; h++) {
+        const xx = gx + (h / (24 * spanDays)) * gridW;
+        const isMid = h % 24 === 0;
+        vline(xx, gridTop, gridBottom, isMid ? 0.9 : 0.4, isMid ? rgb(0.35, 0.35, 0.35) : rgb(0.8, 0.8, 0.8));
+        if (h < 24 * spanDays && (spanDays === 1 || h % 2 === 0)) {
+          const hh = h % 24;
+          const lab = hh === 0 ? 'M' : hh === 12 ? 'N' : String(hh % 12);
+          text(lab, xx - textW(lab, 6.5) / 2, gridTop + 3, 6.5, font, rgb(0.35, 0.35, 0.35));
+        }
+      }
+      // row lines + labels
+      for (let r = 0; r <= 4; r++) hline(gx, gx + gridW, gridTop - r * rowH, r === 0 || r === 4 ? 0.9 : 0.5, rgb(0.45, 0.45, 0.45));
+      vline(gx + gridW, gridTop, gridBottom, 0.9, rgb(0.35, 0.35, 0.35));
+      ROWS.forEach((st, r) => text(STATUS_NAME[st], M, gridTop - r * rowH - rowH / 2 - 3, 8, bold));
+      text('Total', gx + gridW + 8, gridTop + 3, 6.5, bold, rgb(0.35, 0.35, 0.35));
+      // segments
+      const pts = [...v.points].sort((a, b) => new Date(a.time) - new Date(b.time));
+      const drawEnd = log.end ? v.dayEnd : new Date(Math.min(v.dayEnd.getTime(), Date.now()));
+      const hoursEnd = v.dataEnd || drawEnd;
+      const totals = {};
+      let cumD = v.startCumDriving, cumO = v.startCumOnDuty, prevY = null;
+      for (let i = 0; i < pts.length; i++) {
+        const segStart = new Date(pts[i].time);
+        const last = i + 1 >= pts.length;
+        const segEnd = last ? drawEnd : new Date(pts[i + 1].time);
+        if (segEnd <= segStart) continue;
+        const hrsReal = Math.max(0, ((last ? hoursEnd : segEnd) - segStart) / 3600000);
+        if (pts[i].status === 'driving') cumD += hrsReal;
+        if (pts[i].status === 'driving' || pts[i].status === 'onDuty') cumO += hrsReal;
+        totals[pts[i].status] = (totals[pts[i].status] || 0) + Math.max(0, (segEnd - segStart) / 3600000);
+        const over = cumD > HOS_LIMITS.driving || cumO > HOS_LIMITS.onDuty;
+        const ry = gridTop - ROWS.indexOf(pts[i].status) * rowH - rowH / 2;
+        const col = over ? rgb(0.8, 0.15, 0.1) : rgb(0.05, 0.05, 0.05);
+        if (prevY != null && prevY !== ry) vline(xOf(segStart), prevY, ry, 1.6, col);
+        hline(xOf(segStart), xOf(segEnd), ry, 2.2, col);
+        prevY = ry;
+      }
+      ROWS.forEach((st, r) => text(fmtH(totals[st] || 0), gx + gridW + 8, gridTop - r * rowH - rowH / 2 - 3, 9, bold));
+      y = gridBottom - 14;
+    }
+
+    // ----- Duty changes -----
+    const changes = [...(log.statusChanges || [])].sort((a, b) => new Date(a.time) - new Date(b.time));
+    if (changes.length) {
+      ensure(30);
+      text('DUTY CHANGES', M, y - 8, 8, bold, rgb(0.4, 0.4, 0.4));
+      y -= 14;
+      for (let i = 0; i < changes.length; i++) {
+        ensure(13);
+        const c = changes[i];
+        const sameDay = dayLabel(c.time) === dayLabel(log.start);
+        const next = i + 1 < changes.length ? changes[i + 1].time : log.end;
+        const dur = next ? fmtH((new Date(next) - new Date(c.time)) / 3600000) : '';
+        text(hm(c.time) + (sameDay ? '' : ' (' + dayLabel(c.time) + ')'), M, y - 9, 9, bold);
+        text(STATUS_NAME[c.status] || c.status, M + 120, y - 9, 9);
+        text(dur, M + 240, y - 9, 9);
+        if (c.note) text(String(c.note).slice(0, 90), M + 290, y - 9, 9, font, rgb(0.3, 0.3, 0.3));
+        y -= 13;
+      }
+      y -= 6;
+    }
+
+    // ----- Signature -----
+    ensure(70);
+    hline(M, PW - M, y - 2, 0.6, rgb(0.7, 0.7, 0.7));
+    y -= 10;
+    text('DRIVER SIGNATURE', M, y - 8, 8, bold, rgb(0.4, 0.4, 0.4));
+    let drewSig = false;
+    if (log.signature && typeof log.signature === 'string' && log.signature.startsWith('data:image/')) {
+      try {
+        const b64 = log.signature.split(',')[1];
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const img = log.signature.startsWith('data:image/png') ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+        const sc = Math.min(200 / img.width, 48 / img.height);
+        page.drawImage(img, { x: M, y: y - 14 - img.height * sc, width: img.width * sc, height: img.height * sc });
+        drewSig = true;
+      } catch (e) { /* unreadable signature image: fall through to the label */ }
+    }
+    if (!drewSig) text(log.signature ? 'Signed (image not available)' : 'Not signed', M, y - 26, 10, bold, log.signature ? rgb(0.1, 0.1, 0.1) : rgb(0.8, 0.15, 0.1));
+    text(driver, M + 230, y - 26, 10, font);
+    text('Sent from the Harder Contracting driver log app', PW - M - textW('Sent from the Harder Contracting driver log app', 7), M - 14, 7, font, rgb(0.5, 0.5, 0.5));
+  }
+  return doc.save();
+}
+
+function bytesToBase64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
 // Roadside / scale stop: the driver types the officer's email and the last 14
 // days of this driver's logs go out as a plain-text email via the backend.
 function EmailLogsPanel({ driver, allLogs }) {
@@ -8623,15 +8801,23 @@ function EmailLogsPanel({ driver, allLogs }) {
       .map((l) => ({
         start: l.start, end: l.end || null, odometerStart: l.odometerStart || '', odometerEnd: l.odometerEnd || '',
         statusChanges: (l.statusChanges || []).map((c) => ({ time: c.time, status: c.status, note: c.note || '' })),
+        signature: l.signature || null,
       }));
     if (logs.length === 0) { setState('error'); setMsg('No logs in the last 14 days to send.'); return; }
     setState('sending'); setMsg('');
     try {
       const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), 30000);
+      const timer = setTimeout(() => ctl.abort(), 60000);
+      // One PDF page per log (grid, times, km, signature). If the PDF library
+      // didn't load or the build fails, the backend still sends the text version.
+      let pdfBase64 = null;
+      try {
+        if (typeof PDFLib !== 'undefined') pdfBase64 = bytesToBase64(await buildDriverLogsPdf(driver, logs));
+      } catch (e) { console.error('driver log PDF failed', e); }
+      const lightLogs = logs.map((l) => ({ ...l, signature: undefined }));
       const res = await fetch(CLOUD_FUNCTION_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctl.signal,
-        body: JSON.stringify({ key: APP_SECRET, mode: 'emailDriverLogs', to: addr, driver, logs }),
+        body: JSON.stringify({ key: APP_SECRET, mode: 'emailDriverLogs', to: addr, driver, logs: lightLogs, pdfBase64 }),
       });
       clearTimeout(timer);
       const json = await res.json().catch(() => ({}));
