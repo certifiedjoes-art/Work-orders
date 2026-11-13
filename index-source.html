@@ -5776,6 +5776,14 @@ function localDateFromIso(iso) {
   if (!iso) return '';
   return localDateStr(new Date(iso));
 }
+// ISO timestamp -> value for <input type="datetime-local"> in LOCAL time.
+function isoToLocalInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 function weekStartOf(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() - d.getDay());
@@ -6022,6 +6030,8 @@ async function saveUnitPlate(unit, value) {
 // trailer swap therefore lists both trailers. Plates come from the pre-trip record, else the saved unit plate.
 function trailersForLog(log, driverLogs, preTrips, unitPlates) {
   if (!log || !log.start) return [];
+  // Once someone has edited the trailers on this log by hand, that list is the answer.
+  if (log.trailersEdited) return Array.isArray(log.trailers) ? log.trailers : [];
   const startMs = new Date(log.start).getTime();
   let from = startMs - 24 * 60 * 60 * 1000;
   (driverLogs || []).forEach((l) => {
@@ -9289,9 +9299,10 @@ function InspectionModeScreen({ driver, allLogs, preTrips, unitPlates, onExit, d
 // this shows exactly that, flags any gaps, and lets a stretch of no
 // driving get backfilled as a full day of Off Duty, all covered by one
 // signature rather than needing to sign each day separately.
-function DriverRecentLogsSection({ driver, allLogs, preTrips, unitPlates, onBackfillOffDuty }) {
+function DriverRecentLogsSection({ driver, allLogs, preTrips, unitPlates, driverApprovals, onSaveLog, onAddMissed, onUpdateChange, onRemoveChange, onBackfillOffDuty }) {
   const [backfilling, setBackfilling] = useState(false);
   const [signature, setSignature] = useState(null);
+  const [editingLogId, setEditingLogId] = useState(null);
 
   const today = new Date();
   const last14Dates = [];
@@ -9347,7 +9358,38 @@ function DriverRecentLogsSection({ driver, allLogs, preTrips, unitPlates, onBack
         <p className="text-sm" style={{ color: COLORS.inkDim }}>No logs yet.</p>
       ) : (
         <div className="space-y-2">
-          {recentLogs.map((l, idx) => <PastLogRow key={l.id} log={l} defaultOpen={idx === 0} trailers={trailersForLog(l, myLogs, preTrips, unitPlates)} />)}
+          {recentLogs.map((l, idx) => {
+            if (editingLogId === l.id) {
+              return (
+                <DriverLogEditCard
+                  key={l.id}
+                  log={l}
+                  trailers={trailersForLog(l, myLogs, preTrips, unitPlates)}
+                  isWeekApproved={(dateStr) => !!(driverApprovals || {})[weekStartOf(dateStr)]}
+                  isAdmin={false}
+                  onSave={(patch) => { onSaveLog(l.id, patch); setEditingLogId(null); }}
+                  onAddMissed={(status, time, note) => onAddMissed(l.id, status, time, note)}
+                  onUpdateChange={(changeId, patch) => onUpdateChange(l.id, changeId, patch)}
+                  onRemoveChange={(changeId) => onRemoveChange(l.id, changeId)}
+                  onCancel={() => setEditingLogId(null)}
+                />
+              );
+            }
+            // The week being approved is what makes a log final for the driver.
+            const approval = (driverApprovals || {})[weekStartOf(l.start.slice(0, 10))];
+            return (
+              <div key={l.id}>
+                <PastLogRow log={l} defaultOpen={idx === 0} trailers={trailersForLog(l, myLogs, preTrips, unitPlates)} />
+                <div className="flex justify-end mt-1 mb-1">
+                  {approval ? (
+                    <span className="text-xs" style={{ color: COLORS.inkDim }}>🔒 Approved{approval.approvedBy ? ' by ' + approval.approvedBy : ''} — ask admin if something needs changing</span>
+                  ) : (
+                    <button type="button" onClick={() => setEditingLogId(l.id)} className="text-xs underline" style={{ color: COLORS.accent }}>✏️ Edit this log</button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -14038,13 +14080,16 @@ function PrintableDriverLog({ log, driverName }) {
   );
 }
 
-function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange, onRemoveChange, onCancel, isAdmin, onCloseLog, onSplitLog }) {
+function DriverLogEditCard({ log, trailers, isWeekApproved, onSave, onDelete, onAddMissed, onUpdateChange, onRemoveChange, onCancel, isAdmin, onCloseLog, onSplitLog }) {
   const [closeAt, setCloseAt] = useState('');
   const [odometerStart, setOdometerStart] = useState(log.odometerStart || '');
   const [odometerEnd, setOdometerEnd] = useState(log.odometerEnd || '');
+  const [startDraft, setStartDraft] = useState(isoToLocalInput(log.start));
+  const [endDraft, setEndDraft] = useState(isoToLocalInput(log.end));
   const [unitDraft, setUnitDraft] = useState(log.unit || '');
   const [plateDraft, setPlateDraft] = useState(log.plate || '');
   const [homeDraft, setHomeDraft] = useState(log.homeTerminal || '');
+  const [trailersDraft, setTrailersDraft] = useState(() => (trailers || []).map((t) => ({ unitName: t.unitName || '', plate: t.plate || '' })));
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [addingMissed, setAddingMissed] = useState(false);
   const [missedStatus, setMissedStatus] = useState('off');
@@ -14095,6 +14140,33 @@ function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange,
           <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Home terminal location</span>
           <TextInput value={homeDraft} onChange={(e) => setHomeDraft(e.target.value)} placeholder={DEFAULT_HOME_TERMINAL} />
         </label>
+      </div>
+
+      <p className="text-xs uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>Log start and end</p>
+      <div className="grid grid-cols-1 gap-3 mb-4">
+        <label className="block">
+          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Time in (log start)</span>
+          <input type="datetime-local" value={startDraft} onChange={(e) => setStartDraft(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+        </label>
+        {log.end && (
+          <label className="block">
+            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Time out (log end)</span>
+            <input type="datetime-local" value={endDraft} onChange={(e) => setEndDraft(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+          </label>
+        )}
+      </div>
+
+      <p className="text-xs uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>Trailers</p>
+      <div className="mb-4">
+        {trailersDraft.length === 0 && <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>No trailers on this log.</p>}
+        {trailersDraft.map((t, ti) => (
+          <div key={ti} className="flex gap-2 mb-2 items-center">
+            <TextInput value={t.unitName} onChange={(e) => setTrailersDraft((prev) => prev.map((x, i) => (i === ti ? { ...x, unitName: e.target.value } : x)))} placeholder="Trailer" className="flex-1" />
+            <TextInput value={t.plate} onChange={(e) => setTrailersDraft((prev) => prev.map((x, i) => (i === ti ? { ...x, plate: e.target.value.toUpperCase() } : x)))} placeholder="Plate" autoCapitalize="characters" className="flex-1" />
+            <button type="button" onClick={() => setTrailersDraft((prev) => prev.filter((_, i) => i !== ti))} className="text-xs underline shrink-0" style={{ color: '#E07A5F' }}>Remove</button>
+          </div>
+        ))}
+        <button type="button" onClick={() => setTrailersDraft((prev) => [...prev, { unitName: '', plate: '' }])} className="text-xs underline" style={{ color: COLORS.accent }}>+ Add a trailer</button>
       </div>
 
       <p className="text-xs uppercase tracking-wide mb-2" style={{ color: COLORS.accent }}>Grid</p>
@@ -14154,7 +14226,7 @@ function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange,
 
       {addingMissed ? (
         <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised }}>
-          <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Add a status he missed logging at the time:</p>
+          <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Add a status that was missed at the time:</p>
           <select
             value={missedStatus}
             onChange={(e) => setMissedStatus(e.target.value)}
@@ -14199,9 +14271,30 @@ function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange,
         </div>
       ) : (
         <div className="flex gap-2 flex-wrap">
-          <Btn onClick={() => onSave({ odometerStart, odometerEnd, unit: unitDraft.trim(), plate: plateDraft.trim().toUpperCase(), homeTerminal: homeDraft.trim() })}>Save changes</Btn>
+          <Btn onClick={() => {
+            const newStartMs = new Date(startDraft).getTime();
+            const newEndMs = log.end ? new Date(endDraft).getTime() : null;
+            if (isNaN(newStartMs)) { alert('Pick a valid time in.'); return; }
+            if (log.end && isNaN(newEndMs)) { alert('Pick a valid time out.'); return; }
+            if (newStartMs > Date.now() + 60000 || (newEndMs && newEndMs > Date.now() + 60000)) { alert("That time hasn't happened yet."); return; }
+            if (newEndMs && newEndMs <= newStartMs) { alert('Time out has to be after time in.'); return; }
+            if (isWeekApproved && (isWeekApproved(localDateStr(new Date(newStartMs))) || (newEndMs && isWeekApproved(localDateStr(new Date(newEndMs)))))) { alert('That time is in a week admin has already approved. Ask admin to change it.'); return; }
+            const startChanged = newStartMs !== new Date(log.start).getTime();
+            const endChanged = !!log.end && newEndMs !== new Date(log.end).getTime();
+            const patch = { odometerStart, odometerEnd, unit: unitDraft.trim(), plate: plateDraft.trim().toUpperCase(), homeTerminal: homeDraft.trim(), trailersEdited: true, trailers: trailersDraft.map((t) => ({ unitName: t.unitName.trim(), plate: t.plate.trim().toUpperCase() })).filter((t) => t.unitName) };
+            if (startChanged) patch.start = new Date(newStartMs).toISOString();
+            if (endChanged) patch.end = new Date(newEndMs).toISOString();
+            // The first entry is the shift start; keep it lined up with the new time in.
+            const first = sorted[0];
+            const firstFollowsStart = first && new Date(first.time).getTime() === new Date(log.start).getTime();
+            const earlier = sorted.filter((c) => new Date(c.time).getTime() < newStartMs && !(firstFollowsStart && c.id === first.id));
+            const later = endChanged ? sorted.filter((c) => new Date(c.time).getTime() > newEndMs) : [];
+            if ((earlier.length || later.length) && !confirm('Some status entries fall outside the new time in / time out. They will stay as they are — fix them below if needed. Save anyway?')) return;
+            onSave(patch);
+            if (startChanged && firstFollowsStart && onUpdateChange) onUpdateChange(first.id, { time: patch.start });
+          }}>Save changes</Btn>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
-          <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>Delete log</button>
+          {onDelete && <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>Delete log</button>}
         </div>
       )}
     </div>
@@ -14210,7 +14303,8 @@ function DriverLogEditCard({ log, onSave, onDelete, onAddMissed, onUpdateChange,
 
 function DriverStatusChangeEditRow({ change, onSave, onCancel }) {
   const [status, setStatus] = useState(change.status);
-  const [time, setTime] = useState(() => new Date(change.time).toISOString().slice(0, 16));
+  const [place, setPlace] = useState((change.loc && change.loc.place) || '');
+  const [time, setTime] = useState(() => isoToLocalInput(change.time));
   const [note, setNote] = useState(change.note || '');
   return (
     <div className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.accent}` }}>
@@ -14230,8 +14324,17 @@ function DriverStatusChangeEditRow({ change, onSave, onCancel }) {
         style={{ background: COLORS.surface, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
       />
       <TextInput value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className="w-full mb-2" />
+      <TextInput value={place} onChange={(e) => setPlace(e.target.value)} placeholder={change.loc && typeof change.loc.lat === 'number' ? 'Location (GPS: ' + change.loc.lat.toFixed(4) + ', ' + change.loc.lng.toFixed(4) + ')' : 'Location (optional)'} className="w-full mb-2" />
       <div className="flex gap-2">
-        <Btn onClick={() => onSave({ status, time: new Date(time).toISOString(), note })}>Save</Btn>
+        <Btn onClick={() => {
+          const p = place.trim();
+          const hasCoords = change.loc && typeof change.loc.lat === 'number';
+          let loc = change.loc || null;
+          if (p) loc = { ...(change.loc || {}), place: p };
+          else if (hasCoords) { loc = { ...change.loc }; delete loc.place; }
+          else loc = null;
+          onSave({ status, time: new Date(time).toISOString(), note, loc });
+        }}>Save</Btn>
         <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
       </div>
     </div>
@@ -22089,6 +22192,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               allLogs={driverLogs}
               preTrips={preTripInspections}
               unitPlates={unitPlates}
+              driverApprovals={driverLogApprovals}
+              onSaveLog={updateDriverLog}
+              onAddMissed={addMissedStatusChange}
+              onUpdateChange={updateDriverStatusChange}
+              onRemoveChange={removeDriverStatusChange}
               onBackfillOffDuty={backfillOffDutyDriverLogs}
             />
           )}
@@ -23968,6 +24076,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                                   <DriverLogEditCard
                                     key={l.id}
                                     log={l}
+                                    trailers={trailersForLog(l, driverLogs, preTripInspections, unitPlates)}
                                     onCloseLog={adminCloseDriverLog}
                                     onSplitLog={adminSplitDriverLog}
                                     onSave={(patch) => { updateDriverLog(l.id, patch); setEditingDriverLogId(null); }}
