@@ -14868,6 +14868,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [newUnitName, setNewUnitName] = useState('');
   const [newUnitTypeDraft, setNewUnitTypeDraft] = useState('');
   const [editingUnitName, setEditingUnitName] = useState(null);
+  const [editingPlateForUnit, setEditingPlateForUnit] = useState(null);
+  const [plateDraftText, setPlateDraftText] = useState('');
+  const [newUnitPlate, setNewUnitPlate] = useState('');
   const [editingDriversForUnit, setEditingDriversForUnit] = useState(null);
   const [renamedUnitText, setRenamedUnitText] = useState('');
   const [showAddUnit, setShowAddUnit] = useState(false);
@@ -20390,7 +20393,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (!name || units.includes(name)) return;
     await persistMeta(mechanics, [...units, name]);
     if (type) await firebase.database().ref('unitTypes/' + slugForUnit(name)).set(type).catch(() => alert("Couldn't save the type tag — check your signal and try again."));
+    const plate = newUnitPlate.trim().toUpperCase();
+    if (plate) await saveUnitPlate(name, plate).catch(() => alert("Added the unit, but couldn't save its licence plate — set it again from the unit's card."));
     setNewUnitName('');
+    setNewUnitPlate('');
     setShowAddUnit(false);
   };
   const setUnitType = async (name, type) => {
@@ -20430,6 +20436,12 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (oldType) {
       await firebase.database().ref('unitTypes/' + slugForUnit(trimmed)).set(oldType).catch(() => alert("Renamed the unit, but couldn't carry over its type tag — set it again from the dropdown."));
       await firebase.database().ref('unitTypes/' + slugForUnit(oldName)).remove().catch(() => {});
+    }
+    // The licence plate belongs to the unit, so it follows the rename too.
+    const oldPlate = (unitPlates || {})[slugForUnit(oldName)];
+    if (oldPlate) {
+      await saveUnitPlate(trimmed, oldPlate).catch(() => alert("Renamed the unit, but couldn't carry over its licence plate — set it again from the unit's card."));
+      await saveUnitPlate(oldName, null).catch(() => {});
     }
     // Anyone currently assigned to this unit should follow the rename,
     // rather than being silently left pointing at a unit number that no
@@ -24252,6 +24264,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           ))}
                         </select>
                       </div>
+                      <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+                        {editingPlateForUnit === u ? (
+                          <div className="flex items-center gap-2">
+                            <TextInput value={plateDraftText} onChange={(e) => setPlateDraftText(e.target.value)} placeholder="Licence plate" autoCapitalize="characters" className="flex-1 text-sm" autoFocus />
+                            <Btn onClick={async () => { try { await saveUnitPlate(u, plateDraftText.trim().toUpperCase()); setEditingPlateForUnit(null); } catch (e) { alert("Couldn't save — check your signal and try again."); } }}>Save</Btn>
+                            <Btn variant="ghost" onClick={() => setEditingPlateForUnit(null)}>Cancel</Btn>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => { setEditingPlateForUnit(u); setPlateDraftText((unitPlates || {})[slugForUnit(u)] || ''); }}
+                            className="text-xs font-display uppercase tracking-wider underline"
+                            style={{ color: COLORS.inkDim }}
+                          >
+                            🪪 Licence plate: {(unitPlates || {})[slugForUnit(u)] || 'Not set'}
+                          </button>
+                        )}
+                      </div>
                       {unitTypes[slugForUnit(u)] && (() => {
                         const uSlug = slugForUnit(u);
                         const uType = unitTypes[uSlug];
@@ -24387,6 +24416,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             {showAddUnit ? (
               <div className="space-y-2">
                 <TextInput value={newUnitName} onChange={(e) => setNewUnitName(e.target.value)} placeholder="Unit number, e.g. UNIT-104" className="w-full" />
+                <TextInput value={newUnitPlate} onChange={(e) => setNewUnitPlate(e.target.value)} placeholder="Licence plate (optional)" autoCapitalize="characters" className="w-full" />
                 <select
                   value={newUnitTypeDraft}
                   onChange={(e) => setNewUnitTypeDraft(e.target.value)}
@@ -24403,7 +24433,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 </select>
                 <div className="flex gap-2">
                   <Btn onClick={async () => { await addUnit(newUnitTypeDraft); setNewUnitTypeDraft(''); }} disabled={!newUnitName.trim()}>Add unit</Btn>
-                  <Btn variant="ghost" onClick={() => { setShowAddUnit(false); setNewUnitName(''); setNewUnitTypeDraft(''); }}>Cancel</Btn>
+                  <Btn variant="ghost" onClick={() => { setShowAddUnit(false); setNewUnitName(''); setNewUnitPlate(''); setNewUnitTypeDraft(''); }}>Cancel</Btn>
                 </div>
               </div>
             ) : (
