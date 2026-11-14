@@ -19289,7 +19289,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (driverLogBusyRef.current) return;
     driverLogBusyRef.current = true;
     try {
-    const loc = await getLogLocation(openDriverLog.unit);
+    // Driving entries don't carry a location — every other status does.
+    const loc = status === 'driving' ? null : await getLogLocation(openDriverLog.unit);
     const change = { id: uid(), status, time: new Date().toISOString(), note: note || '', ...(loc ? { loc } : {}) };
     const nextChanges = [...(openDriverLog.statusChanges || []), change];
     await patchOneDriverLog(openDriverLog.id, { statusChanges: nextChanges });
