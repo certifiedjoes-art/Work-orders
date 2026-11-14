@@ -8152,7 +8152,11 @@ async function getPhoneLocation() {
   if (!pos || !pos.coords || typeof pos.coords.latitude !== 'number') return null;
   const lat = Math.round(pos.coords.latitude * 1e5) / 1e5;
   const lng = Math.round(pos.coords.longitude * 1e5) / 1e5;
-  const loc = { lat, lng, acc: Math.round(pos.coords.accuracy || 0) };
+  return addPlaceName({ lat, lng, acc: Math.round(pos.coords.accuracy || 0), src: 'phone' });
+}
+// Looks up the nearest road / town for a position (cached, 2.5 s cap).
+async function addPlaceName(loc) {
+  const lat = loc.lat, lng = loc.lng;
   const key = lat.toFixed(3) + ',' + lng.toFixed(3);
   let place = __placeCache[key];
   if (place === undefined) {
@@ -9080,7 +9084,7 @@ function PastLogRow({ log, defaultOpen, trailers }) {
             <div className="mt-2 space-y-1">
               {[...(log.statusChanges || [])].sort((a, b) => new Date(a.time) - new Date(b.time)).map((c) => (
                 <p key={c.id} className="text-xs" style={{ color: COLORS.inkDim }}>
-                  <span className="font-mono">{fmtTime(c.time)}</span> {DUTY_STATUS_LABELS[c.status]}{c.loc ? ' · 📍 ' + locLabel(c.loc) : ''}
+                  <span className="font-mono">{fmtTime(c.time)}</span> {DUTY_STATUS_LABELS[c.status]}{c.loc ? (c.loc.src === 'samsara' ? ' · 🚛 ' : ' · 📍 ') + locLabel(c.loc) : ''}
                 </p>
               ))}
             </div>
@@ -14218,7 +14222,7 @@ function DriverLogEditCard({ log, trailers, isWeekApproved, onSave, onDelete, on
                 {c.note && <span style={{ color: COLORS.inkDim }}> · {c.note}</span>}
                 {c.loc && (
                   <div style={{ color: COLORS.inkDim }}>
-                    📍 {locLabel(c.loc)}{typeof c.loc.lat === 'number' && <a href={`https://www.google.com/maps?q=${c.loc.lat},${c.loc.lng}`} target="_blank" rel="noopener noreferrer" className="underline ml-1" style={{ color: COLORS.accent }}>map</a>}
+                    {c.loc.src === 'samsara' ? '🚛' : '📍'} {locLabel(c.loc)}{typeof c.loc.lat === 'number' && <a href={`https://www.google.com/maps?q=${c.loc.lat},${c.loc.lng}`} target="_blank" rel="noopener noreferrer" className="underline ml-1" style={{ color: COLORS.accent }}>map</a>}
                   </div>
                 )}
               </div>
@@ -19211,6 +19215,24 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       if (openDriverLog && (openDriverLog.unit || '') === unitName) await patchOneDriverLog(openDriverLog.id, { plate: v });
     } catch (e) { alert("Couldn't save — check your signal and try again."); }
   };
+  // Where a log entry happened: the TRUCK's own Samsara GPS first (matched by
+  // unit number, and only if its last GPS reading is under 24 hours old — a parked truck
+  // reports rarely, but it also hasn't moved).
+  // If Samsara has nothing for that truck, fall back to the driver's phone.
+  const getLogLocation = async (unitName) => {
+    if (unitName) {
+      try {
+        const positions = await Promise.race([fetchAllSamsaraPositions(), new Promise((r) => setTimeout(() => r([]), 5000))]);
+        const want = String(unitName).trim().toLowerCase();
+        const m = (positions || []).find((p) => String(p.name || '').trim().toLowerCase() === want);
+        const age = m && m.time ? Date.now() - new Date(m.time).getTime() : Infinity;
+        if (m && typeof m.lat === 'number' && typeof m.lng === 'number' && age < 24 * 3600 * 1000) {
+          return await addPlaceName({ lat: Math.round(m.lat * 1e5) / 1e5, lng: Math.round(m.lng * 1e5) / 1e5, src: 'samsara' });
+        }
+      } catch (e) { /* fall through to the phone */ }
+    }
+    return getPhoneLocation();
+  };
   const startDriverLog = async (odometerStart, unit) => {
     if (driverLogBusyRef.current) return;
     driverLogBusyRef.current = true;
@@ -19223,7 +19245,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       .sort((a, b) => new Date(b.start) - new Date(a.start))[0];
     if (earlier) {
       if (!confirm("You already have a log for today. Continue it?\n\nYour Off Duty at the end will be changed to On Duty, and you'll sign again when you finish for good.")) return;
-      const loc2 = await getPhoneLocation();
+      const loc2 = await getLogLocation(unit || earlier.unit);
       const changes = [...(earlier.statusChanges || [])].sort((a, b) => new Date(a.time) - new Date(b.time));
       const closeIdx = changes.length - 1;
       const closing = changes[closeIdx];
@@ -19241,7 +19263,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       await checkLogBookMismatch(currentMechanic, todayStr, { ...earlier, ...patch });
       return;
     }
-    const loc = await getPhoneLocation();
+    const loc = await getLogLocation(unit);
     const now = new Date().toISOString();
     const entry = {
       id: uid(),
@@ -19267,7 +19289,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (driverLogBusyRef.current) return;
     driverLogBusyRef.current = true;
     try {
-    const loc = await getPhoneLocation();
+    const loc = await getLogLocation(openDriverLog.unit);
     const change = { id: uid(), status, time: new Date().toISOString(), note: note || '', ...(loc ? { loc } : {}) };
     const nextChanges = [...(openDriverLog.statusChanges || []), change];
     await patchOneDriverLog(openDriverLog.id, { statusChanges: nextChanges });
@@ -19293,7 +19315,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     // Only stamp where the phone is if the log is closing right now (or within
     // 10 minutes of now) — a back-dated close would show the wrong place.
     const closingNow = !endIso || Math.abs(Date.now() - new Date(endIso).getTime()) < 10 * 60 * 1000;
-    const loc = closingNow ? await getPhoneLocation() : null;
+    const loc = closingNow ? await getLogLocation(openDriverLog.unit) : null;
     const finalStatus = { id: uid(), status: 'off', time: now, note: 'Ending shift', ...(loc ? { loc } : {}) };
     const nextChanges = [...(openDriverLog.statusChanges || []), finalStatus];
     await patchOneDriverLog(openDriverLog.id, {
