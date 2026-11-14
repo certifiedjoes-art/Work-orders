@@ -7402,6 +7402,12 @@ const DEFAULT_TEMPLATES = [
 // /unitTypes — there's no separate hardcoded machine list anymore. Mechanics
 // still use the plain clock in/out; production-tagged units get the fields
 // below based on their tag.
+// Only road vehicles carry a licence plate: trucks and trailers (and the other
+// on-road vehicle types). Machines (buncher, processor, ...) don't. Untagged
+// units still get the box, since we can't tell what they are.
+function unitNeedsPlate(type) {
+  return !type || ['truck', 'pickup', 'winch', 'fuel', 'trailer'].includes(type);
+}
 function machineType(name, unitTypesMap) {
   return (unitTypesMap || {})[slugForUnit(name || '')];
 }
@@ -20554,7 +20560,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (!name || units.includes(name)) return;
     await persistMeta(mechanics, [...units, name]);
     if (type) await firebase.database().ref('unitTypes/' + slugForUnit(name)).set(type).catch(() => alert("Couldn't save the type tag — check your signal and try again."));
-    const plate = newUnitPlate.trim().toUpperCase();
+    const plate = unitNeedsPlate(type) ? newUnitPlate.trim().toUpperCase() : '';
     if (plate) await saveUnitPlate(name, plate).catch(() => alert("Added the unit, but couldn't save its licence plate — set it again from the unit's card."));
     setNewUnitName('');
     setNewUnitPlate('');
@@ -24431,6 +24437,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           ))}
                         </select>
                       </div>
+                      {unitNeedsPlate(unitTypes[slugForUnit(u)]) && (
                       <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${COLORS.line}` }}>
                         {editingPlateForUnit === u ? (
                           <div className="flex items-center gap-2">
@@ -24448,6 +24455,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           </button>
                         )}
                       </div>
+                      )}
                       {unitTypes[slugForUnit(u)] && (() => {
                         const uSlug = slugForUnit(u);
                         const uType = unitTypes[uSlug];
@@ -24583,7 +24591,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             {showAddUnit ? (
               <div className="space-y-2">
                 <TextInput value={newUnitName} onChange={(e) => setNewUnitName(e.target.value)} placeholder="Unit number, e.g. UNIT-104" className="w-full" />
-                <TextInput value={newUnitPlate} onChange={(e) => setNewUnitPlate(e.target.value)} placeholder="Licence plate (optional)" autoCapitalize="characters" className="w-full" />
+                {unitNeedsPlate(newUnitTypeDraft) && <TextInput value={newUnitPlate} onChange={(e) => setNewUnitPlate(e.target.value)} placeholder="Licence plate (optional)" autoCapitalize="characters" className="w-full" />}
                 <select
                   value={newUnitTypeDraft}
                   onChange={(e) => setNewUnitTypeDraft(e.target.value)}
