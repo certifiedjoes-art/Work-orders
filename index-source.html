@@ -5617,6 +5617,13 @@ async function idbDeleteMapImageBlob(mapId) {
   }
 }
 
+// Camp iPad mode — a per-device switch (admin turns it on in Settings) for a
+// shared tablet in camp: everyone always signs in with name + PIN, nobody is
+// remembered, and the tablet signs the person out by itself when they're done.
+// Clocks keep running because they live in the database, not on the tablet.
+function isCampIpad() {
+  try { return localStorage.getItem('campIpadMode') === '1'; } catch (e) { return false; }
+}
 function getDeviceUsers() {
   try {
     const raw = localStorage.getItem('deviceUsers');
@@ -14948,12 +14955,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [uploadingMachineIconType, setUploadingMachineIconType] = useState(null);
   const [orders, setOrders] = useState(() => cacheGet('orders', []));
   const [currentMechanic, setCurrentMechanic] = useState(null);
+  const [campShowEveryone, setCampShowEveryone] = useState(false);
   const [screen, setScreen] = useState('login');
   // If this phone is about to sign itself back in (still inside the stay-signed-in
   // window), keep our loading screen up until it lands on its real screen — otherwise
   // the login screen (and its banners) flashes for a second first.
   const [autoSignInPending, setAutoSignInPending] = useState(() => {
     try {
+      if (isCampIpad()) return false;
       const name = localStorage.getItem('sessionMechanic');
       const last = parseInt(localStorage.getItem('sessionLastActive'), 10) || 0;
       const h = parseFloat(localStorage.getItem('sessionHours'));
@@ -15419,6 +15428,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   }, [currentMechanic]);
   useEffect(() => {
     if (autoSignInTriedRef.current || currentMechanic || !firebaseUser || !firebaseUser.email || mechanics.length === 0) return;
+    if (isCampIpad()) { autoSignInTriedRef.current = true; return; } // camp tablet: always name + PIN
     let name = null, last = 0;
     try { name = localStorage.getItem('sessionMechanic'); last = parseInt(localStorage.getItem('sessionLastActive'), 10) || 0; } catch (e) { return; }
     if (!name) { autoSignInTriedRef.current = true; return; }
@@ -16518,6 +16528,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   };
 
   const checkAndPromptEmail = async (name) => {
+    if (isCampIpad()) return;
     // Same fresh-page-load risk seen elsewhere — local mechanicEmails state
     // may not have finished syncing yet right after a fresh login, which
     // would incorrectly show this prompt even when an email is already on
@@ -16535,6 +16546,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // itself needs a real tap to satisfy Safari's requirement that
   // Notification.requestPermission() only works inside a genuine gesture.
   const checkAndPromptPush = (name) => {
+    if (isCampIpad()) return; // shared tablet — no personal notifications
     if (!localStorage.getItem('pushAsked_' + name)) {
       setShowPushPrompt(true);
     }
@@ -16581,7 +16593,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           });
         });
       }
-      const sessionAlreadyValid = sessionUser && sessionUser.email === emailForMechanic(name);
+      const sessionAlreadyValid = !isCampIpad() && sessionUser && sessionUser.email === emailForMechanic(name);
 
       if (sessionAlreadyValid) {
         // Biometric only ever unlocks a session that's already real and
@@ -19509,6 +19521,63 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await checkLogBookMismatch(log.driver, localDateStr(new Date(log.start)), { ...log, statusChanges: nextChanges });
   };
 
+  // ---- Camp iPad: sign-out bar and automatic sign-out ----
+  // 2 minutes with no touch signs the person out; once they've clocked in or
+  // out it drops to 20 seconds, so the tablet is free for the next person.
+  const campClockKey = currentMechanic ? [productionShifts.some((x) => x.employee === currentMechanic && !x.end), !!openDriverLog, timesheets.filter((e) => e.mechanic === currentMechanic && !e.clockOut).length].join('|') : '';
+  const campStateRef = useRef({ user: null, key: '', since: 0, quick: false });
+  useEffect(() => {
+    const st = campStateRef.current;
+    if (st.user !== currentMechanic) { campStateRef.current = { user: currentMechanic, key: campClockKey, since: Date.now(), quick: false }; return; }
+    if (st.key !== campClockKey) {
+      st.key = campClockKey;
+      if (Date.now() - st.since > 1500) st.quick = true; // a real clock in / out, not data still loading
+    }
+  }, [currentMechanic, campClockKey]);
+  useEffect(() => {
+    if (!currentMechanic || !isCampIpad() || window.__viewAs) return undefined;
+    let last = Date.now();
+    let leaving = false;
+    const signOutNow = async () => {
+      if (leaving) return;
+      leaving = true;
+      try { localStorage.removeItem('sessionMechanic'); localStorage.removeItem('sessionLastActive'); } catch (e) { /* ignore */ }
+      try { await firebase.auth().signOut(); } catch (e) { /* ignore */ }
+      window.location.reload(); // clean slate for the next person
+    };
+    const bar = document.createElement('div');
+    bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:#1B1F19;border-top:2px solid #7FA37F;color:#E8E6DF;font-family:Inter,-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px;';
+    const label = document.createElement('span');
+    const btn = document.createElement('button');
+    btn.textContent = 'Done — sign out';
+    btn.style.cssText = 'flex-shrink:0;font-family:inherit;background:#7FA37F;color:#1B1F19;font-weight:700;border:none;border-radius:10px;padding:12px 18px;font-size:15px;text-transform:uppercase;letter-spacing:0.04em;';
+    btn.addEventListener('click', (e) => { e.stopPropagation(); signOutNow(); });
+    bar.appendChild(label); bar.appendChild(btn);
+    document.body.appendChild(bar);
+    const prevPad = document.body.style.paddingBottom;
+    document.body.style.paddingBottom = '70px';
+    const touch = () => { last = Date.now(); };
+    const evs = ['pointerdown', 'keydown', 'touchstart', 'scroll', 'input'];
+    evs.forEach((ev) => document.addEventListener(ev, touch, true));
+    const tick = () => {
+      const limit = campStateRef.current.quick ? 20 : 120;
+      const left = Math.ceil(limit - (Date.now() - last) / 1000);
+      const quick = campStateRef.current.quick;
+      label.textContent = '🏕️ ' + currentMechanic + (left <= 30
+        ? (quick ? ' — saved. Signing out in ' : ' — signing out in ') + Math.max(left, 0) + 's (touch the screen to stay)'
+        : ' — signed in on the camp iPad');
+      if (left <= 0) signOutNow();
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => {
+      clearInterval(timer);
+      evs.forEach((ev) => document.removeEventListener(ev, touch, true));
+      bar.remove();
+      document.body.style.paddingBottom = prevPad;
+    };
+  }, [currentMechanic]);
+
   const isDriverLogWeekApproved = (weekStart) => !!driverLogApprovals[weekStart];
   const approveDriverLogWeek = async (weekStart) => {
     const next = { ...driverLogApprovals, [weekStart]: { approvedBy: currentMechanic, approvedAt: new Date().toISOString() } };
@@ -21169,16 +21238,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           {mechanics.length > 0 && (() => {
             const rememberedName = localStorage.getItem('deviceMechanic');
             const rememberedStillExists = rememberedName && mechanics.includes(rememberedName);
-            const revealAll = showAllMechanics || !rememberedStillExists;
+            const camp = isCampIpad();
+            const revealAll = showAllMechanics || !rememberedStillExists || camp;
             // Only people who've actually signed in on this exact device —
             // a shared shop tablet shouldn't show the entire company roster.
             // New people arrive via their own invite link, never through this
             // list. An existing employee on an unfamiliar device uses "Lost
             // access? Get a login link" below, not a way to browse everyone.
             const deviceUsers = getDeviceUsers().filter((m) => mechanics.includes(m));
-            const namesToShow = deviceUsers.length > 0 ? deviceUsers : mechanics;
+            const namesToShow = (camp && campShowEveryone) || deviceUsers.length === 0 ? mechanics : deviceUsers;
             return (
               <div className="mb-8">
+                {camp && (
+                  <div className="rounded-lg p-3 mb-4 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
+                    <p className="font-display font-bold uppercase tracking-wide" style={{ color: COLORS.accent }}>🏕️ Camp iPad</p>
+                    <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>Tap your name and enter your PIN. Your clock keeps running after you sign out.</p>
+                  </div>
+                )}
                 <p className="font-display text-xs uppercase tracking-wider mb-3 block" style={{ color: COLORS.inkDim }}>
                   {revealAll ? t('tapToSignIn') : t('welcomeBack')}
                 </p>
@@ -21197,6 +21273,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                         )}
                       </button>
                     ))}
+                    {camp && deviceUsers.length > 0 && (
+                      <button onClick={() => setCampShowEveryone((v) => !v)} className="col-span-2 text-center text-xs underline mt-1" style={{ color: COLORS.inkDim }}>
+                        {campShowEveryone ? 'Show only people who use this iPad' : "Don't see your name? Show everyone"}
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <div>
@@ -22303,6 +22384,50 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             onConfirm={pendingSwitchMachine ? confirmMachineSwitch : confirmProductionClockOut}
             onCancel={() => { setShowProductionClockOutReview(false); setPendingSwitchMachine(null); }}
           />
+
+          {/* Camp iPad: enter a whole finished shift after the fact (no phone in the bush) */}
+          {isCampIpad() && !openProductionShift && (showAddMissedDay ? (
+            <AddMissedDayForm
+              t={t}
+              defaultMechanic={currentMechanic}
+              groupedEmployeeOptions={[{ label: 'You', names: [currentMechanic] }]}
+              jobTypeFor={jobTypeFor}
+              assignedUnitFor={assignedUnitFor}
+              unitTypesMap={unitTypes}
+              unitOptions={groupedUnitOptions()}
+              blocks={blocks}
+              onSubmit={async (mechanicName, date, ci, co, ls, le, setError, jobs) => {
+                if (isWeekApproved(weekStartOf(date))) { setError("That week's already been approved — ask admin to add this one for you."); return; }
+                await addManualEntry(currentMechanic, date, ci, co, ls, le, jobs);
+                setShowAddMissedDay(false);
+                campStateRef.current.quick = true;
+              }}
+              onSubmitProduction={async (employeeName, date, startLocal, endLocal, machine, block, numbers, setError) => {
+                if (!endLocal) { setError('Put in the time you finished too.'); return; }
+                if (isWeekApproved(weekStartOf(date))) { setError("That week's already been approved — ask admin to add this one for you."); return; }
+                let endFixed = endLocal;
+                if (new Date(endLocal) <= new Date(startLocal)) { // finished after midnight
+                  const d = new Date(endLocal); d.setDate(d.getDate() + 1);
+                  endFixed = isoToLocalInput(d.toISOString());
+                }
+                if (new Date(endFixed) > new Date(Date.now() + 60000)) { setError("That finish time hasn't happened yet."); return; }
+                const clash = productionShifts.some((x) => x.employee === currentMechanic && x.start && x.end && new Date(x.start) < new Date(endFixed) && new Date(x.end) > new Date(startLocal));
+                if (clash) { setError('You already have a shift recorded during those hours.'); return; }
+                await addManualProductionShift(currentMechanic, date, startLocal, endFixed, machine, block, numbers);
+                setShowAddMissedDay(false);
+                campStateRef.current.quick = true; // saved — free the tablet up soon
+              }}
+              onCancel={() => setShowAddMissedDay(false)}
+            />
+          ) : (
+            <button
+              onClick={() => setShowAddMissedDay(true)}
+              className="w-full text-center text-sm font-display uppercase tracking-wide mb-6 py-3 rounded-lg"
+              style={{ color: COLORS.accent, background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}
+            >
+              + Enter a shift I already finished
+            </button>
+          ))}
 
           <ProductionShiftHistory
             shifts={myProductionShifts}
@@ -25849,6 +25974,25 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             {t('backToBoard')}
           </button>
           <h1 className="font-display text-3xl font-bold mb-8">Settings</h1>
+
+          {isAdmin && (
+            <div className="rounded-lg p-5 mb-4" style={{ background: COLORS.surface, border: `2px solid ${isCampIpad() ? COLORS.accent : COLORS.line}` }}>
+              <span className="text-sm font-semibold block" style={{ color: COLORS.ink }}>🏕️ Camp iPad mode — {isCampIpad() ? 'ON for this device' : 'off'}</span>
+              <span className="text-xs block mb-3" style={{ color: COLORS.inkDim }}>
+                For a shared tablet in camp. Everyone signs in with their name and PIN every time, and the tablet signs them out by itself when they're done. Their clock keeps running. This only changes this one device.
+              </span>
+              <Btn onClick={async () => {
+                const turningOn = !isCampIpad();
+                if (!confirm(turningOn ? 'Turn this device into the Camp iPad?\n\nYou will be signed out and the tablet will show the name list.' : 'Turn Camp iPad mode OFF on this device?')) return;
+                try { if (turningOn) localStorage.setItem('campIpadMode', '1'); else localStorage.removeItem('campIpadMode'); } catch (e) { alert("Couldn't save that on this device."); return; }
+                if (turningOn) {
+                  try { localStorage.removeItem('sessionMechanic'); localStorage.removeItem('sessionLastActive'); } catch (e) { /* ignore */ }
+                  await firebase.auth().signOut().catch(() => {});
+                }
+                window.location.reload();
+              }}>{isCampIpad() ? 'Turn off Camp iPad mode' : 'Make this the Camp iPad'}</Btn>
+            </div>
+          )}
 
           <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
             <label className="flex items-center justify-between gap-3 cursor-pointer">
