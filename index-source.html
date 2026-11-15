@@ -8893,11 +8893,16 @@ async function buildDriverLogsPdf(driver, logs, preTrips) {
     if (changes.length) {
       ensure(30);
       text('DUTY CHANGES', M, y - 8, 8, bold, rgb(0.4, 0.4, 0.4));
-      text('LOCATION (PHONE GPS)', M + 460, y - 8, 8, bold, rgb(0.4, 0.4, 0.4));
+      text('LOCATION / GPS COORDINATES', M + 460, y - 8, 8, bold, rgb(0.4, 0.4, 0.4));
       y -= 14;
       for (let i = 0; i < changes.length; i++) {
-        ensure(13);
         const c = changes[i];
+        // Place name, with the exact GPS coordinates always printed too so the
+        // spot can be found on any map.
+        const coords = c.loc && typeof c.loc.lat === 'number' && typeof c.loc.lng === 'number' ? c.loc.lat.toFixed(5) + ', ' + c.loc.lng.toFixed(5) : '';
+        const placeName = c.loc && c.loc.place ? c.loc.place : '';
+        const twoLines = !!(placeName && coords);
+        ensure(twoLines ? 22 : 13);
         const sameDay = dayLabel(c.time) === dayLabel(log.start);
         const next = i + 1 < changes.length ? changes[i + 1].time : log.end;
         const dur = next ? fmtH((new Date(next) - new Date(c.time)) / 3600000) : '';
@@ -8905,9 +8910,10 @@ async function buildDriverLogsPdf(driver, logs, preTrips) {
         text(STATUS_NAME[c.status] || c.status, M + 120, y - 9, 9);
         text(dur, M + 240, y - 9, 9);
         if (c.note) text(fitText(c.note, 9, 160), M + 290, y - 9, 9, font, rgb(0.3, 0.3, 0.3));
-        const where = c.loc ? (c.loc.place || (typeof c.loc.lat === 'number' ? c.loc.lat.toFixed(4) + ', ' + c.loc.lng.toFixed(4) : '')) : '';
+        const where = placeName || coords;
         if (where) text(fitText(where, 9, PW - M - (M + 460)), M + 460, y - 9, 9, font, rgb(0.15, 0.3, 0.55));
-        y -= 13;
+        if (twoLines) text('GPS ' + coords, M + 460, y - 18, 7.5, font, rgb(0.3, 0.3, 0.3));
+        y -= twoLines ? 22 : 13;
       }
       y -= 6;
     }
