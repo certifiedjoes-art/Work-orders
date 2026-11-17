@@ -1,6 +1,6 @@
 // Bump this version string every time index.html changes, so phones
 // reliably pick up the new version instead of getting stuck on an old one.
-const CACHE_NAME = 'harder-work-orders-v449';
+const CACHE_NAME = 'harder-work-orders-v450';
 
 // Handles push notifications arriving while the app isn't open — separate
 // from the caching logic below, using Firebase Cloud Messaging's own
@@ -35,6 +35,17 @@ try {
   // No signal, or the import failed for some other reason — background push
   // notifications won't work this time, but the rest of the app (caching,
   // offline fallback, everything below) still works completely normally.
+}
+
+// Camp iPad: the page leaves an (empty) cache named CAMP_FLAG once this device is in
+// camp mode AND has a complete saved copy of the app. While it exists this worker does
+// not download anything new, does not delete the saved copy, and serves everything from
+// what is already saved — so pushing a new version never costs the camp iPad any data.
+// An admin's "Update this iPad now" button deletes all caches (flag included), which
+// lets the next load install and save the newest version in full.
+const CAMP_FLAG = 'harder-camp-flag';
+async function campFrozen() {
+  try { return await caches.has(CAMP_FLAG); } catch (e) { return false; }
 }
 
 const APP_SHELL = [
@@ -94,6 +105,7 @@ async function cacheOne(cache, url, attempts) {
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
+    if (await campFrozen()) return; // camp iPad: stay on the saved version, download nothing
     const cache = await caches.open(CACHE_NAME);
     try {
       // Same-origin app files: all required.
@@ -115,11 +127,11 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
-  );
+  event.waitUntil((async () => {
+    if (await campFrozen()) return; // keep the saved copy the camp iPad is running from
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)));
+  })());
   self.clients.claim();
 });
 
@@ -224,5 +236,26 @@ self.addEventListener('fetch', (event) => {
   const sameOrigin = url.origin === self.location.origin;
   if (!sameOrigin && !CDN_HOSTS.includes(url.hostname)) return; // not ours — leave it to the browser
   const isPage = request.mode === 'navigate' || (sameOrigin && (url.pathname.endsWith('/') || url.pathname.endsWith('/index.html')));
-  event.respondWith(isPage ? handlePage(event) : handleStatic(event));
+  event.respondWith((async () => {
+    if (await campFrozen()) return campServe(event, isPage);
+    return isPage ? handlePage(event) : handleStatic(event);
+  })());
 });
+
+// Camp iPad: answer from whatever is saved (any version), never refresh it in the
+// background. Only if something was never saved does it go to the network.
+async function campServe(event, isPage) {
+  const request = event.request;
+  let cached = await caches.match(request, { ignoreVary: true });
+  if (!cached && isPage) cached = await caches.match('./index.html', { ignoreVary: true });
+  if (cached && cached.type === 'opaque' && request.mode === 'cors') cached = null;
+  if (cached) {
+    if (request.headers.has('range')) return rangeResponseFromCached(request, cached);
+    return cached;
+  }
+  try {
+    return await fetch(request);
+  } catch (e) {
+    return new Response('', { status: 504, statusText: 'Offline and not cached' });
+  }
+}

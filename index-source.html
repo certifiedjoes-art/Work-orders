@@ -15,7 +15,34 @@
   if ('serviceWorker' in navigator) {
     const hadControllerAlready = !!navigator.serviceWorker.controller;
 
+    // Camp iPad (switched on per device in Settings): it must NOT follow new
+    // versions on its own — the hotspot it runs on has very little data. It stays on
+    // the version it has until an admin taps "Update this iPad now". The flag lives in
+    // Cache Storage (not localStorage) because sw.js can't read localStorage.
+    let CAMP_DEVICE = false;
+    try { CAMP_DEVICE = localStorage.getItem('campIpadMode') === '1'; } catch (e) { /* ignore */ }
+    if (!CAMP_DEVICE) { try { caches.delete('harder-camp-flag'); } catch (e) { /* ignore */ } }
+
     navigator.serviceWorker.register('sw.js').then((registration) => {
+      if (CAMP_DEVICE) {
+        // Only freeze once this version has finished saving itself (otherwise there
+        // would be nothing saved to run from). Checked every few seconds until done.
+        const freezeWhenSaved = async () => {
+          try {
+            const keys = await caches.keys();
+            const mine = keys.filter((k) => k.indexOf('harder-work-orders-') === 0);
+            for (const k of mine) {
+              const c = await caches.open(k);
+              if (await c.match('./index.html')) { await caches.open('harder-camp-flag'); return true; }
+            }
+          } catch (e) { /* ignore */ }
+          return false;
+        };
+        let tries = 0;
+        const t = setInterval(async () => { tries++; if ((await freezeWhenSaved()) || tries > 60) clearInterval(t); }, 5000);
+        freezeWhenSaved();
+        return;
+      }
       // Check for a new version right away, then periodically while the
       // app stays open, and again any time it comes back to the
       // foreground — reopening from a home screen icon after being
@@ -65,6 +92,7 @@
       if (safeToReload()) window.location.reload();
     };
     navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (CAMP_DEVICE) return; // camp iPad never reloads itself onto a new version
       if (!hadControllerAlready || updatePending) return;
       updatePending = true;
       tryApplyUpdate();
@@ -119,6 +147,32 @@
 <script crossorigin src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" onload="window.__loadStatus['firebase-auth']='ok'" onerror="window.__loadStatus['firebase-auth']='FAILED'"></script>
 <script crossorigin src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js" onload="window.__loadStatus['firebase-messaging']='ok'" onerror="window.__loadStatus['firebase-messaging']='FAILED'"></script>
 <script crossorigin src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js" onload="window.__loadStatus['firebase-storage']='ok'" onerror="window.__loadStatus['firebase-storage']='FAILED'"></script>
+
+<script>
+  // Camp iPad: only subscribe to the handful of database nodes the timesheet screens
+  // need. Every other live listener is switched off (it just never fires), so the
+  // tablet isn't pulling maps, work orders, driver logs, safety records and so on
+  // over a hotspot. Writes are untouched.
+  (function () {
+    var camp = false;
+    try { camp = localStorage.getItem('campIpadMode') === '1'; } catch (e) { /* ignore */ }
+    if (!camp || !window.firebase || !firebase.database || !firebase.database.Query) return;
+    var ALLOWED = { '': 1, 'meta': 1, 'admins': 1, 'roles': 1, 'unitAssignments': 1, 'altUnitAssignments': 1, 'unitTypes': 1, 'blocks': 1,
+      'productionShiftRecords': 1, 'productionTimesheetSettings': 1, 'timesheetEntries': 1, 'timesheetApprovals': 1, 'timesheetSettings': 1,
+      'authMigrated': 1, 'mechanicEmails': 1, 'pins': 1, '.info': 1, 'mapSettings': 0 };
+    var origOn = firebase.database.Query.prototype.on;
+    firebase.database.Query.prototype.on = function (eventType, cb, a, b) {
+      try {
+        var full = (this.ref || this).toString();
+        var path = full.replace(/^https?:\/\/[^/]+\/?/, '');
+        var top = path.split('/')[0];
+        if (!ALLOWED[top]) return cb; // not needed on the camp iPad: never subscribe
+      } catch (e) { /* fall through to a normal listener */ }
+      return origOn.call(this, eventType, cb, a, b);
+    };
+    window.__campFiltered = true;
+  })();
+</script>
 
 <!-- PDF.js — renders an uploaded PDF map's first page to a canvas, client-side, so it can be used as a real map image instead of the placeholder terrain. v4.0.379 only ships as an ES module on cdnjs (no classic script-loadable build), so this imports it as a module and exposes it as window.pdfjsLib for the rest of the app's plain scripts to use. -->
 <script type="module">
@@ -5225,6 +5279,14 @@ function SidebarMenu({ show, onClose, mechanic, isAdmin, isSafety, isForeman, is
             <button onClick={onClose} className="text-2xl leading-none" style={{ color: COLORS.inkDim }}>✕</button>
           </div>
 
+          {isCampIpad() ? (
+            <div className="space-y-1 mb-4">
+              {item('⏱️', 'Shift', () => onNavigate('shift'))}
+              {!isAdmin && item('🗒️', 'Timesheets', () => onNavigate('myTimesheets'))}
+              {isAdmin && item('⚙️', 'Settings', () => onNavigate('settings'))}
+            </div>
+          ) : (
+          <React.Fragment>
           <div className="space-y-1 mb-4">
             {(isAdmin || isSafety) && item('🛠️', 'Admin', () => onNavigate('admin'))}
             {item('⏱️', 'Shift', () => onNavigate('shift'))}
@@ -5247,6 +5309,8 @@ function SidebarMenu({ show, onClose, mechanic, isAdmin, isSafety, isForeman, is
           <div className="space-y-1 mb-4">
             {item('🔄', t('checkForUpdates').replace('🔄 ', ''), onCheckUpdates)}
           </div>
+          </React.Fragment>
+          )}
 
           <div className="h-px my-4" style={{ background: COLORS.line }} />
 
@@ -6456,6 +6520,7 @@ async function selfHealMigration(oldPath, newPath, itemLabel) {
   // this device, only reads one record, and never holds things up more than 4 s.
   const doneKey = 'selfHealDone_' + newPath;
   try { if (localStorage.getItem(doneKey) === '1') return; } catch (e) { /* ignore */ }
+  if (isCampIpad()) return; // camp iPad only reads; migrations are for other devices
   const check = (async () => {
     const db = firebase.database();
     const newSnap = await db.ref(newPath).limitToFirst(1).once('value');
@@ -15533,7 +15598,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     // part of the app that reads `timesheets` keeps working completely
     // unchanged — none of them need to know or care how it's actually
     // stored underneath.
-    const tsRef = firebase.database().ref('timesheetEntries');
+    const tsBase = firebase.database().ref('timesheetEntries');
+    const tsRef = isCampIpad() ? tsBase.orderByKey().startAt((Date.now() - 60 * 24 * 3600 * 1000).toString(36)) : tsBase;
     let onTs = null;
     (async () => {
       await selfHealMigration('timesheets', 'timesheetEntries', 'timesheet entries');
@@ -16156,6 +16222,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       checkReady();
     }, onLoadError('the employee list'));
     let onOrders = null;
+    if (isCampIpad()) {
+      // The camp iPad doesn't show the work order board or checklists, so it never
+      // downloads them (and must never "fill in defaults" for them either).
+      ready.orders = true;
+      ready.templates = true;
+      checkReady();
+      return () => { metaRef.off('value', onMeta); };
+    }
     // Self-healing safety net — see selfHealMigration. Guarantees
     // workOrders is populated before it's ever treated as the live
     // source, whether or not anyone ran the migration button first.
@@ -16395,7 +16469,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   }, []);
 
   useEffect(() => {
-    const ref = firebase.database().ref('productionShiftRecords');
+    const base = firebase.database().ref('productionShiftRecords');
+    // Camp iPad: only the last 60 days (ids start with a base36 timestamp).
+    const ref = isCampIpad() ? base.orderByKey().startAt((Date.now() - 60 * 24 * 3600 * 1000).toString(36)) : base;
     let on = null;
     (async () => {
       await selfHealMigration('productionShifts', 'productionShiftRecords', 'production shifts');
@@ -18956,6 +19032,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // share one Samsara call instead of one each.
   const samsaraCacheRef = useRef({ time: 0, positions: null });
   const fetchAllSamsaraPositions = async () => {
+    if (isCampIpad()) return []; // camp iPad runs on a hotspot: no Samsara calls
     const cache = samsaraCacheRef.current;
     if (cache.positions && Date.now() - cache.time < 4000) return cache.positions;
     try {
@@ -19577,6 +19654,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       document.body.style.paddingBottom = prevPad;
     };
   }, [currentMechanic]);
+
+  // Camp iPad is timesheets only: anything else (maps, work orders, safety...) bounces
+  // back to the person's own time screen.
+  useEffect(() => {
+    if (!isCampIpad() || !currentMechanic || window.__viewAs) return;
+    const campHome = usesShiftScreen(jobTypeFor(currentMechanic)) ? 'shift' : 'timeclock';
+    const allowed = ['login', 'shift', 'timeclock', 'myTimesheets'];
+    if (isAdmin) allowed.push('settings');
+    if (!allowed.includes(screen)) setScreen(campHome);
+  }, [screen, currentMechanic, admins]);
 
   const isDriverLogWeekApproved = (weekStart) => !!driverLogApprovals[weekStart];
   const approveDriverLogWeek = async (weekStart) => {
@@ -26032,9 +26119,34 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 if (turningOn) {
                   try { localStorage.removeItem('sessionMechanic'); localStorage.removeItem('sessionLastActive'); } catch (e) { /* ignore */ }
                   await firebase.auth().signOut().catch(() => {});
+                } else {
+                  // Back to a normal device: forget the frozen copy so it picks up the latest version.
+                  try {
+                    const regs = await navigator.serviceWorker.getRegistrations();
+                    await Promise.all(regs.map((r) => r.unregister()));
+                    const keys = await caches.keys();
+                    await Promise.all(keys.map((k) => caches.delete(k)));
+                  } catch (e) { /* ignore */ }
                 }
                 window.location.reload();
               }}>{isCampIpad() ? 'Turn off Camp iPad mode' : 'Make this the Camp iPad'}</Btn>
+              {isCampIpad() && (
+                <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+                  <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>
+                    The Camp iPad does <b>not</b> update by itself when a new version is pushed — it stays on the version it has, to save data. Tap below (on wifi or a good connection) when you want it on the newest version. It downloads about 5 MB.
+                  </p>
+                  <Btn variant="ghost" onClick={async () => {
+                    if (!confirm('Update this iPad to the newest version now? It downloads about 5 MB and restarts the app.')) return;
+                    try {
+                      const regs = await navigator.serviceWorker.getRegistrations();
+                      await Promise.all(regs.map((r) => r.unregister()));
+                      const keys = await caches.keys();
+                      await Promise.all(keys.map((k) => caches.delete(k)));
+                    } catch (e) { /* ignore */ }
+                    window.location.reload();
+                  }}>🔄 Update this iPad now</Btn>
+                </div>
+              )}
             </div>
           )}
 
