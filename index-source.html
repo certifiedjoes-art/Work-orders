@@ -5888,6 +5888,108 @@ function weekEndOf(weekStart) {
   d.setDate(d.getDate() + 6);
   return d.toISOString().slice(0, 10);
 }
+
+// ---- Daily approvals ----
+// Approvals are stored per calendar day under the key 'day_YYYY-MM-DD' (with daily:true).
+// Older weekly approvals (keyed by the week's start date, no `daily` flag) are still honoured:
+// they keep that whole week locked for workers.
+// Workers can edit their own entries for 7 days; after that the day locks. Approving a day does
+// not lock it. If a worker edits an already-approved day the approval is marked needsReapproval
+// and the safety coordinator sees a "changed" flag. Admin edits never raise the flag.
+const WORKER_EDIT_WINDOW_DAYS = 7;
+function dayApprovalKey(dateStr) { return 'day_' + dateStr; }
+function getDayApproval(approvals, dateStr) {
+  const a = (approvals || {})[dayApprovalKey(dateStr)];
+  return a && a.daily ? a : null;
+}
+function isLegacyWeekApproved(approvals, dateStr) {
+  const a = (approvals || {})[weekStartOf(dateStr)];
+  return !!a && !a.daily;
+}
+function isDayLockedForWorker(approvals, dateStr) {
+  if (!dateStr) return false;
+  dateStr = String(dateStr).slice(0, 10);
+  if (isLegacyWeekApproved(approvals, dateStr)) return true;
+  const d = new Date(dateStr + 'T00:00:00');
+  const t = new Date(localDateStr() + 'T00:00:00');
+  return Math.round((t - d) / 86400000) > WORKER_EDIT_WINDOW_DAYS;
+}
+function changedApprovalDaysList(approvals, kind) {
+  return Object.entries(approvals || {})
+    .filter(([k, v]) => k.indexOf('day_') === 0 && v && v.daily && v.needsReapproval)
+    .map(([k, v]) => ({ kind, date: k.slice(4), by: v.changedBy || 'a worker' }));
+}
+function weekDaysFrom(weekStart) {
+  const out = [];
+  for (let i = 0; i < 7; i++) { const d = new Date(weekStart + 'T00:00:00'); d.setDate(d.getDate() + i); out.push(localDateStr(d)); }
+  return out;
+}
+function timesheetDaySummaries(weekStart, entries, prodShifts) {
+  const out = {};
+  weekDaysFrom(weekStart).forEach((date) => {
+    const ents = (entries || []).filter((e) => e.date === date);
+    const ps = (prodShifts || []).filter((s) => s.end && localDateFromIso(s.end) === date);
+    const people = new Set([...ents.map((e) => e.mechanic), ...ps.map((s) => s.employee)]);
+    out[date] = people.size ? `${people.size} ${people.size === 1 ? 'person' : 'people'} · ${ents.length + ps.length} ${ents.length + ps.length === 1 ? 'shift' : 'shifts'}` : '';
+  });
+  return out;
+}
+function DailyApprovalPanel({ weekStart, approvals, summaryByDate, onApprove, onUnapprove, onUnapproveLegacy }) {
+  const days = weekDaysFrom(weekStart);
+  const today = localDateStr();
+  const legacy = isLegacyWeekApproved(approvals, weekStart);
+  return (
+    <div className="mb-4">
+      <p className="font-display text-xs font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Daily approvals</p>
+      {legacy && (
+        <div className="flex items-center justify-between rounded-lg p-2 mb-2" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+          <span className="text-xs" style={{ color: COLORS.inkDim }}>🔒 This whole week was approved under the old weekly approval ({(approvals[weekStart] || {}).approvedBy || 'admin'}).</span>
+          {onUnapproveLegacy && <button type="button" className="text-xs underline" style={{ color: COLORS.accent }} onClick={() => onUnapproveLegacy(weekStart)}>Remove</button>}
+        </div>
+      )}
+      <div className="space-y-1">
+        {days.map((date) => {
+          const a = getDayApproval(approvals, date);
+          const needs = !!a && !!a.needsReapproval;
+          const approved = !!a && !needs;
+          const summary = (summaryByDate || {})[date] || '';
+          const future = date > today;
+          const label = new Date(date + 'T00:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' });
+          return (
+            <div key={date} className="flex items-center justify-between gap-2 rounded-lg p-2" style={{ background: needs ? COLORS.surfaceRaised : 'transparent', border: needs ? `1px solid ${COLORS.accent}` : `1px solid ${COLORS.line}` }}>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold">{label}</p>
+                <p className="text-xs" style={{ color: needs ? COLORS.accent : approved ? COLORS.done : COLORS.inkDim }}>
+                  {needs ? `⚠ Changed by ${a.changedBy || 'a worker'} after approval — needs re-approval` : approved ? `✓ Approved by ${a.approvedBy}` : (summary || (future ? 'Not yet' : 'Nothing logged'))}
+                </p>
+                {(approved || needs) && summary && <p className="text-xs" style={{ color: COLORS.inkDim }}>{summary}</p>}
+              </div>
+              <div className="flex gap-2 flex-shrink-0">
+                {approved ? (
+                  <Btn variant="ghost" onClick={() => onUnapprove(date)}>Un-approve</Btn>
+                ) : (
+                  <Btn onClick={() => onApprove(date)} disabled={future || (!summary && !needs)}>{needs ? 'Re-approve' : 'Approve day'}</Btn>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+function ChangedDaysBanner({ items }) {
+  if (!items || !items.length) return null;
+  const sorted = [...items].sort((a, b) => b.date.localeCompare(a.date));
+  return (
+    <div className="max-w-3xl mx-auto rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `2px solid ${COLORS.accent}` }}>
+      <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>⚠ Days changed since approval</p>
+      {sorted.map((it) => (
+        <p key={it.kind + it.date} className="text-xs">{it.kind} — {new Date(it.date + 'T00:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}: changed by {it.by}. Review and re-approve.</p>
+      ))}
+    </div>
+  );
+}
 function fmtWeekRange(weekStart) {
   const end = weekEndOf(weekStart);
   return `${fmtDate(weekStart)} – ${fmtDate(end)}`;
@@ -9476,7 +9578,7 @@ function DriverRecentLogsSection({ driver, allLogs, preTrips, unitPlates, driver
                   key={l.id}
                   log={l}
                   trailers={trailersForLog(l, myLogs, preTrips, unitPlates)}
-                  isWeekApproved={(dateStr) => !!(driverApprovals || {})[weekStartOf(dateStr)]}
+                  isWeekApproved={(dateStr) => isDayLockedForWorker(driverApprovals, dateStr)}
                   isAdmin={false}
                   onSave={(patch) => { onSaveLog(l.id, patch); setEditingLogId(null); }}
                   onAddMissed={(status, time, note) => onAddMissed(l.id, status, time, note)}
@@ -9486,14 +9588,14 @@ function DriverRecentLogsSection({ driver, allLogs, preTrips, unitPlates, driver
                 />
               );
             }
-            // The week being approved is what makes a log final for the driver.
-            const approval = (driverApprovals || {})[weekStartOf(l.start.slice(0, 10))];
+            // A log is final for the driver once it is more than 7 days old (or in an old weekly-approved week).
+            const approval = isDayLockedForWorker(driverApprovals, l.start.slice(0, 10)) ? { locked: true } : null;
             return (
               <div key={l.id}>
                 <PastLogRow log={l} defaultOpen={idx === 0} trailers={trailersForLog(l, myLogs, preTrips, unitPlates)} />
                 <div className="flex justify-end mt-1 mb-1">
                   {approval ? (
-                    <span className="text-xs" style={{ color: COLORS.inkDim }}>🔒 Approved{approval.approvedBy ? ' by ' + approval.approvedBy : ''} — ask admin if something needs changing</span>
+                    <span className="text-xs" style={{ color: COLORS.inkDim }}>🔒 Locked — ask admin if something needs changing</span>
                   ) : (
                     <button type="button" onClick={() => setEditingLogId(l.id)} className="text-xs underline" style={{ color: COLORS.accent }}>✏️ Edit this log</button>
                   )}
@@ -14413,7 +14515,7 @@ function DriverLogEditCard({ log, trailers, isWeekApproved, onSave, onDelete, on
             if (log.end && isNaN(newEndMs)) { alert('Pick a valid time out.'); return; }
             if (newStartMs > Date.now() + 60000 || (newEndMs && newEndMs > Date.now() + 60000)) { alert("That time hasn't happened yet."); return; }
             if (newEndMs && newEndMs <= newStartMs) { alert('Time out has to be after time in.'); return; }
-            if (isWeekApproved && (isWeekApproved(localDateStr(new Date(newStartMs))) || (newEndMs && isWeekApproved(localDateStr(new Date(newEndMs)))))) { alert('That time is in a week admin has already approved. Ask admin to change it.'); return; }
+            if (isWeekApproved && (isWeekApproved(localDateStr(new Date(newStartMs))) || (newEndMs && isWeekApproved(localDateStr(new Date(newEndMs)))))) { alert('That time is more than 7 days ago, so it is locked. Ask admin to change it.'); return; }
             const startChanged = newStartMs !== new Date(log.start).getTime();
             const endChanged = !!log.end && newEndMs !== new Date(log.end).getTime();
             const patch = { odometerStart, odometerEnd, unit: unitDraft.trim(), plate: plateDraft.trim().toUpperCase(), homeTerminal: homeDraft.trim(), trailersEdited: true, trailers: trailersDraft.map((t) => ({ unitName: t.unitName.trim(), plate: t.plate.trim().toUpperCase() })).filter((t) => t.unitName) };
@@ -17799,6 +17901,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await queueWrite('productionShifts', { kind: 'save', entry: shift });
   };
   const patchOneProductionShift = async (shiftId, patch) => {
+    { const prevS = productionShifts.find((x) => x.id === shiftId); if (prevS && (prevS.end || prevS.start)) flagTimesheetDayChanged(localDateFromIso(prevS.end || prevS.start)); }
     setProductionShifts((prev) => {
       const next = prev.map((s) => (s.id === shiftId ? { ...s, ...patch } : s));
       cacheSet('productionShifts', next);
@@ -17807,6 +17910,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await queueWrite('productionShifts', { kind: 'patch', entryId: shiftId, patch });
   };
   const deleteOneProductionShift = async (shiftId) => {
+    { const prevS = productionShifts.find((x) => x.id === shiftId); if (prevS && (prevS.end || prevS.start)) flagTimesheetDayChanged(localDateFromIso(prevS.end || prevS.start)); }
     setProductionShifts((prev) => {
       const next = prev.filter((s) => s.id !== shiftId);
       cacheSet('productionShifts', next);
@@ -19480,6 +19584,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // how this was specifically asked for (unlike Timesheets, where approval
   // is closer to a soft lock).
   const updateDriverLog = async (logId, patch) => {
+    flagDriverLogDayChanged(logId);
     await patchOneDriverLog(logId, patch);
     const log = driverLogs.find((l) => l.id === logId);
     if (log) await checkLogBookMismatch(log.driver, localDateStr(new Date(log.start)), { ...log, ...patch });
@@ -19583,6 +19688,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   }, [isAdmin, driverLogsLive, isOnline, driverLogs.length]);
   const deleteDriverLog = async (logId) => {
     const log = driverLogs.find((l) => l.id === logId);
+    flagDriverLogDayChanged(logId);
     await deleteOneDriverLog(logId);
     setEditingDriverLogId(null);
     if (log) await checkLogBookMismatch(log.driver, localDateStr(new Date(log.start)), null);
@@ -19603,6 +19709,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const change = { id: uid(), status, time: new Date(time).toISOString(), note: note || '' };
     const log = driverLogs.find((l) => l.id === logId);
     if (!log) return;
+    flagDriverLogDayChanged(logId);
     const nextChanges = [...(log.statusChanges || []), change].sort((a, b) => new Date(a.time) - new Date(b.time));
     await patchOneDriverLog(logId, { statusChanges: nextChanges });
     await checkLogBookMismatch(log.driver, localDateStr(new Date(log.start)), { ...log, statusChanges: nextChanges });
@@ -19610,6 +19717,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const updateDriverStatusChange = async (logId, changeId, patch) => {
     const log = driverLogs.find((l) => l.id === logId);
     if (!log) return;
+    flagDriverLogDayChanged(logId);
     const nextChanges = (log.statusChanges || [])
       .map((c) => (c.id === changeId ? { ...c, ...patch } : c))
       .sort((a, b) => new Date(a.time) - new Date(b.time));
@@ -19619,6 +19727,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const removeDriverStatusChange = async (logId, changeId) => {
     const log = driverLogs.find((l) => l.id === logId);
     if (!log) return;
+    flagDriverLogDayChanged(logId);
     const nextChanges = (log.statusChanges || []).filter((c) => c.id !== changeId);
     await patchOneDriverLog(logId, { statusChanges: nextChanges });
     await checkLogBookMismatch(log.driver, localDateStr(new Date(log.start)), { ...log, statusChanges: nextChanges });
@@ -19691,17 +19800,32 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (!allowed.includes(screen)) setScreen(campHome);
   }, [screen, currentMechanic, admins]);
 
-  const isDriverLogWeekApproved = (weekStart) => !!driverLogApprovals[weekStart];
-  const approveDriverLogWeek = async (weekStart) => {
-    const next = { ...driverLogApprovals, [weekStart]: { approvedBy: currentMechanic, approvedAt: new Date().toISOString() } };
-    setDriverLogApprovals(next);
-    await firebase.database().ref('driverLogApprovals').set(next).catch(() => alert("Couldn't save — check your signal and try again."));
+  const approveDriverLogDay = async (dateStr) => {
+    const rec = { daily: true, approvedBy: currentMechanic, approvedAt: new Date().toISOString() };
+    setDriverLogApprovals((prev) => ({ ...prev, [dayApprovalKey(dateStr)]: rec }));
+    try { await firebase.database().ref('driverLogApprovals/' + dayApprovalKey(dateStr)).set(rec); }
+    catch (e) { alert("Couldn't save — check your signal and try again."); }
   };
-  const unapproveDriverLogWeek = async (weekStart) => {
-    const next = { ...driverLogApprovals };
-    delete next[weekStart];
-    setDriverLogApprovals(next);
-    await firebase.database().ref('driverLogApprovals').set(next).catch(() => alert("Couldn't save — check your signal and try again."));
+  const unapproveDriverLogDay = async (dateStr) => {
+    setDriverLogApprovals((prev) => { const n = { ...prev }; delete n[dayApprovalKey(dateStr)]; return n; });
+    try { await firebase.database().ref('driverLogApprovals/' + dayApprovalKey(dateStr)).remove(); }
+    catch (e) { alert("Couldn't save — check your signal and try again."); }
+  };
+  const unapproveLegacyDriverLogWeek = async (weekStart) => {
+    setDriverLogApprovals((prev) => { const n = { ...prev }; delete n[weekStart]; return n; });
+    try { await firebase.database().ref('driverLogApprovals/' + weekStart).remove(); }
+    catch (e) { alert("Couldn't save — check your signal and try again."); }
+  };
+  const flagDriverLogDayChanged = (logId) => {
+    if (isAdmin || isSafety || window.__viewAs) return;
+    const log = driverLogs.find((l) => l.id === logId);
+    if (!log || !log.start) return;
+    const dateStr = log.start.slice(0, 10);
+    const cur = getDayApproval(driverLogApprovals, dateStr);
+    if (!cur || cur.needsReapproval) return;
+    const rec = { ...cur, needsReapproval: true, changedBy: currentMechanic, changedAt: new Date().toISOString() };
+    setDriverLogApprovals((prev) => ({ ...prev, [dayApprovalKey(dateStr)]: rec }));
+    firebase.database().ref('driverLogApprovals/' + dayApprovalKey(dateStr)).set(rec).catch((e) => console.error('flag changed day failed', e));
   };
 
   const persistBlocks = async (next) => {
@@ -20193,6 +20317,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // someone else, which simply can't happen when every write is scoped to
   // one entry's own id.
   const saveOneTimesheetEntry = async (entry) => {
+    flagTimesheetDayChanged(entry && entry.date);
     setTimesheets((prev) => {
       const next = prev.some((t) => t.id === entry.id) ? prev.map((t) => (t.id === entry.id ? entry : t)) : [...prev, entry];
       cacheSet('timesheets', next);
@@ -20201,6 +20326,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await queueWrite('timesheets', { kind: 'save', entry });
   };
   const patchOneTimesheetEntry = async (entryId, patch) => {
+    { const prevE = timesheets.find((t) => t.id === entryId); if (prevE) flagTimesheetDayChanged(prevE.date); if (patch && patch.date && (!prevE || patch.date !== prevE.date)) flagTimesheetDayChanged(patch.date); }
     setTimesheets((prev) => {
       const next = prev.map((t) => (t.id === entryId ? { ...t, ...patch } : t));
       cacheSet('timesheets', next);
@@ -20209,6 +20335,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await queueWrite('timesheets', { kind: 'patch', entryId, patch });
   };
   const deleteOneTimesheetEntry = async (entryId) => {
+    { const prevE = timesheets.find((t) => t.id === entryId); if (prevE) flagTimesheetDayChanged(prevE.date); }
     setTimesheets((prev) => {
       const next = prev.filter((t) => t.id !== entryId);
       cacheSet('timesheets', next);
@@ -20528,20 +20655,35 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     }
   };
 
-  const isWeekApproved = (weekStart) => !!timesheetApprovals[weekStart];
-
-  const approveWeek = async (weekStart) => {
-    const next = { ...timesheetApprovals, [weekStart]: { approvedBy: currentMechanic, approvedAt: new Date().toISOString() } };
-    setTimesheetApprovals(next);
-    await saveTimesheetApprovals(next);
+  // Daily approvals (see DailyApprovalPanel). Locked = a worker can no longer edit that day.
+  const isDayLocked = (dateStr) => isDayLockedForWorker(timesheetApprovals, dateStr);
+  const approveDay = async (dateStr) => {
+    const rec = { daily: true, approvedBy: currentMechanic, approvedAt: new Date().toISOString() };
+    setTimesheetApprovals((prev) => ({ ...prev, [dayApprovalKey(dateStr)]: rec }));
+    try { await firebase.database().ref('timesheetApprovals/' + dayApprovalKey(dateStr)).set(rec); }
+    catch (e) { alert("Couldn't save — check your signal and try again."); }
   };
-
-  const unapproveWeek = async (weekStart) => {
-    const next = { ...timesheetApprovals };
-    delete next[weekStart];
-    setTimesheetApprovals(next);
-    await saveTimesheetApprovals(next);
+  const unapproveDay = async (dateStr) => {
+    setTimesheetApprovals((prev) => { const n = { ...prev }; delete n[dayApprovalKey(dateStr)]; return n; });
+    try { await firebase.database().ref('timesheetApprovals/' + dayApprovalKey(dateStr)).remove(); }
+    catch (e) { alert("Couldn't save — check your signal and try again."); }
   };
+  const unapproveLegacyTimesheetWeek = async (weekStart) => {
+    setTimesheetApprovals((prev) => { const n = { ...prev }; delete n[weekStart]; return n; });
+    try { await firebase.database().ref('timesheetApprovals/' + weekStart).remove(); }
+    catch (e) { alert("Couldn't save — check your signal and try again."); }
+  };
+  // A worker (not admin / safety coordinator) changed something on an already-approved day:
+  // mark that day as needing re-approval so the safety coordinator sees it.
+  const flagTimesheetDayChanged = (dateStr) => {
+    if (!dateStr || isAdmin || isSafety || window.__viewAs) return;
+    const cur = getDayApproval(timesheetApprovals, dateStr);
+    if (!cur || cur.needsReapproval) return;
+    const rec = { ...cur, needsReapproval: true, changedBy: currentMechanic, changedAt: new Date().toISOString() };
+    setTimesheetApprovals((prev) => ({ ...prev, [dayApprovalKey(dateStr)]: rec }));
+    firebase.database().ref('timesheetApprovals/' + dayApprovalKey(dateStr)).set(rec).catch((e) => console.error('flag changed day failed', e));
+  };
+  const changedApprovalDays = [...changedApprovalDaysList(timesheetApprovals, 'Timesheets'), ...changedApprovalDaysList(driverLogApprovals, 'Driver logs')];
 
   // Always shows 2 decimals, even for whole numbers (9 -> "9.00") — unlike
   // fmtHoursDecimal, which strips trailing zeros for the app's own
@@ -21940,7 +22082,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       blocks,
       onSubmitProduction: async (employeeName, date, startLocal, endLocal, machine, block, numbers, setError, downtimes) => {
         if (!endLocal) { setError('Put in the time you finished too.'); return; }
-        if (isWeekApproved(weekStartOf(date))) { setError("That week's already been approved — ask admin to add this one for you."); return; }
+        if (isDayLocked(date)) { setError("That day is locked (more than 7 days ago) — ask admin to add this one for you."); return; }
         let endFixed = endLocal;
         if (new Date(endLocal) <= new Date(startLocal)) { // finished after midnight
           const d = new Date(endLocal); d.setDate(d.getDate() + 1);
@@ -22567,7 +22709,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               defaultMechanic={currentMechanic}
               {...selfMissedDayProps(() => { setShowAddMissedDay(false); campStateRef.current.quick = true; })}
               onSubmit={async (mechanicName, date, ci, co, ls, le, setError, jobs) => {
-                if (isWeekApproved(weekStartOf(date))) { setError("That week's already been approved — ask admin to add this one for you."); return; }
+                if (isDayLocked(date)) { setError("That day is locked (more than 7 days ago) — ask admin to add this one for you."); return; }
                 await addManualEntry(currentMechanic, date, ci, co, ls, le, jobs);
                 setShowAddMissedDay(false);
                 campStateRef.current.quick = true;
@@ -22743,8 +22885,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               defaultMechanic={currentMechanic}
               {...selfMissedDayProps(() => setShowAddMissedDay(false))}
               onSubmit={async (mechanicName, date, ci, co, ls, le, setError) => {
-                if (isWeekApproved(weekStartOf(date))) {
-                  setError("That week's already been approved — ask admin to add this one for you.");
+                if (isDayLocked(date)) {
+                  setError("That day is locked (more than 7 days ago) — ask admin to add this one for you.");
                   return;
                 }
                 await addManualEntry(mechanicName, date, ci, co, ls, le);
@@ -22812,8 +22954,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 <TimesheetEntryCard
                   key={entry.id}
                   entry={entry}
-                  locked={isWeekApproved(weekStartOf(entry.date))}
-                  canEdit={isAdmin || !isWeekApproved(weekStartOf(entry.date))}
+                  locked={isDayLocked(entry.date)}
+                  canEdit={isAdmin || !isDayLocked(entry.date)}
                   isEditing={editingEntryId === entry.id}
                   onEdit={() => setEditingEntryId(entry.id)}
                   onCancelEdit={() => setEditingEntryId(null)}
@@ -22885,7 +23027,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             {t('backToBoard')}
           </button>
           <h1 className="font-display text-3xl font-bold mb-2">🗒️ My Timesheets</h1>
-          <p className="text-xs mb-6" style={{ color: COLORS.inkDim }}>Your past shifts. Tap one to fix it. Weeks that admin has approved are locked.</p>
+          <p className="text-xs mb-6" style={{ color: COLORS.inkDim }}>Your past shifts. Tap one to fix it. Shifts older than 7 days are locked.</p>
 
           {staleEntry && fixBox('You never clocked out on ' + fmtDate(staleEntry.clockIn), staleEntry.clockIn, fixOutEntryVal, setFixOutEntryVal, async (iso) => {
             await patchOneTimesheetEntry(staleEntry.id, { clockOut: iso });
@@ -22903,8 +23045,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               defaultMechanic={currentMechanic}
               {...selfMissedDayProps(() => setShowAddMissedDay(false))}
               onSubmit={async (mechanicName, date, ci, co, ls, le, setError) => {
-                if (isWeekApproved(weekStartOf(date))) {
-                  setError("That week's already been approved — ask admin to add this one for you.");
+                if (isDayLocked(date)) {
+                  setError("That day is locked (more than 7 days ago) — ask admin to add this one for you.");
                   return;
                 }
                 await addManualEntry(mechanicName, date, ci, co, ls, le);
@@ -22930,8 +23072,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   <TimesheetEntryCard
                     key={entry.id}
                     entry={entry}
-                    locked={isWeekApproved(weekStartOf(entry.date))}
-                    canEdit={isAdmin || !isWeekApproved(weekStartOf(entry.date))}
+                    locked={isDayLocked(entry.date)}
+                    canEdit={isAdmin || !isDayLocked(entry.date)}
                     isEditing={editingEntryId === entry.id}
                     onEdit={() => setEditingEntryId(entry.id)}
                     onCancelEdit={() => setEditingEntryId(null)}
@@ -23017,7 +23159,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       weekTotalsByMechanic[e.mechanic] = (weekTotalsByMechanic[e.mechanic] || 0) + entryHours(e);
     });
     const weekProductionShifts = productionShifts.filter((s) => s.end && localDateFromIso(s.end) >= viewedWeekStart && localDateFromIso(s.end) <= viewedWeekEnd);
-    const weekApproved = isWeekApproved(viewedWeekStart);
 
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
@@ -23059,11 +23200,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               <button onClick={() => setTsWeekOffset(tsWeekOffset - 1)} className="text-lg px-2" style={{ color: COLORS.inkDim }}>←</button>
               <div className="text-center">
                 <p className="font-display font-bold">{fmtWeekRange(viewedWeekStart)}</p>
-                {weekApproved && (
-                  <p className="text-xs font-semibold mt-1" style={{ color: COLORS.done }}>
-                    ✓ Approved by {timesheetApprovals[viewedWeekStart].approvedBy}
-                  </p>
-                )}
               </div>
               <button
                 onClick={() => setTsWeekOffset(Math.min(0, tsWeekOffset + 1))}
@@ -23090,13 +23226,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               </div>
             )}
 
-            {weekApproved ? (
-              <Btn variant="ghost" onClick={() => unapproveWeek(viewedWeekStart)}>Un-approve this week</Btn>
-            ) : (
-              <div className="flex gap-2 flex-wrap">
-                <Btn onClick={() => approveWeek(viewedWeekStart)} disabled={Object.keys(weekTotalsByMechanic).length === 0}>
-                  Approve this week
-                </Btn>
+            <DailyApprovalPanel weekStart={viewedWeekStart} approvals={timesheetApprovals} summaryByDate={timesheetDaySummaries(viewedWeekStart, weekEntries, weekProductionShifts)} onApprove={approveDay} onUnapprove={unapproveDay} onUnapproveLegacy={unapproveLegacyTimesheetWeek} />
+            <div className="flex gap-2 flex-wrap">
                 <Btn variant="ghost" onClick={() => setShowWeekTable((s) => !s)} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
                   {showWeekTable ? '✕ Hide table' : '👁️ View here'}
                 </Btn>
@@ -23106,8 +23237,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 <Btn variant="ghost" onClick={() => window.print()} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
                   🖨️ Print
                 </Btn>
-              </div>
-            )}
+            </div>
             {showWeekTable && (
               <React.Fragment>
                 <WeekReviewTable
@@ -23124,7 +23254,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               </React.Fragment>
             )}
             <p className="text-xs mt-3 no-print" style={{ color: COLORS.line }}>
-              Approving a week locks it — mechanics can no longer edit shifts within it themselves.
+              Approve each day as you go. Workers can edit their own shifts for 7 days, then they lock. If a worker changes an approved day, it goes back to needing approval.
             </p>
           </div>
 
@@ -23389,7 +23519,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const weekEntries = timesheets.filter((t) => t.date >= viewedWeekStart && t.date <= viewedWeekEnd);
     const weekTotalsByMechanic = {};
     weekEntries.forEach((e) => { weekTotalsByMechanic[e.mechanic] = (weekTotalsByMechanic[e.mechanic] || 0) + entryHours(e); });
-    const weekApproved = isWeekApproved(viewedWeekStart);
 
     const productionClockedInNow = productionShifts.filter((s) => !s.end);
     const recentProductionShifts = productionShifts.filter((s) => s.end).sort((a, b) => b.end.localeCompare(a.end)).slice(0, 20);
@@ -23469,7 +23598,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       return localDateStr(d);
     })();
     const driverLogWeekEnd = weekEndOf(driverLogWeekStart);
-    const driverLogWeekApproved = isDriverLogWeekApproved(driverLogWeekStart);
     const driverNames = [...new Set(driverLogs.map((l) => l.driver))].sort((a, b) => a.localeCompare(b));
     const driverLogsThisWeek = (name) => driverLogs
       .filter((l) => l.driver === name && l.start.slice(0, 10) >= driverLogWeekStart && l.start.slice(0, 10) <= driverLogWeekEnd)
@@ -23488,6 +23616,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
+        <ChangedDaysBanner items={changedApprovalDays} />
         <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <SidebarMenu
           show={showSidebar}
@@ -24041,11 +24170,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               <button onClick={() => setTsWeekOffset(tsWeekOffset - 1)} className="text-lg px-2" style={{ color: COLORS.inkDim }}>←</button>
               <div className="text-center">
                 <p className="font-display font-bold">{fmtWeekRange(viewedWeekStart)}</p>
-                {weekApproved && (
-                  <p className="text-xs font-semibold mt-1" style={{ color: COLORS.done }}>
-                    ✓ Approved by {timesheetApprovals[viewedWeekStart].approvedBy}
-                  </p>
-                )}
               </div>
               <button
                 onClick={() => setTsWeekOffset(Math.min(0, tsWeekOffset + 1))}
@@ -24104,13 +24228,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               </div>
             )}
 
-            {weekApproved ? (
-              <Btn variant="ghost" onClick={() => unapproveWeek(viewedWeekStart)}>Un-approve this week</Btn>
-            ) : (
-              <div className="flex gap-2 flex-wrap">
-                <Btn onClick={() => approveWeek(viewedWeekStart)} disabled={weekGroups.length === 0}>
-                  Approve this week
-                </Btn>
+            <DailyApprovalPanel weekStart={viewedWeekStart} approvals={timesheetApprovals} summaryByDate={timesheetDaySummaries(viewedWeekStart, weekEntries, weekProductionShifts)} onApprove={approveDay} onUnapprove={unapproveDay} onUnapproveLegacy={unapproveLegacyTimesheetWeek} />
+            <div className="flex gap-2 flex-wrap">
                 <Btn variant="ghost" onClick={() => setShowWeekTable((s) => !s)} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
                   {showWeekTable ? '✕ Hide table' : '👁️ View here'}
                 </Btn>
@@ -24122,8 +24241,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     🖨️ Print
                   </Btn>
                 )}
-              </div>
-            )}
+            </div>
             {showWeekTable && (
               <React.Fragment>
                 <WeekReviewTable
@@ -24142,7 +24260,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               </React.Fragment>
             )}
             <p className="text-xs mt-3 no-print" style={{ color: COLORS.line }}>
-              Approving a week locks it — mechanics can no longer edit shifts within it themselves.
+              Approve each day as you go. Workers can edit their own shifts for 7 days, then they lock. If a worker changes an approved day, it goes back to needing approval.
             </p>
           </div>
 
@@ -24413,11 +24531,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 <button onClick={() => setDriverLogWeekOffset(driverLogWeekOffset - 1)} className="text-lg px-2" style={{ color: COLORS.inkDim }}>←</button>
                 <div className="text-center">
                   <p className="font-display font-bold">{fmtWeekRange(driverLogWeekStart)}</p>
-                  {driverLogWeekApproved && (
-                    <p className="text-xs font-semibold mt-1" style={{ color: COLORS.done }}>
-                      ✓ Approved by {driverLogApprovals[driverLogWeekStart].approvedBy}
-                    </p>
-                  )}
                 </div>
                 <button
                   onClick={() => setDriverLogWeekOffset(Math.min(0, driverLogWeekOffset + 1))}
@@ -24490,11 +24603,15 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 })}
               </div>
 
-              {driverLogWeekApproved ? (
-                <Btn variant="ghost" onClick={() => unapproveDriverLogWeek(driverLogWeekStart)}>Un-approve this week</Btn>
-              ) : (
-                <Btn onClick={() => approveDriverLogWeek(driverLogWeekStart)}>Approve this week</Btn>
-              )}
+              <DailyApprovalPanel
+                weekStart={driverLogWeekStart}
+                approvals={driverLogApprovals}
+                summaryByDate={(() => { const o = {}; weekDaysFrom(driverLogWeekStart).forEach((d) => { const c = driverLogs.filter((l) => l.start && l.start.slice(0, 10) === d).length; o[d] = c ? `${c} log${c !== 1 ? 's' : ''}` : ''; }); return o; })()}
+                onApprove={approveDriverLogDay}
+                onUnapprove={unapproveDriverLogDay}
+                onUnapproveLegacy={unapproveLegacyDriverLogWeek}
+              />
+              <p className="text-xs mt-2" style={{ color: COLORS.line }}>Approve each day as you go. Drivers can edit their own logs for 7 days, then they lock. If a driver changes an approved day, it goes back to needing approval.</p>
             </React.Fragment>
           )}
           </AdminSection>
@@ -29683,7 +29800,7 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
           {!canEdit ? (
             <span className="text-xs" style={{ color: COLORS.line }}>Ask admin to fix a mistake</span>
           ) : locked ? (
-            <span className="text-xs font-semibold" style={{ color: COLORS.done }}>🔒 Approved</span>
+            <span className="text-xs font-semibold" style={{ color: COLORS.done }}>🔒 Locked</span>
           ) : (
             <button onClick={onEdit} className="text-xs underline" style={{ color: COLORS.accent }}>Edit</button>
           )}
