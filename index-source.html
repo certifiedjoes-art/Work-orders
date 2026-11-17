@@ -19,8 +19,8 @@
     // versions on its own — the hotspot it runs on has very little data. It stays on
     // the version it has until an admin taps "Update this iPad now". The flag lives in
     // Cache Storage (not localStorage) because sw.js can't read localStorage.
-    let CAMP_DEVICE = false;
-    try { CAMP_DEVICE = localStorage.getItem('campIpadMode') === '1'; } catch (e) { /* ignore */ }
+    let CAMP_DEVICE = false; // (name kept: "Low data mode" on this device — see Settings)
+    try { CAMP_DEVICE = localStorage.getItem('lowDataMode') === '1'; } catch (e) { /* ignore */ }
     if (!CAMP_DEVICE) { try { caches.delete('harder-camp-flag'); } catch (e) { /* ignore */ } }
 
     navigator.serviceWorker.register('sw.js').then((registration) => {
@@ -155,7 +155,7 @@
   // over a hotspot. Writes are untouched.
   (function () {
     var camp = false;
-    try { camp = localStorage.getItem('campIpadMode') === '1'; } catch (e) { /* ignore */ }
+    try { camp = localStorage.getItem('lowDataMode') === '1'; } catch (e) { /* ignore */ }
     if (!camp || !window.firebase || !firebase.database || !firebase.database.Query) return;
     var ALLOWED = { '': 1, 'meta': 1, 'admins': 1, 'roles': 1, 'unitAssignments': 1, 'altUnitAssignments': 1, 'unitTypes': 1, 'blocks': 1,
       'productionShiftRecords': 1, 'productionTimesheetSettings': 1, 'timesheetEntries': 1, 'timesheetApprovals': 1, 'timesheetSettings': 1,
@@ -5279,7 +5279,7 @@ function SidebarMenu({ show, onClose, mechanic, isAdmin, isSafety, isForeman, is
             <button onClick={onClose} className="text-2xl leading-none" style={{ color: COLORS.inkDim }}>✕</button>
           </div>
 
-          {isCampIpad() ? (
+          {isLowData() ? (
             <div className="space-y-1 mb-4">
               {item('⏱️', 'Shift', () => onNavigate('shift'))}
               {!isAdmin && item('🗒️', 'Timesheets', () => onNavigate('myTimesheets'))}
@@ -5685,6 +5685,29 @@ async function idbDeleteMapImageBlob(mapId) {
 // shared tablet in camp: everyone always signs in with name + PIN, nobody is
 // remembered, and the tablet signs the person out by itself when they're done.
 // Clocks keep running because they live in the database, not on the tablet.
+// Low data mode — a separate per-device switch (admin turns it on in Settings) for a device
+// on a weak or capped connection (e.g. a hotspot): timesheets only, no maps / Samsara /
+// work orders, a short history window, and no automatic app updates. Turn it off and
+// the device goes back to the full app and updates itself again.
+function lowDataPersonRef(base, field, person) {
+  // Low data mode: only this person's own newest 30 records (needs .indexOn on `field`).
+  // If Firebase ever warns the index is missing, remember it and use a 14-day key window instead.
+  try {
+    if (!window.__ldWarnHook) {
+      window.__ldWarnHook = true;
+      const ow = console.warn;
+      console.warn = function () {
+        try { if (String(arguments[0] || '').indexOf('indexOn') !== -1) localStorage.setItem('lowDataNoIndex', '1'); } catch (e) {}
+        return ow.apply(console, arguments);
+      };
+    }
+    if (localStorage.getItem('lowDataNoIndex') !== '1') return base.orderByChild(field).equalTo(person).limitToLast(30);
+  } catch (e) {}
+  return base.orderByKey().startAt((Date.now() - 14 * 24 * 3600 * 1000).toString(36));
+}
+function isLowData() {
+  try { return localStorage.getItem('lowDataMode') === '1'; } catch (e) { return false; }
+}
 function isCampIpad() {
   try { return localStorage.getItem('campIpadMode') === '1'; } catch (e) { return false; }
 }
@@ -6520,7 +6543,7 @@ async function selfHealMigration(oldPath, newPath, itemLabel) {
   // this device, only reads one record, and never holds things up more than 4 s.
   const doneKey = 'selfHealDone_' + newPath;
   try { if (localStorage.getItem(doneKey) === '1') return; } catch (e) { /* ignore */ }
-  if (isCampIpad()) return; // camp iPad only reads; migrations are for other devices
+  if (isLowData()) return; // low data mode only reads; migrations are for other devices
   const check = (async () => {
     const db = firebase.database();
     const newSnap = await db.ref(newPath).limitToFirst(1).once('value');
@@ -15599,7 +15622,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     // unchanged — none of them need to know or care how it's actually
     // stored underneath.
     const tsBase = firebase.database().ref('timesheetEntries');
-    const tsRef = isCampIpad() ? tsBase.orderByKey().startAt((Date.now() - 60 * 24 * 3600 * 1000).toString(36)) : tsBase;
+    // Low data mode: nothing is downloaded until someone signs in, and then only the last
+    // 14 days (ids start with a base36 timestamp, so no database index is needed).
+    if (isLowData() && !currentMechanic) return undefined;
+    const tsRef = isLowData() ? lowDataPersonRef(tsBase, 'mechanic', currentMechanic) : tsBase;
     let onTs = null;
     (async () => {
       await selfHealMigration('timesheets', 'timesheetEntries', 'timesheet entries');
@@ -15610,7 +15636,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       });
     })();
     return () => { if (onTs) tsRef.off('value', onTs); };
-  }, []);
+  }, [isLowData() ? currentMechanic : null]);
 
   // Everyone except admin only downloads the last 30 days of driver logs and
   // pre-trips. Record ids start with a base36 timestamp (see uid()), so a key
@@ -16222,8 +16248,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       checkReady();
     }, onLoadError('the employee list'));
     let onOrders = null;
-    if (isCampIpad()) {
-      // The camp iPad doesn't show the work order board or checklists, so it never
+    if (isLowData()) {
+      // Low data mode doesn't show the work order board or checklists, so it never
       // downloads them (and must never "fill in defaults" for them either).
       ready.orders = true;
       ready.templates = true;
@@ -16470,8 +16496,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
   useEffect(() => {
     const base = firebase.database().ref('productionShiftRecords');
-    // Camp iPad: only the last 60 days (ids start with a base36 timestamp).
-    const ref = isCampIpad() ? base.orderByKey().startAt((Date.now() - 60 * 24 * 3600 * 1000).toString(36)) : base;
+    if (isLowData() && !currentMechanic) return undefined;
+    const ref = isLowData() ? lowDataPersonRef(base, 'employee', currentMechanic) : base;
     let on = null;
     (async () => {
       await selfHealMigration('productionShifts', 'productionShiftRecords', 'production shifts');
@@ -16482,7 +16508,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       });
     })();
     return () => { if (on) ref.off('value', on); };
-  }, []);
+  }, [isLowData() ? currentMechanic : null]);
 
   useEffect(() => {
     const ref = firebase.database().ref('productionTimesheetSettings');
@@ -19032,7 +19058,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // share one Samsara call instead of one each.
   const samsaraCacheRef = useRef({ time: 0, positions: null });
   const fetchAllSamsaraPositions = async () => {
-    if (isCampIpad()) return []; // camp iPad runs on a hotspot: no Samsara calls
+    if (isLowData()) return []; // low data mode: no Samsara calls
     const cache = samsaraCacheRef.current;
     if (cache.positions && Date.now() - cache.time < 4000) return cache.positions;
     try {
@@ -19658,7 +19684,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // Camp iPad is timesheets only: anything else (maps, work orders, safety...) bounces
   // back to the person's own time screen.
   useEffect(() => {
-    if (!isCampIpad() || !currentMechanic || window.__viewAs) return;
+    if (!isLowData() || !currentMechanic || window.__viewAs) return;
     const campHome = usesShiftScreen(jobTypeFor(currentMechanic)) ? 'shift' : 'timeclock';
     const allowed = ['login', 'shift', 'timeclock', 'myTimesheets'];
     if (isAdmin) allowed.push('settings');
@@ -26119,8 +26145,24 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 if (turningOn) {
                   try { localStorage.removeItem('sessionMechanic'); localStorage.removeItem('sessionLastActive'); } catch (e) { /* ignore */ }
                   await firebase.auth().signOut().catch(() => {});
-                } else {
-                  // Back to a normal device: forget the frozen copy so it picks up the latest version.
+                }
+                window.location.reload();
+              }}>{isCampIpad() ? 'Turn off Camp iPad mode' : 'Make this the Camp iPad'}</Btn>
+            </div>
+          )}
+
+          {isAdmin && (
+            <div className="rounded-lg p-5 mb-4" style={{ background: COLORS.surface, border: `2px solid ${isLowData() ? COLORS.accent : COLORS.line}` }}>
+              <span className="text-sm font-semibold block" style={{ color: COLORS.ink }}>📶 Low data mode — {isLowData() ? 'ON for this device' : 'off'}</span>
+              <span className="text-xs block mb-3" style={{ color: COLORS.inkDim }}>
+                For a device on a weak or capped connection (like a hotspot). Timesheets only — no maps, Samsara, work orders or safety. After someone signs in it only downloads the last 14 days. And it does <b>not</b> update itself when a new version is pushed. Turn it off once you're somewhere with good data. This only changes this one device.
+              </span>
+              <Btn onClick={async () => {
+                const turningOn = !isLowData();
+                if (!confirm(turningOn ? 'Turn Low data mode ON for this device?\n\nIt will only show timesheets, and stop updating itself.' : 'Turn Low data mode OFF for this device?\n\nIt will download the newest version (about 5 MB) and go back to the full app.')) return;
+                try { if (turningOn) localStorage.setItem('lowDataMode', '1'); else localStorage.removeItem('lowDataMode'); } catch (e) { alert("Couldn't save that on this device."); return; }
+                if (!turningOn) {
+                  // Back to normal: forget the frozen copy so it picks up the latest version.
                   try {
                     const regs = await navigator.serviceWorker.getRegistrations();
                     await Promise.all(regs.map((r) => r.unregister()));
@@ -26129,14 +26171,14 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   } catch (e) { /* ignore */ }
                 }
                 window.location.reload();
-              }}>{isCampIpad() ? 'Turn off Camp iPad mode' : 'Make this the Camp iPad'}</Btn>
-              {isCampIpad() && (
+              }}>{isLowData() ? 'Turn off Low data mode' : 'Turn on Low data mode'}</Btn>
+              {isLowData() && (
                 <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${COLORS.line}` }}>
                   <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>
-                    The Camp iPad does <b>not</b> update by itself when a new version is pushed — it stays on the version it has, to save data. Tap below (on wifi or a good connection) when you want it on the newest version. It downloads about 5 MB.
+                    Want this device on the newest version but still in Low data mode? Tap below on a good connection. It downloads about 5 MB and restarts the app.
                   </p>
                   <Btn variant="ghost" onClick={async () => {
-                    if (!confirm('Update this iPad to the newest version now? It downloads about 5 MB and restarts the app.')) return;
+                    if (!confirm('Update this device to the newest version now? It downloads about 5 MB and restarts the app.')) return;
                     try {
                       const regs = await navigator.serviceWorker.getRegistrations();
                       await Promise.all(regs.map((r) => r.unregister()));
@@ -26144,7 +26186,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       await Promise.all(keys.map((k) => caches.delete(k)));
                     } catch (e) { /* ignore */ }
                     window.location.reload();
-                  }}>🔄 Update this iPad now</Btn>
+                  }}>🔄 Update this device now</Btn>
                 </div>
               )}
             </div>
