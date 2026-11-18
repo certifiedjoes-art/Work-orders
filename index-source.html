@@ -5914,79 +5914,202 @@ function isDayLockedForWorker(approvals, dateStr) {
   const t = new Date(localDateStr() + 'T00:00:00');
   return Math.round((t - d) / 86400000) > WORKER_EDIT_WINDOW_DAYS;
 }
-function changedApprovalDaysList(approvals, kind) {
-  return Object.entries(approvals || {})
-    .filter(([k, v]) => k.indexOf('day_') === 0 && v && v.daily && v.needsReapproval)
-    .map(([k, v]) => ({ kind, date: k.slice(4), by: v.changedBy || 'a worker' }));
+// ---- One-by-one approvals ----
+// Every timesheet (regular shift), production shift and driver log is approved on its own.
+// Records live in `itemApprovals/<itemId>`: {kind, approvedBy, approvedAt} when approved, or
+// {kind, needsReapproval:true, changedBy, changedAt, reason} when something changed after approval.
+// Days approved under the short-lived daily system (and old weekly approvals) still count as approved,
+// but only for items that existed when the day was approved.
+function idCreatedMs(id) {
+  const m = parseInt(String(id || '').slice(0, 8), 36);
+  return m > 1.4e12 && m < 3e12 ? m : NaN;
 }
-function weekDaysFrom(weekStart) {
-  const out = [];
-  for (let i = 0; i < 7; i++) { const d = new Date(weekStart + 'T00:00:00'); d.setDate(d.getDate() + i); out.push(localDateStr(d)); }
-  return out;
+function itemApprovalState(item, itemApprovals, tsApprovals, logApprovals) {
+  const rec = (itemApprovals || {})[item.id];
+  if (rec) {
+    if (rec.needsReapproval) return { status: 'changed', rec };
+    return { status: 'approved', by: rec.approvedBy, rec };
+  }
+  const approvals = item.kind === 'log' ? logApprovals : tsApprovals;
+  const wk = (approvals || {})[weekStartOf(item.date)];
+  if (wk && !wk.daily) return { status: 'approved', by: wk.approvedBy, legacy: true };
+  const day = getDayApproval(approvals, item.date);
+  if (day && !day.needsReapproval) {
+    const created = idCreatedMs(item.id);
+    const at = Date.parse(day.approvedAt);
+    if (!isFinite(created) || !isFinite(at) || created <= at) return { status: 'approved', by: day.approvedBy, legacy: true };
+  }
+  return { status: 'pending' };
 }
-function timesheetDaySummaries(weekStart, entries, prodShifts) {
-  const out = {};
-  weekDaysFrom(weekStart).forEach((date) => {
-    const ents = (entries || []).filter((e) => e.date === date);
-    const ps = (prodShifts || []).filter((s) => s.end && localDateFromIso(s.end) === date);
-    const people = new Set([...ents.map((e) => e.mechanic), ...ps.map((s) => s.employee)]);
-    out[date] = people.size ? `${people.size} ${people.size === 1 ? 'person' : 'people'} · ${ents.length + ps.length} ${ents.length + ps.length === 1 ? 'shift' : 'shifts'}` : '';
-  });
-  return out;
-}
-function DailyApprovalPanel({ weekStart, approvals, summaryByDate, onApprove, onUnapprove, onUnapproveLegacy }) {
-  const days = weekDaysFrom(weekStart);
+function buildApprovalItems(timesheets, productionShifts, driverLogs, itemApprovals, tsApprovals, logApprovals) {
   const today = localDateStr();
-  const legacy = isLegacyWeekApproved(approvals, weekStart);
-  return (
-    <div className="mb-4">
-      <p className="font-display text-xs font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>Daily approvals</p>
-      {legacy && (
-        <div className="flex items-center justify-between rounded-lg p-2 mb-2" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
-          <span className="text-xs" style={{ color: COLORS.inkDim }}>🔒 This whole week was approved under the old weekly approval ({(approvals[weekStart] || {}).approvedBy || 'admin'}).</span>
-          {onUnapproveLegacy && <button type="button" className="text-xs underline" style={{ color: COLORS.accent }} onClick={() => onUnapproveLegacy(weekStart)}>Remove</button>}
+  const out = [];
+  (timesheets || []).forEach((e) => { if (e.clockOut && e.date) out.push({ id: e.id, kind: 'ts', person: e.mechanic, date: e.date, raw: e }); });
+  (productionShifts || []).forEach((sh) => { if (sh.end) out.push({ id: sh.id, kind: 'prod', person: sh.employee, date: localDateFromIso(sh.end), raw: sh }); });
+  (driverLogs || []).forEach((l) => {
+    if (!l.start) return;
+    const date = l.start.slice(0, 10);
+    if (l.end || date < today) out.push({ id: l.id, kind: 'log', person: l.driver, date, raw: l });
+  });
+  out.forEach((it) => { it.state = itemApprovalState(it, itemApprovals, tsApprovals, logApprovals); });
+  const kindOrder = { ts: 0, prod: 1, log: 2 };
+  out.sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.person || '').localeCompare(b.person || '') || kindOrder[a.kind] - kindOrder[b.kind]);
+  return out;
+}
+const APPROVAL_KIND_LABEL = { ts: 'Timesheet', prod: 'Production shift', log: 'Driver log' };
+const APPROVAL_KIND_ICON = { ts: '🔧', prod: '🌲', log: '🚛' };
+function approvalDayLabel(dateStr) {
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-CA', { weekday: 'long', month: 'short', day: 'numeric' });
+}
+function approvalItemSummary(it) {
+  if (it.kind === 'ts') {
+    const e = it.raw;
+    return `${fmtTime(e.clockIn)}–${fmtTime(e.clockOut)} · ${fmtHours(entryHours(e))}` + ((e.jobs || []).length ? ` · ${e.jobs.map((j) => j.unit).join(', ')}` : '');
+  }
+  if (it.kind === 'prod') {
+    const sh = it.raw;
+    return `${sh.machine || ''}${sh.block ? ' · Block ' + sh.block : ''} · ${fmtTime(sh.start)}–${fmtTime(sh.end)}`;
+  }
+  const l = it.raw;
+  return `${fmtTime(l.start)}–${l.end ? fmtTime(l.end) : 'open'}${l.unit ? ' · ' + l.unit : ''}`;
+}
+function ApprovalStatusChip({ state }) {
+  if (state.status === 'approved') return <span className="text-xs font-semibold" style={{ color: COLORS.done }}>✓ Approved{state.by ? ' by ' + state.by : ''}</span>;
+  if (state.status === 'changed') return <span className="text-xs font-semibold" style={{ color: COLORS.accent }}>⚠ {(state.rec && state.rec.reason) || 'Changed'}{state.rec && state.rec.changedBy ? ' (' + state.rec.changedBy + ')' : ''} — needs approval</span>;
+  return <span className="text-xs font-semibold" style={{ color: COLORS.inkDim }}>Needs approval</span>;
+}
+function ApprovalDetail({ item, unitTypes }) {
+  const row = (label, value) => (value === undefined || value === null || value === '' ? null : (
+    <div key={label} className="flex justify-between gap-4 py-1.5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+      <span className="text-sm" style={{ color: COLORS.inkDim }}>{label}</span>
+      <span className="text-sm font-semibold text-right">{value}</span>
+    </div>
+  ));
+  const rows = [];
+  if (item.kind === 'ts') {
+    const e = item.raw;
+    const hrs = entryHours(e);
+    rows.push(row('Employee', e.mechanic), row('Date', fmtDate(e.date)), row('Clock in', fmtTime(e.clockIn)), row('Clock out', fmtTime(e.clockOut)));
+    rows.push(row('Break', e.skippedLunch ? 'No break taken' : (e.lunchStart && e.lunchEnd ? `${fmtTime(e.lunchStart)}–${fmtTime(e.lunchEnd)}` : '—')));
+    rows.push(row('Paid hours', fmtHours(hrs)));
+    (e.jobs || []).forEach((j, i) => rows.push(row('Job ' + (i + 1), `${j.unit} — ${j.hours}h`)));
+    rows.push(row('Signed', e.signature ? 'Yes' : 'No'));
+    if (hrs > 24 && !e.hoursConfirmedGood) rows.push(<p key="w1" className="text-xs mt-2" style={{ color: '#E07A5F' }}>⚠ This looks wrong — likely a bad date on one of the saved times.</p>);
+    else if (hrs > 16 && !e.hoursConfirmedGood) rows.push(<p key="w2" className="text-xs mt-2" style={{ color: COLORS.accent }}>Long shift — worth a look.</p>);
+    if (typeof e.logBookMismatchHours === 'number' && e.logBookMismatchHours > 0) rows.push(<p key="w3" className="text-xs mt-2" style={{ color: COLORS.accent }}>⚠ Log book shows {e.logBookMismatchHours}h more on-duty than what is paid this day.</p>);
+  } else if (item.kind === 'prod') {
+    const sh = item.raw;
+    const hrs = Math.max(0, (new Date(sh.end) - new Date(sh.start)) / 3600000);
+    const downtimeH = (sh.downtimeLog || []).reduce((sum, d) => sum + (d.start && d.end ? (new Date(d.end) - new Date(d.start)) / 3600000 : 0), 0);
+    const fuelTotal = Object.values(sh.fuelLog || {}).flat().reduce((sum, v) => sum + (parseFloat(v) || 0), 0);
+    rows.push(row('Employee', sh.employee), row('Date', fmtDate(item.date)), row('Machine', sh.machine), row('Block', sh.block), row('Start', fmtTime(sh.start)), row('End', fmtTime(sh.end)), row('Hours', fmtHours(hrs)));
+    rows.push(row('Machine hours', sh.startHours || sh.endHours ? `${sh.startHours || '—'} → ${sh.endHours || '—'}` : ''));
+    rows.push(row('Spruce', sh.spruce), row('Aspen', sh.aspen), row('Trees', sh.trees), row('Loads', sh.loadCount), row('Top piles', sh.topPileCount));
+    rows.push(row('Fuel', fuelTotal > 0 ? `${fuelTotal} L` : ''));
+    (sh.extraTasks || []).forEach((t, i) => rows.push(row('Extra task ' + (i + 1), `${t.desc} — ${t.hours}h`)));
+    rows.push(row('Downtime', downtimeH > 0 ? fmtHours(downtimeH) : ''));
+    rows.push(row('Notes', sh.notes));
+    rows.push(row('Signed', sh.signature ? 'Yes' : 'No'));
+  } else {
+    const l = item.raw;
+    const changes = [...(l.statusChanges || [])].sort((a, b) => new Date(a.time) - new Date(b.time));
+    rows.push(row('Driver', l.driver), row('Date', fmtDate(l.start)), row('Log', `${fmtTime(l.start)}–${l.end ? fmtTime(l.end) : 'still open'}`), row('Unit', l.unit), row('Plate', l.plate), row('Home terminal', l.homeTerminal));
+    rows.push(row('Odometer', l.odometerStart || l.odometerEnd ? `${l.odometerStart || '—'} → ${l.odometerEnd || '—'}` : ''));
+    rows.push(row('Summary', driverDaySummaryLabel(l.statusChanges)));
+    rows.push(row('Signed', l.signature ? 'Yes' : 'No'));
+    if (changes.length) {
+      rows.push(
+        <div key="chg" className="mt-3">
+          <p className="font-display text-xs uppercase tracking-wider mb-2" style={{ color: COLORS.inkDim }}>Status changes</p>
+          {changes.map((c, i) => (
+            <p key={c.id || i} className="text-sm font-mono">{fmtTime(c.time)} — {c.status}{c.note ? ` (${c.note})` : ''}</p>
+          ))}
         </div>
-      )}
-      <div className="space-y-1">
-        {days.map((date) => {
-          const a = getDayApproval(approvals, date);
-          const needs = !!a && !!a.needsReapproval;
-          const approved = !!a && !needs;
-          const summary = (summaryByDate || {})[date] || '';
-          const future = date > today;
-          const label = new Date(date + 'T00:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' });
-          return (
-            <div key={date} className="flex items-center justify-between gap-2 rounded-lg p-2" style={{ background: needs ? COLORS.surfaceRaised : 'transparent', border: needs ? `1px solid ${COLORS.accent}` : `1px solid ${COLORS.line}` }}>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold">{label}</p>
-                <p className="text-xs" style={{ color: needs ? COLORS.accent : approved ? COLORS.done : COLORS.inkDim }}>
-                  {needs ? `⚠ Changed by ${a.changedBy || 'a worker'} after approval — needs re-approval` : approved ? `✓ Approved by ${a.approvedBy}` : (summary || (future ? 'Not yet' : 'Nothing logged'))}
-                </p>
-                {(approved || needs) && summary && <p className="text-xs" style={{ color: COLORS.inkDim }}>{summary}</p>}
-              </div>
-              <div className="flex gap-2 flex-shrink-0">
-                {approved ? (
-                  <Btn variant="ghost" onClick={() => onUnapprove(date)}>Un-approve</Btn>
-                ) : (
-                  <Btn onClick={() => onApprove(date)} disabled={future || (!summary && !needs)}>{needs ? 'Re-approve' : 'Approve day'}</Btn>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      );
+    }
+  }
+  return <div>{rows}</div>;
+}
+function ApprovalsPage({ items, selectedId, onSelect, showApproved, onToggleShowApproved, onApprove, onUnapprove, onBack, unitTypes }) {
+  const pending = items.filter((it) => it.state.status !== 'approved');
+  const shown = showApproved ? items : pending;
+  const selected = selectedId ? items.find((it) => it.id === selectedId) : null;
+  const wrap = (children) => (
+    <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
+      {FONT_STYLE}
+      <div className="max-w-3xl mx-auto">{children}</div>
     </div>
   );
-}
-function ChangedDaysBanner({ items }) {
-  if (!items || !items.length) return null;
-  const sorted = [...items].sort((a, b) => b.date.localeCompare(a.date));
-  return (
-    <div className="max-w-3xl mx-auto rounded-lg p-3 mb-4" style={{ background: COLORS.surfaceRaised, border: `2px solid ${COLORS.accent}` }}>
-      <p className="font-display text-sm font-bold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>⚠ Days changed since approval</p>
-      {sorted.map((it) => (
-        <p key={it.kind + it.date} className="text-xs">{it.kind} — {new Date(it.date + 'T00:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}: changed by {it.by}. Review and re-approve.</p>
+  if (selected) {
+    const counterparts = items.filter((it) => it.id !== selected.id && it.date === selected.date && it.person === selected.person && (selected.kind === 'log' ? it.kind !== 'log' : it.kind === 'log'));
+    const isApproved = selected.state.status === 'approved';
+    const idx = pending.findIndex((it) => it.id === selected.id);
+    const next = pending.slice(idx + 1)[0] || pending.slice(0, Math.max(idx, 0)).filter((it) => it.id !== selected.id)[0] || null;
+    return wrap(
+      <React.Fragment>
+        <button onClick={() => onSelect(null)} className="text-sm mb-4" style={{ color: COLORS.inkDim }}>← Back to the list</button>
+        <p className="font-display text-xs uppercase tracking-wider mb-1" style={{ color: COLORS.inkDim }}>{APPROVAL_KIND_ICON[selected.kind]} {APPROVAL_KIND_LABEL[selected.kind]} · {approvalDayLabel(selected.date)}</p>
+        <p className="font-display text-2xl font-bold mb-1">{selected.person}</p>
+        <div className="mb-4"><ApprovalStatusChip state={selected.state} /></div>
+        <div className="rounded-lg p-4 mb-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+          <ApprovalDetail item={selected} unitTypes={unitTypes} />
+        </div>
+        {counterparts.length > 0 && (
+          <div className="flex gap-2 flex-wrap mb-4">
+            {counterparts.map((c) => (
+              <Btn key={c.id} variant="ghost" onClick={() => onSelect(c.id)}>{APPROVAL_KIND_ICON[c.kind]} Compare with {APPROVAL_KIND_LABEL[c.kind].toLowerCase()}</Btn>
+            ))}
+          </div>
+        )}
+        {isApproved ? (
+          <Btn variant="ghost" onClick={() => onUnapprove(selected)}>Un-approve</Btn>
+        ) : (
+          <Btn onClick={() => { onApprove(selected); onSelect(next ? next.id : null); }}>✓ Approve{next ? ' and next' : ''}</Btn>
+        )}
+        <p className="text-xs mt-3" style={{ color: COLORS.line }}>To fix a mistake, edit it on the Timesheets or Driver logs screen first, then come back and approve it.</p>
+      </React.Fragment>
+    );
+  }
+  const groups = [];
+  shown.forEach((it) => {
+    const last = groups[groups.length - 1];
+    if (last && last.date === it.date) last.items.push(it); else groups.push({ date: it.date, items: [it] });
+  });
+  return wrap(
+    <React.Fragment>
+      <button onClick={onBack} className="text-sm mb-4" style={{ color: COLORS.inkDim }}>← Back</button>
+      <p className="font-display text-2xl font-bold mb-1">Approvals</p>
+      <p className="text-sm mb-4" style={{ color: COLORS.inkDim }}>{pending.length === 0 ? 'Nothing waiting for approval.' : `${pending.length} waiting for approval, oldest first.`}</p>
+      <div className="flex gap-2 flex-wrap mb-4">
+        {pending.length > 0 && <Btn onClick={() => onSelect(pending[0].id)}>Start with the oldest</Btn>}
+        <Btn variant="ghost" onClick={onToggleShowApproved}>{showApproved ? 'Hide approved' : 'Show approved'}</Btn>
+      </div>
+      {groups.map((g) => (
+        <div key={g.date} className="mb-4">
+          <p className="font-display text-xs font-bold uppercase tracking-wide mb-2" style={{ color: COLORS.inkDim }}>{approvalDayLabel(g.date)}</p>
+          <div className="space-y-2">
+            {g.items.map((it) => (
+              <button key={it.id} onClick={() => onSelect(it.id)} className="w-full text-left rounded-lg p-3" style={{ background: COLORS.surface, border: it.state.status === 'changed' ? `2px solid ${COLORS.accent}` : `1px solid ${COLORS.line}` }}>
+                <div className="flex justify-between items-center">
+                  <span className="font-semibold text-sm">{APPROVAL_KIND_ICON[it.kind]} {it.person}</span>
+                  <span className="text-xs" style={{ color: COLORS.inkDim }}>{APPROVAL_KIND_LABEL[it.kind]}</span>
+                </div>
+                <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>{approvalItemSummary(it)}</p>
+                <div className="mt-1"><ApprovalStatusChip state={it.state} /></div>
+              </button>
+            ))}
+          </div>
+        </div>
       ))}
+    </React.Fragment>
+  );
+}
+function ChangedItemsBanner({ count, onOpen }) {
+  if (!count) return null;
+  return (
+    <div className="max-w-3xl mx-auto rounded-lg p-3 mb-4 flex items-center justify-between gap-3" style={{ background: COLORS.surfaceRaised, border: `2px solid ${COLORS.accent}` }}>
+      <p className="text-sm font-semibold" style={{ color: COLORS.accent }}>⚠ {count} approved item{count === 1 ? '' : 's'} changed — needs approval again</p>
+      <Btn onClick={onOpen}>Review</Btn>
     </div>
   );
 }
@@ -9893,19 +10016,20 @@ function DriverLogSection({ liveOdometer, driver, unitName, plate, homeTerminal,
   );
 }
 
-function ProductionShiftHistory({ shifts, editingId, onEdit, onCancelEdit, onSave, onDelete, unitTypes, units, isAdmin }) {
+function ProductionShiftHistory({ shifts, editingId, onEdit, onCancelEdit, onSave, onDelete, unitTypes, units, isAdmin, isLocked }) {
   if (shifts.length === 0) return null;
   return (
     <div className="mt-8">
       <p className="font-display text-xs uppercase tracking-wider mb-3" style={{ color: COLORS.inkDim }}>Recent shifts</p>
       <div className="space-y-2">
-        {shifts.map((s) =>
-          editingId === s.id ? (
+        {shifts.map((s) => {
+          const lockedForWorker = !isAdmin && !!isLocked && isLocked(s);
+          return editingId === s.id && !lockedForWorker ? (
             <ProductionShiftEditCard key={s.id} shift={s} unitTypes={unitTypes} units={units} onCancel={onCancelEdit} onSave={(patch) => onSave(s.id, patch)} onDelete={() => onDelete(s.id)} isAdmin={isAdmin} />
           ) : (
             <button
               key={s.id}
-              onClick={() => onEdit(s.id)}
+              onClick={() => { if (!lockedForWorker) onEdit(s.id); }}
               className="w-full text-left rounded-lg p-3"
               style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}
             >
@@ -9923,11 +10047,13 @@ function ProductionShiftHistory({ shifts, editingId, onEdit, onCancelEdit, onSav
                 </p>
               )}
               <div className="flex justify-end">
-                <span className="text-xs underline" style={{ color: COLORS.accent }}>Edit</span>
+                {lockedForWorker
+                  ? <span className="text-xs font-semibold" style={{ color: COLORS.done }}>🔒 Locked — ask admin to fix a mistake</span>
+                  : <span className="text-xs underline" style={{ color: COLORS.accent }}>Edit</span>}
               </div>
             </button>
-          )
-        )}
+          );
+        })}
       </div>
     </div>
   );
@@ -15303,6 +15429,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [driverLogsLive, setDriverLogsLive] = useState(false); // true once the live Firebase copy of the logs has arrived
   const [driverLogs, setDriverLogs] = useState(() => cacheGet('driverLogs', [])); // hours-of-service log book — winch truck driver only, separate from paid clock-in
   const [driverLogApprovals, setDriverLogApprovals] = useState(() => cacheGet('driverLogApprovals', {}));
+  const [itemApprovals, setItemApprovals] = useState(() => cacheGet('itemApprovals', {}));
+  const [approvalSelectedId, setApprovalSelectedId] = useState(null);
+  const [showApprovedItems, setShowApprovedItems] = useState(false);
+  const [approvalsFrom, setApprovalsFrom] = useState('team');
   const [preTripInspections, setPreTripInspections] = useState(() => cacheGet('preTripInspections', []));
   const [maps, setMaps] = useState(() => cacheGet('maps', [])); // [{id, name, isPublic, isDefault, addedBy}] — real file content comes in a later stage
   // Maps loaded straight from a file on this device (AirDrop/email → Files),
@@ -15768,6 +15898,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const val = snap.val() || {};
       setDriverLogApprovals(val);
       cacheSet('driverLogApprovals', val);
+    });
+    return () => ref.off('value', on);
+  }, []);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('itemApprovals');
+    const on = ref.on('value', (snap) => {
+      const val = snap.val() || {};
+      setItemApprovals(val);
+      cacheSet('itemApprovals', val);
     });
     return () => ref.off('value', on);
   }, []);
@@ -17893,6 +18033,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     }
   };
   const saveOneProductionShift = async (shift) => {
+    if (shift && (shift.end || shift.start)) flagItemChanged('prod', shift.id, localDateFromIso(shift.end || shift.start), 'Changed');
     setProductionShifts((prev) => {
       const next = prev.some((s) => s.id === shift.id) ? prev.map((s) => (s.id === shift.id ? shift : s)) : [...prev, shift];
       cacheSet('productionShifts', next);
@@ -17901,7 +18042,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await queueWrite('productionShifts', { kind: 'save', entry: shift });
   };
   const patchOneProductionShift = async (shiftId, patch) => {
-    { const prevS = productionShifts.find((x) => x.id === shiftId); if (prevS && (prevS.end || prevS.start)) flagTimesheetDayChanged(localDateFromIso(prevS.end || prevS.start)); }
+    { const prevS = productionShifts.find((x) => x.id === shiftId); if (prevS && (prevS.end || prevS.start)) flagItemChanged('prod', shiftId, localDateFromIso(prevS.end || prevS.start), 'Changed'); }
     setProductionShifts((prev) => {
       const next = prev.map((s) => (s.id === shiftId ? { ...s, ...patch } : s));
       cacheSet('productionShifts', next);
@@ -17910,7 +18051,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await queueWrite('productionShifts', { kind: 'patch', entryId: shiftId, patch });
   };
   const deleteOneProductionShift = async (shiftId) => {
-    { const prevS = productionShifts.find((x) => x.id === shiftId); if (prevS && (prevS.end || prevS.start)) flagTimesheetDayChanged(localDateFromIso(prevS.end || prevS.start)); }
+    { const prevS = productionShifts.find((x) => x.id === shiftId); if (prevS && (prevS.end || prevS.start)) flagItemChanged('prod', shiftId, localDateFromIso(prevS.end || prevS.start), 'Changed'); }
     setProductionShifts((prev) => {
       const next = prev.filter((s) => s.id !== shiftId);
       cacheSet('productionShifts', next);
@@ -19800,32 +19941,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (!allowed.includes(screen)) setScreen(campHome);
   }, [screen, currentMechanic, admins]);
 
-  const approveDriverLogDay = async (dateStr) => {
-    const rec = { daily: true, approvedBy: currentMechanic, approvedAt: new Date().toISOString() };
-    setDriverLogApprovals((prev) => ({ ...prev, [dayApprovalKey(dateStr)]: rec }));
-    try { await firebase.database().ref('driverLogApprovals/' + dayApprovalKey(dateStr)).set(rec); }
-    catch (e) { alert("Couldn't save — check your signal and try again."); }
-  };
-  const unapproveDriverLogDay = async (dateStr) => {
-    setDriverLogApprovals((prev) => { const n = { ...prev }; delete n[dayApprovalKey(dateStr)]; return n; });
-    try { await firebase.database().ref('driverLogApprovals/' + dayApprovalKey(dateStr)).remove(); }
-    catch (e) { alert("Couldn't save — check your signal and try again."); }
-  };
-  const unapproveLegacyDriverLogWeek = async (weekStart) => {
-    setDriverLogApprovals((prev) => { const n = { ...prev }; delete n[weekStart]; return n; });
-    try { await firebase.database().ref('driverLogApprovals/' + weekStart).remove(); }
-    catch (e) { alert("Couldn't save — check your signal and try again."); }
-  };
+  // A driver edited a log: the log needs approving again, and so does that person's timesheet
+  // for the same day (the two are checked against each other).
   const flagDriverLogDayChanged = (logId) => {
     if (isAdmin || isSafety || window.__viewAs) return;
     const log = driverLogs.find((l) => l.id === logId);
     if (!log || !log.start) return;
-    const dateStr = log.start.slice(0, 10);
-    const cur = getDayApproval(driverLogApprovals, dateStr);
-    if (!cur || cur.needsReapproval) return;
-    const rec = { ...cur, needsReapproval: true, changedBy: currentMechanic, changedAt: new Date().toISOString() };
-    setDriverLogApprovals((prev) => ({ ...prev, [dayApprovalKey(dateStr)]: rec }));
-    firebase.database().ref('driverLogApprovals/' + dayApprovalKey(dateStr)).set(rec).catch((e) => console.error('flag changed day failed', e));
+    const date = log.start.slice(0, 10);
+    flagItemChanged('log', logId, date, 'Log edited');
+    timesheets.filter((t) => t.mechanic === log.driver && t.date === date).forEach((t) => flagItemChanged('ts', t.id, date, 'Driver log edited'));
+    productionShifts.filter((sh) => sh.employee === log.driver && sh.end && localDateFromIso(sh.end) === date).forEach((sh) => flagItemChanged('prod', sh.id, date, 'Driver log edited'));
   };
 
   const persistBlocks = async (next) => {
@@ -20317,7 +20442,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // someone else, which simply can't happen when every write is scoped to
   // one entry's own id.
   const saveOneTimesheetEntry = async (entry) => {
-    flagTimesheetDayChanged(entry && entry.date);
+    if (entry) flagItemChanged('ts', entry.id, entry.date, 'Changed');
     setTimesheets((prev) => {
       const next = prev.some((t) => t.id === entry.id) ? prev.map((t) => (t.id === entry.id ? entry : t)) : [...prev, entry];
       cacheSet('timesheets', next);
@@ -20326,7 +20451,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await queueWrite('timesheets', { kind: 'save', entry });
   };
   const patchOneTimesheetEntry = async (entryId, patch) => {
-    { const prevE = timesheets.find((t) => t.id === entryId); if (prevE) flagTimesheetDayChanged(prevE.date); if (patch && patch.date && (!prevE || patch.date !== prevE.date)) flagTimesheetDayChanged(patch.date); }
+    { const prevE = timesheets.find((t) => t.id === entryId); if (prevE) flagItemChanged('ts', entryId, prevE.date, 'Changed'); }
     setTimesheets((prev) => {
       const next = prev.map((t) => (t.id === entryId ? { ...t, ...patch } : t));
       cacheSet('timesheets', next);
@@ -20335,7 +20460,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await queueWrite('timesheets', { kind: 'patch', entryId, patch });
   };
   const deleteOneTimesheetEntry = async (entryId) => {
-    { const prevE = timesheets.find((t) => t.id === entryId); if (prevE) flagTimesheetDayChanged(prevE.date); }
+    { const prevE = timesheets.find((t) => t.id === entryId); if (prevE) flagItemChanged('ts', entryId, prevE.date, 'Changed'); }
     setTimesheets((prev) => {
       const next = prev.filter((t) => t.id !== entryId);
       cacheSet('timesheets', next);
@@ -20655,35 +20780,38 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     }
   };
 
-  // Daily approvals (see DailyApprovalPanel). Locked = a worker can no longer edit that day.
+  // Locked = a worker can no longer edit that day (older than 7 days, or in an old weekly-approved week).
+  // Approving an item does not lock it.
   const isDayLocked = (dateStr) => isDayLockedForWorker(timesheetApprovals, dateStr);
-  const approveDay = async (dateStr) => {
-    const rec = { daily: true, approvedBy: currentMechanic, approvedAt: new Date().toISOString() };
-    setTimesheetApprovals((prev) => ({ ...prev, [dayApprovalKey(dateStr)]: rec }));
-    try { await firebase.database().ref('timesheetApprovals/' + dayApprovalKey(dateStr)).set(rec); }
-    catch (e) { alert("Couldn't save — check your signal and try again."); }
+  const writeItemApproval = (id, rec) => {
+    setItemApprovals((prev) => ({ ...prev, [id]: rec }));
+    return firebase.database().ref('itemApprovals/' + id).set(rec);
   };
-  const unapproveDay = async (dateStr) => {
-    setTimesheetApprovals((prev) => { const n = { ...prev }; delete n[dayApprovalKey(dateStr)]; return n; });
-    try { await firebase.database().ref('timesheetApprovals/' + dayApprovalKey(dateStr)).remove(); }
-    catch (e) { alert("Couldn't save — check your signal and try again."); }
+  const approveItem = async (item) => {
+    const rec = { kind: item.kind, approvedBy: currentMechanic, approvedAt: new Date().toISOString() };
+    try { await writeItemApproval(item.id, rec); } catch (e) { alert("Couldn't save — check your signal and try again."); }
   };
-  const unapproveLegacyTimesheetWeek = async (weekStart) => {
-    setTimesheetApprovals((prev) => { const n = { ...prev }; delete n[weekStart]; return n; });
-    try { await firebase.database().ref('timesheetApprovals/' + weekStart).remove(); }
-    catch (e) { alert("Couldn't save — check your signal and try again."); }
+  const unapproveItem = async (item) => {
+    const rec = { kind: item.kind, needsReapproval: true, changedBy: currentMechanic, changedAt: new Date().toISOString(), reason: 'Un-approved' };
+    try { await writeItemApproval(item.id, rec); } catch (e) { alert("Couldn't save — check your signal and try again."); }
   };
-  // A worker (not admin / safety coordinator) changed something on an already-approved day:
-  // mark that day as needing re-approval so the safety coordinator sees it.
-  const flagTimesheetDayChanged = (dateStr) => {
-    if (!dateStr || isAdmin || isSafety || window.__viewAs) return;
-    const cur = getDayApproval(timesheetApprovals, dateStr);
-    if (!cur || cur.needsReapproval) return;
-    const rec = { ...cur, needsReapproval: true, changedBy: currentMechanic, changedAt: new Date().toISOString() };
-    setTimesheetApprovals((prev) => ({ ...prev, [dayApprovalKey(dateStr)]: rec }));
-    firebase.database().ref('timesheetApprovals/' + dayApprovalKey(dateStr)).set(rec).catch((e) => console.error('flag changed day failed', e));
+  // A worker (not admin / safety coordinator) changed something that was already approved: it goes back to
+  // needing approval and shows a "changed" flag. Brand new items simply start out as needing approval.
+  const flagItemChanged = (kind, id, dateStr, reason) => {
+    if (!id || isAdmin || isSafety || window.__viewAs) return;
+    const st = itemApprovalState({ id, kind, date: dateStr }, itemApprovals, timesheetApprovals, driverLogApprovals);
+    if (st.status !== 'approved') return;
+    const rec = { kind, needsReapproval: true, previouslyApprovedBy: st.by || '', changedBy: currentMechanic, changedAt: new Date().toISOString(), reason: reason || 'Changed' };
+    writeItemApproval(id, rec).catch((e) => console.error('flag changed item failed', e));
   };
-  const changedApprovalDays = [...changedApprovalDaysList(timesheetApprovals, 'Timesheets'), ...changedApprovalDaysList(driverLogApprovals, 'Driver logs')];
+  const approvalItems = (isAdmin || isSafety)
+    ? buildApprovalItems(timesheets, productionShifts, driverLogs, itemApprovals, timesheetApprovals, driverLogApprovals)
+    : [];
+  const approvalPendingCount = approvalItems.filter((it) => it.state.status !== 'approved').length;
+  const approvalChangedCount = approvalItems.filter((it) => it.state.status === 'changed').length;
+  const approvalStateById = {};
+  approvalItems.forEach((it) => { approvalStateById[it.id] = it.state; });
+  const openApprovalsPage = (fromScreen) => { setApprovalsFrom(fromScreen || 'team'); setApprovalSelectedId(null); setScreen('approvals'); };
 
   // Always shows 2 decimals, even for whole numbers (9 -> "9.00") — unlike
   // fmtHoursDecimal, which strips trailing zeros for the app's own
@@ -22736,6 +22864,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             unitTypes={unitTypes}
             units={units}
             isAdmin={isAdmin}
+            isLocked={(sh) => isDayLocked(localDateFromIso(sh.end || sh.start))}
           />
         </div>
       </div>
@@ -23099,6 +23228,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             unitTypes={unitTypes}
             units={units}
             isAdmin={isAdmin}
+            isLocked={(sh) => isDayLocked(localDateFromIso(sh.end || sh.start))}
           />
 
           {myClockEntries.length === 0 && myShifts.length === 0 && (
@@ -23110,6 +23240,33 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   }
 
   // ---------- TIMESHEETS (admin only) ----------
+  if (screen === 'approvals') {
+    if (!isAdmin && !isSafety) {
+      return (
+        <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8 flex items-center justify-center">
+          {FONT_STYLE}
+          <div className="text-center">
+            <p className="font-display text-lg font-bold mb-4">Admins only</p>
+            <Btn onClick={() => setScreen(landingScreenFor(currentMechanic))}>Back to board</Btn>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <ApprovalsPage
+        items={approvalItems}
+        selectedId={approvalSelectedId}
+        onSelect={setApprovalSelectedId}
+        showApproved={showApprovedItems}
+        onToggleShowApproved={() => setShowApprovedItems((v) => !v)}
+        onApprove={approveItem}
+        onUnapprove={unapproveItem}
+        onBack={() => setScreen(approvalsFrom || 'team')}
+        unitTypes={unitTypes}
+      />
+    );
+  }
+
   if (screen === 'timesheets') {
     if (!isAdmin && !isSafety) {
       return (
@@ -23226,35 +23383,21 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               </div>
             )}
 
-            <DailyApprovalPanel weekStart={viewedWeekStart} approvals={timesheetApprovals} summaryByDate={timesheetDaySummaries(viewedWeekStart, weekEntries, weekProductionShifts)} onApprove={approveDay} onUnapprove={unapproveDay} onUnapproveLegacy={unapproveLegacyTimesheetWeek} />
-            <div className="flex gap-2 flex-wrap">
-                <Btn variant="ghost" onClick={() => setShowWeekTable((s) => !s)} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
-                  {showWeekTable ? '✕ Hide table' : '👁️ View here'}
-                </Btn>
-                <Btn variant="ghost" onClick={() => exportTimesheets(weekEntries, weekProductionShifts, 'week-review', viewedWeekStart, weekEndOf(viewedWeekStart))} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
-                  📊 Open as spreadsheet
-                </Btn>
+            <Btn onClick={() => openApprovalsPage(screen)}>✅ Review timesheets to approve{approvalPendingCount > 0 ? ` (${approvalPendingCount})` : ''}</Btn>
+            <div className="flex gap-2 flex-wrap mt-3">
                 <Btn variant="ghost" onClick={() => window.print()} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
                   🖨️ Print
                 </Btn>
             </div>
-            {showWeekTable && (
-              <React.Fragment>
-                <WeekReviewTable
-                  entries={weekEntries}
-                  productionEntries={tsFilterMechanic ? weekProductionShifts.filter((s) => s.employee === tsFilterMechanic) : weekProductionShifts}
-                />
-                <PrintPortal>
-                  <WeekReviewTable
-                    entries={tsFilterMechanic ? weekEntries.filter((e) => e.mechanic === tsFilterMechanic) : weekEntries}
-                    productionEntries={tsFilterMechanic ? weekProductionShifts.filter((s) => s.employee === tsFilterMechanic) : weekProductionShifts}
-                    printMode
-                  />
-                </PrintPortal>
-              </React.Fragment>
-            )}
+            <PrintPortal>
+              <WeekReviewTable
+                entries={tsFilterMechanic ? weekEntries.filter((e) => e.mechanic === tsFilterMechanic) : weekEntries}
+                productionEntries={tsFilterMechanic ? weekProductionShifts.filter((sh) => sh.employee === tsFilterMechanic) : weekProductionShifts}
+                printMode
+              />
+            </PrintPortal>
             <p className="text-xs mt-3 no-print" style={{ color: COLORS.line }}>
-              Approve each day as you go. Workers can edit their own shifts for 7 days, then they lock. If a worker changes an approved day, it goes back to needing approval.
+              Approve timesheets one at a time on the review page. Workers can edit their own shifts for 7 days, then they lock. If a worker changes an approved timesheet, it goes back to needing approval.
             </p>
           </div>
 
@@ -23616,7 +23759,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        <ChangedDaysBanner items={changedApprovalDays} />
+        <ChangedItemsBanner count={approvalChangedCount} onOpen={() => openApprovalsPage(screen)} />
         <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <SidebarMenu
           show={showSidebar}
@@ -24228,39 +24371,23 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               </div>
             )}
 
-            <DailyApprovalPanel weekStart={viewedWeekStart} approvals={timesheetApprovals} summaryByDate={timesheetDaySummaries(viewedWeekStart, weekEntries, weekProductionShifts)} onApprove={approveDay} onUnapprove={unapproveDay} onUnapproveLegacy={unapproveLegacyTimesheetWeek} />
-            <div className="flex gap-2 flex-wrap">
-                <Btn variant="ghost" onClick={() => setShowWeekTable((s) => !s)} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
-                  {showWeekTable ? '✕ Hide table' : '👁️ View here'}
-                </Btn>
-                <Btn variant="ghost" onClick={() => exportTimesheets(weekEntries, weekProductionShifts, 'week-review', viewedWeekStart, weekEndOf(viewedWeekStart))} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
-                  📊 Open as spreadsheet
-                </Btn>
+            <Btn onClick={() => openApprovalsPage(screen)}>✅ Review timesheets to approve{approvalPendingCount > 0 ? ` (${approvalPendingCount})` : ''}</Btn>
+            <div className="flex gap-2 flex-wrap mt-3">
                 {adminAccess && (
                   <Btn variant="ghost" onClick={() => window.print()} disabled={weekEntries.length === 0 && weekProductionShifts.length === 0}>
                     🖨️ Print
                   </Btn>
                 )}
             </div>
-            {showWeekTable && (
-              <React.Fragment>
-                <WeekReviewTable
-                  entries={weekEntries}
-                  productionEntries={tsFilterMechanic ? weekProductionShifts.filter((s) => s.employee === tsFilterMechanic) : weekProductionShifts}
-                />
-                {adminAccess && (
-                  <PrintPortal>
-                    <WeekReviewTable
-                      entries={tsFilterMechanic ? weekEntries.filter((e) => e.mechanic === tsFilterMechanic) : weekEntries}
-                      productionEntries={tsFilterMechanic ? weekProductionShifts.filter((s) => s.employee === tsFilterMechanic) : weekProductionShifts}
-                      printMode
-                    />
-                  </PrintPortal>
-                )}
-              </React.Fragment>
-            )}
+            {adminAccess && (<PrintPortal>
+              <WeekReviewTable
+                entries={tsFilterMechanic ? weekEntries.filter((e) => e.mechanic === tsFilterMechanic) : weekEntries}
+                productionEntries={tsFilterMechanic ? weekProductionShifts.filter((sh) => sh.employee === tsFilterMechanic) : weekProductionShifts}
+                printMode
+              />
+            </PrintPortal>)}
             <p className="text-xs mt-3 no-print" style={{ color: COLORS.line }}>
-              Approve each day as you go. Workers can edit their own shifts for 7 days, then they lock. If a worker changes an approved day, it goes back to needing approval.
+              Approve timesheets one at a time on the review page. Workers can edit their own shifts for 7 days, then they lock. If a worker changes an approved timesheet, it goes back to needing approval.
             </p>
           </div>
 
@@ -24591,6 +24718,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                                       <span>{l.end ? '✓ Closed' : 'Still open'}</span>
                                     </div>
                                     {l.signature && <p className="text-xs mt-1" style={{ color: COLORS.done }}>✓ Signed</p>}
+                                    {approvalStateById[l.id] && <div className="mt-1"><ApprovalStatusChip state={approvalStateById[l.id]} /></div>}
                                   </button>
                                 )
                               ))}
@@ -24603,15 +24731,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 })}
               </div>
 
-              <DailyApprovalPanel
-                weekStart={driverLogWeekStart}
-                approvals={driverLogApprovals}
-                summaryByDate={(() => { const o = {}; weekDaysFrom(driverLogWeekStart).forEach((d) => { const c = driverLogs.filter((l) => l.start && l.start.slice(0, 10) === d).length; o[d] = c ? `${c} log${c !== 1 ? 's' : ''}` : ''; }); return o; })()}
-                onApprove={approveDriverLogDay}
-                onUnapprove={unapproveDriverLogDay}
-                onUnapproveLegacy={unapproveLegacyDriverLogWeek}
-              />
-              <p className="text-xs mt-2" style={{ color: COLORS.line }}>Approve each day as you go. Drivers can edit their own logs for 7 days, then they lock. If a driver changes an approved day, it goes back to needing approval.</p>
+              <Btn onClick={() => openApprovalsPage(screen)}>✅ Review driver logs to approve{approvalPendingCount > 0 ? ` (${approvalPendingCount})` : ''}</Btn>
+              <p className="text-xs mt-2" style={{ color: COLORS.line }}>Driver logs are approved on the same review page as timesheets, one at a time. Drivers can edit their own logs for 7 days, then they lock. If a driver changes an approved log, it goes back to needing approval.</p>
             </React.Fragment>
           )}
           </AdminSection>
