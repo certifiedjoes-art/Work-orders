@@ -5941,15 +5941,17 @@ function itemApprovalState(item, itemApprovals, tsApprovals, logApprovals) {
   }
   return { status: 'pending' };
 }
+// Nothing dated before this is shown on the approvals page (or counted as waiting).
+const APPROVALS_START_DATE = '2026-10-01';
 function buildApprovalItems(timesheets, productionShifts, driverLogs, itemApprovals, tsApprovals, logApprovals) {
   const today = localDateStr();
   const out = [];
-  (timesheets || []).forEach((e) => { if (e.clockOut && e.date) out.push({ id: e.id, kind: 'ts', person: e.mechanic, date: e.date, raw: e }); });
-  (productionShifts || []).forEach((sh) => { if (sh.end) out.push({ id: sh.id, kind: 'prod', person: sh.employee, date: localDateFromIso(sh.end), raw: sh }); });
+  (timesheets || []).forEach((e) => { if (e.clockOut && e.date && e.date >= APPROVALS_START_DATE) out.push({ id: e.id, kind: 'ts', person: e.mechanic, date: e.date, raw: e }); });
+  (productionShifts || []).forEach((sh) => { if (sh.end && localDateFromIso(sh.end) >= APPROVALS_START_DATE) out.push({ id: sh.id, kind: 'prod', person: sh.employee, date: localDateFromIso(sh.end), raw: sh }); });
   (driverLogs || []).forEach((l) => {
     if (!l.start) return;
     const date = l.start.slice(0, 10);
-    if (l.end || date < today) out.push({ id: l.id, kind: 'log', person: l.driver, date, raw: l });
+    if (date >= APPROVALS_START_DATE && (l.end || date < today)) out.push({ id: l.id, kind: 'log', person: l.driver, date, raw: l });
   });
   out.forEach((it) => { it.state = itemApprovalState(it, itemApprovals, tsApprovals, logApprovals); });
   const kindOrder = { ts: 0, prod: 1, log: 2 };
@@ -5978,59 +5980,7 @@ function ApprovalStatusChip({ state }) {
   if (state.status === 'changed') return <span className="text-xs font-semibold" style={{ color: COLORS.accent }}>⚠ {(state.rec && state.rec.reason) || 'Changed'}{state.rec && state.rec.changedBy ? ' (' + state.rec.changedBy + ')' : ''} — needs approval</span>;
   return <span className="text-xs font-semibold" style={{ color: COLORS.inkDim }}>Needs approval</span>;
 }
-function ApprovalDetail({ item, unitTypes }) {
-  const row = (label, value) => (value === undefined || value === null || value === '' ? null : (
-    <div key={label} className="flex justify-between gap-4 py-1.5" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-      <span className="text-sm" style={{ color: COLORS.inkDim }}>{label}</span>
-      <span className="text-sm font-semibold text-right">{value}</span>
-    </div>
-  ));
-  const rows = [];
-  if (item.kind === 'ts') {
-    const e = item.raw;
-    const hrs = entryHours(e);
-    rows.push(row('Employee', e.mechanic), row('Date', fmtDate(e.date)), row('Clock in', fmtTime(e.clockIn)), row('Clock out', fmtTime(e.clockOut)));
-    rows.push(row('Break', e.skippedLunch ? 'No break taken' : (e.lunchStart && e.lunchEnd ? `${fmtTime(e.lunchStart)}–${fmtTime(e.lunchEnd)}` : '—')));
-    rows.push(row('Paid hours', fmtHours(hrs)));
-    (e.jobs || []).forEach((j, i) => rows.push(row('Job ' + (i + 1), `${j.unit} — ${j.hours}h`)));
-    rows.push(row('Signed', e.signature ? 'Yes' : 'No'));
-    if (hrs > 24 && !e.hoursConfirmedGood) rows.push(<p key="w1" className="text-xs mt-2" style={{ color: '#E07A5F' }}>⚠ This looks wrong — likely a bad date on one of the saved times.</p>);
-    else if (hrs > 16 && !e.hoursConfirmedGood) rows.push(<p key="w2" className="text-xs mt-2" style={{ color: COLORS.accent }}>Long shift — worth a look.</p>);
-    if (typeof e.logBookMismatchHours === 'number' && e.logBookMismatchHours > 0) rows.push(<p key="w3" className="text-xs mt-2" style={{ color: COLORS.accent }}>⚠ Log book shows {e.logBookMismatchHours}h more on-duty than what is paid this day.</p>);
-  } else if (item.kind === 'prod') {
-    const sh = item.raw;
-    const hrs = Math.max(0, (new Date(sh.end) - new Date(sh.start)) / 3600000);
-    const downtimeH = (sh.downtimeLog || []).reduce((sum, d) => sum + (d.start && d.end ? (new Date(d.end) - new Date(d.start)) / 3600000 : 0), 0);
-    const fuelTotal = Object.values(sh.fuelLog || {}).flat().reduce((sum, v) => sum + (parseFloat(v) || 0), 0);
-    rows.push(row('Employee', sh.employee), row('Date', fmtDate(item.date)), row('Machine', sh.machine), row('Block', sh.block), row('Start', fmtTime(sh.start)), row('End', fmtTime(sh.end)), row('Hours', fmtHours(hrs)));
-    rows.push(row('Machine hours', sh.startHours || sh.endHours ? `${sh.startHours || '—'} → ${sh.endHours || '—'}` : ''));
-    rows.push(row('Spruce', sh.spruce), row('Aspen', sh.aspen), row('Trees', sh.trees), row('Loads', sh.loadCount), row('Top piles', sh.topPileCount));
-    rows.push(row('Fuel', fuelTotal > 0 ? `${fuelTotal} L` : ''));
-    (sh.extraTasks || []).forEach((t, i) => rows.push(row('Extra task ' + (i + 1), `${t.desc} — ${t.hours}h`)));
-    rows.push(row('Downtime', downtimeH > 0 ? fmtHours(downtimeH) : ''));
-    rows.push(row('Notes', sh.notes));
-    rows.push(row('Signed', sh.signature ? 'Yes' : 'No'));
-  } else {
-    const l = item.raw;
-    const changes = [...(l.statusChanges || [])].sort((a, b) => new Date(a.time) - new Date(b.time));
-    rows.push(row('Driver', l.driver), row('Date', fmtDate(l.start)), row('Log', `${fmtTime(l.start)}–${l.end ? fmtTime(l.end) : 'still open'}`), row('Unit', l.unit), row('Plate', l.plate), row('Home terminal', l.homeTerminal));
-    rows.push(row('Odometer', l.odometerStart || l.odometerEnd ? `${l.odometerStart || '—'} → ${l.odometerEnd || '—'}` : ''));
-    rows.push(row('Summary', driverDaySummaryLabel(l.statusChanges)));
-    rows.push(row('Signed', l.signature ? 'Yes' : 'No'));
-    if (changes.length) {
-      rows.push(
-        <div key="chg" className="mt-3">
-          <p className="font-display text-xs uppercase tracking-wider mb-2" style={{ color: COLORS.inkDim }}>Status changes</p>
-          {changes.map((c, i) => (
-            <p key={c.id || i} className="text-sm font-mono">{fmtTime(c.time)} — {c.status}{c.note ? ` (${c.note})` : ''}</p>
-          ))}
-        </div>
-      );
-    }
-  }
-  return <div>{rows}</div>;
-}
-function ApprovalsPage({ items, selectedId, onSelect, showApproved, onToggleShowApproved, onApprove, onUnapprove, onBack, unitTypes }) {
+function ApprovalsPage({ items, selectedId, onSelect, showApproved, onToggleShowApproved, onApprove, onUnapprove, onBack, renderEditor }) {
   const pending = items.filter((it) => it.state.status !== 'approved');
   const shown = showApproved ? items : pending;
   const selected = selectedId ? items.find((it) => it.id === selectedId) : null;
@@ -6051,9 +6001,7 @@ function ApprovalsPage({ items, selectedId, onSelect, showApproved, onToggleShow
         <p className="font-display text-xs uppercase tracking-wider mb-1" style={{ color: COLORS.inkDim }}>{APPROVAL_KIND_ICON[selected.kind]} {APPROVAL_KIND_LABEL[selected.kind]} · {approvalDayLabel(selected.date)}</p>
         <p className="font-display text-2xl font-bold mb-1">{selected.person}</p>
         <div className="mb-4"><ApprovalStatusChip state={selected.state} /></div>
-        <div className="rounded-lg p-4 mb-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-          <ApprovalDetail item={selected} unitTypes={unitTypes} />
-        </div>
+        <div className="mb-4" key={selected.id}>{renderEditor ? renderEditor(selected) : null}</div>
         {counterparts.length > 0 && (
           <div className="flex gap-2 flex-wrap mb-4">
             {counterparts.map((c) => (
@@ -6066,7 +6014,7 @@ function ApprovalsPage({ items, selectedId, onSelect, showApproved, onToggleShow
         ) : (
           <Btn onClick={() => { onApprove(selected); onSelect(next ? next.id : null); }}>✓ Approve{next ? ' and next' : ''}</Btn>
         )}
-        <p className="text-xs mt-3" style={{ color: COLORS.line }}>To fix a mistake, edit it on the Timesheets or Driver logs screen first, then come back and approve it.</p>
+        <p className="text-xs mt-3" style={{ color: COLORS.line }}>You can fix a mistake right here and save it, then approve.</p>
       </React.Fragment>
     );
   }
@@ -23262,7 +23210,58 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         onApprove={approveItem}
         onUnapprove={unapproveItem}
         onBack={() => setScreen(approvalsFrom || 'team')}
-        unitTypes={unitTypes}
+        renderEditor={(item) => {
+          if (item.kind === 'ts') {
+            return (
+              <TimesheetEntryCard
+                key={item.id}
+                entry={item.raw}
+                locked={false}
+                canEdit={true}
+                isEditing={true}
+                onEdit={() => {}}
+                onCancelEdit={() => {}}
+                onSave={(patch) => updateTimesheetEntry(item.id, patch)}
+                onDelete={() => deleteTimesheetEntry(item.id)}
+                onAddJob={addTimesheetJob}
+                onRemoveJob={removeTimesheetJob}
+                isAdmin={isAdmin || isSafety}
+                onConfirmHours={(val) => updateTimesheetEntry(item.id, { hoursConfirmedGood: val })}
+              />
+            );
+          }
+          if (item.kind === 'prod') {
+            return (
+              <ProductionShiftEditCard
+                key={item.id}
+                shift={item.raw}
+                unitTypes={unitTypes}
+                units={units}
+                onCancel={() => {}}
+                onSave={(patch) => updateProductionShift(item.id, patch)}
+                onDelete={() => deleteProductionShift(item.id)}
+                isAdmin={isAdmin || isSafety}
+              />
+            );
+          }
+          return (
+            <DriverLogEditCard
+              key={item.id}
+              log={item.raw}
+              trailers={trailersForLog(item.raw, driverLogs, preTripInspections, unitPlates)}
+              isWeekApproved={() => false}
+              onCloseLog={adminCloseDriverLog}
+              onSplitLog={adminSplitDriverLog}
+              onSave={(patch) => updateDriverLog(item.id, patch)}
+              onDelete={() => deleteDriverLog(item.id)}
+              onAddMissed={(status, time, note) => addMissedStatusChange(item.id, status, time, note)}
+              onUpdateChange={(changeId, patch) => updateDriverStatusChange(item.id, changeId, patch)}
+              onRemoveChange={(changeId) => removeDriverStatusChange(item.id, changeId)}
+              onCancel={() => {}}
+              isAdmin={isAdmin || isSafety}
+            />
+          );
+        }}
       />
     );
   }
