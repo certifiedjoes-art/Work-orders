@@ -22150,7 +22150,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </button>
           </div>
 
-          {(isAdmin || isSafety) && (
+          {isSafety && (
             <TrainingMatrixAlertBanner
               trainingMatrix={trainingMatrix}
               onOpen={() => { setScreen('safety'); setTrainingMatrixExpanded(true); setEditingTrainingPersonId(null); }}
@@ -22766,7 +22766,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             <button onClick={() => setShowSidebar(true)} className="text-3xl leading-none px-3 py-2 rounded-lg" style={{ color: COLORS.accent, background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>☰</button>
           </div>
 
-          {(isAdmin || isSafety) && (
+          {isSafety && (
             <TrainingMatrixAlertBanner
               trainingMatrix={trainingMatrix}
               onOpen={() => { setScreen('safety'); setTrainingMatrixExpanded(true); setEditingTrainingPersonId(null); }}
@@ -23978,7 +23978,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         {FONT_STYLE}
         <OfflineBanner isOnline={isOnline} pendingCount={pendingWriteCount} />
         <LowVoltageBanner lowUnits={lowVoltageUnits} />
-        <ChangedItemsBanner count={approvalChangedCount} onOpen={() => openApprovalsPage(screen)} />
+        {isSafety && <ChangedItemsBanner count={approvalChangedCount} onOpen={() => openApprovalsPage(screen)} />}
         <OilOverdueBanner overdueUnits={oilBannerUnits} />
         <SidebarMenu
           show={showSidebar}
@@ -24030,7 +24030,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </button>
           </div>
 
-          {(isAdmin || isSafety) && (
+          {isSafety && (
             <TrainingMatrixAlertBanner
               trainingMatrix={trainingMatrix}
               onOpen={() => { setScreen('safety'); setTrainingMatrixExpanded(true); setEditingTrainingPersonId(null); }}
