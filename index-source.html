@@ -5932,6 +5932,77 @@ function approvalItemWarning(it) {
   if (it.kind === 'prod') { const sh = it.raw; return sh.start && sh.end && new Date(sh.end) < new Date(sh.start) ? '⚠ Clock-out is before clock-in — hours are negative' : ''; }
   return '';
 }
+let MECHANIC_CREW = [];
+function downtimeTotalMinutes(list) {
+  return (list || []).reduce((sum, d) => {
+    if (!d.from || !d.to) return sum;
+    const [fh, fm] = d.from.split(':').map(Number);
+    const [th, tm] = d.to.split(':').map(Number);
+    let m = (th * 60 + tm) - (fh * 60 + fm);
+    if (m <= 0) m += 24 * 60;
+    return sum + m;
+  }, 0);
+}
+function DowntimeTotalLine({ list }) {
+  const mins = downtimeTotalMinutes(list);
+  if (!mins) return null;
+  return <p className="text-sm font-semibold mt-3" style={{ color: '#C1521A' }}>Total downtime: {fmtHours(mins / 60)}</p>;
+}
+function validateDowntimeFix(d, i) {
+  if (d.fixed === undefined && !d.orig) return 'Downtime ' + (i + 1) + ': say whether it was fixed.';
+  if (d.fixed === true) {
+    if (!(d.whatFixed || '').trim()) return 'Downtime ' + (i + 1) + ': say what was fixed.';
+    if (!(d.fixedBy || []).length) return 'Downtime ' + (i + 1) + ': pick who fixed it.';
+  }
+  return '';
+}
+function fixFieldsOf(d) {
+  if (d.fixed === undefined) return {};
+  return d.fixed === true ? { fixed: true, whatFixed: d.whatFixed.trim(), fixedBy: d.fixedBy } : { fixed: false };
+}
+function DowntimeFixFields({ d, onChange }) {
+  const [other, setOther] = useState('');
+  const by = d.fixedBy || [];
+  const addBy = (n) => { const name = (n || '').trim(); if (name && !by.includes(name)) onChange({ fixedBy: [...by, name] }); };
+  const choice = (val, label) => (
+    <button type="button" onClick={() => onChange({ fixed: val })} className="text-xs font-semibold px-3 py-1.5 rounded-full" style={{ border: `2px solid ${d.fixed === val ? COLORS.accent : COLORS.line}`, background: 'transparent', color: COLORS.ink }}>
+      {d.fixed === val ? '✓ ' : ''}{label}
+    </button>
+  );
+  const fieldStyleX = { background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` };
+  return (
+    <div className="mb-2">
+      <p className="text-xs mb-1" style={{ color: COLORS.inkDim }}>Was it fixed?</p>
+      <div className="flex flex-wrap gap-2 mb-2">
+        {choice(true, 'Yes, fixed')}
+        {choice(false, 'No, a mechanic needs to look')}
+      </div>
+      {d.fixed === true && (
+        <div>
+          <textarea value={d.whatFixed || ''} onChange={(e) => onChange({ whatFixed: e.target.value })} placeholder="What was fixed? (e.g. replaced hydraulic hose on the boom)" rows={2} className="w-full rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2" style={fieldStyleX} />
+          <p className="text-xs mb-1" style={{ color: COLORS.inkDim }}>Fixed by</p>
+          {by.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {by.map((n) => (
+                <span key={n} className="text-xs font-semibold px-3 py-1.5 rounded-full" style={{ border: `2px solid ${COLORS.accent}`, color: COLORS.ink }}>
+                  {n} <button type="button" onClick={() => onChange({ fixedBy: by.filter((x) => x !== n) })} aria-label={'Remove ' + n} style={{ color: '#E07A5F' }}>✕</button>
+                </span>
+              ))}
+            </div>
+          )}
+          <select value="" onChange={(e) => addBy(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2" style={fieldStyleX}>
+            <option value="">+ Add a mechanic…</option>
+            {MECHANIC_CREW.filter((n) => !by.includes(n)).map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+          <div className="flex gap-2">
+            <input type="text" value={other} onChange={(e) => setOther(e.target.value)} placeholder="Someone else (type name)" className="flex-1 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2" style={fieldStyleX} />
+            <button type="button" onClick={() => { addBy(other); setOther(''); }} className="text-sm underline" style={{ color: COLORS.accent }}>Add</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 // ---- One-by-one approvals ----
 // Every timesheet (regular shift), production shift and driver log is approved on its own.
 // Records live in `itemApprovals/<itemId>`: {kind, approvedBy, approvedAt} when approved, or
@@ -14867,7 +14938,7 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
   // Downtime: same entries the live "Report downtime" button and the add-a-missed-day form make.
   // New ones get a repair job for the mechanics when the shift is saved.
   const hmOf = (iso) => { if (!iso) return ''; const x = new Date(iso); return String(x.getHours()).padStart(2, '0') + ':' + String(x.getMinutes()).padStart(2, '0'); };
-  const [downtimes, setDowntimes] = useState((shift.downtimeLog || []).map((d) => ({ id: d.id || uid(), orig: d, from: hmOf(d.start), to: d.end ? hmOf(d.end) : '', reason: d.reason || '' })));
+  const [downtimes, setDowntimes] = useState((shift.downtimeLog || []).map((d) => ({ id: d.id || uid(), orig: d, from: hmOf(d.start), to: d.end ? hmOf(d.end) : '', reason: d.reason || '', fixed: d.fixed, whatFixed: d.whatFixed || '', fixedBy: d.fixedBy || [] })));
   const setDown = (i, patch) => setDowntimes((prev) => prev.map((d, k) => (k === i ? { ...d, ...patch } : d)));
   const activeType = machineType(shift.machine, unitTypes);
   // Clock in/out — same time-only-input approach as the mechanic
@@ -14914,6 +14985,30 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
     fuelUnitOptionsError = (e && e.message) ? e.message : String(e);
   }
 
+  const handleSave = () => {
+            const startIso = combineDateTime(clockInDate, clockInTime);
+            const r = resolveShiftEnd(startIso, combineDateTime(clockOutDate, clockOutTime));
+            if (r.error) { setSaveError(r.error); return; }
+            const downtimeLog = [];
+            for (let i = 0; i < downtimes.length; i++) {
+              const d = downtimes[i];
+              const o = d.orig || {};
+              if (!o.end && o.start && !d.to) { downtimeLog.push({ ...o, id: d.id, reason: d.reason.trim() || o.reason || '' }); continue; }
+              if (!d.from || !d.to) { setSaveError('Downtime ' + (i + 1) + ': put in when it started and when it ended.'); return; }
+              if (!d.reason.trim()) { setSaveError('Downtime ' + (i + 1) + ': say what was wrong (the details).'); return; }
+              const fixErr = validateDowntimeFix(d, i);
+              if (fixErr) { setSaveError(fixErr); return; }
+              const same = o.start && o.end && d.from === hmOf(o.start) && d.to === hmOf(o.end);
+              let st = same ? o.start : combineDateTime(clockInDate, d.from);
+              let en = same ? o.end : combineDateTime(clockInDate, d.to);
+              if (new Date(en) <= new Date(st)) en = new Date(new Date(en).getTime() + 24 * 3600 * 1000).toISOString();
+              const rec = { id: d.id, reason: d.reason.trim(), start: st, end: en, ...fixFieldsOf(d) };
+              if (o.orderId) rec.orderId = o.orderId;
+              downtimeLog.push(rec);
+            }
+            setSaveError('');
+            onSave({ start: startIso, end: r.out, downtimeLog, block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes, extraTasks });
+          };
   return (
     <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
       <div className="flex items-center justify-between mb-3 no-print">
@@ -15054,12 +15149,16 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
               </label>
             </div>
             <textarea value={d.reason} onChange={(e) => setDown(i, { reason: e.target.value })} placeholder="What was wrong? (hose blew, wouldn't start, waiting on parts...)" rows={2} className="w-full rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            {d.to && <DowntimeFixFields d={d} onChange={(patch) => setDown(i, patch)} />}
             <button type="button" onClick={() => setDowntimes((prev) => prev.filter((_, k) => k !== i))} className="text-xs underline" style={{ color: '#E07A5F' }}>Remove this downtime</button>
           </div>
         ))}
-        <button type="button" onClick={() => setDowntimes((prev) => [...prev, { id: uid(), orig: null, from: '', to: '', reason: '' }])} className="text-sm underline" style={{ color: COLORS.accent }}>
+        <button type="button" onClick={() => setDowntimes((prev) => [...prev, { id: uid(), orig: null, from: '', to: '', reason: '', fixed: undefined, whatFixed: '', fixedBy: [] }])} className="text-sm underline" style={{ color: COLORS.accent }}>
           + {downtimes.length ? 'Add another downtime' : 'Add downtime'}
         </button>
+        <DowntimeTotalLine list={downtimes} />
+        {saveError && <p className="text-sm mt-3" style={{ color: '#E07A5F' }}>{saveError}</p>}
+        <div className="mt-3"><Btn onClick={handleSave}>Save and close</Btn></div>
       </div>
       <div className="mb-3">
         <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Extra tasks (billable)</span>
@@ -15106,28 +15205,7 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
       ) : (
         <div className="flex gap-2 flex-wrap">
           {saveError && <p className="text-sm w-full" style={{ color: '#E07A5F' }}>{saveError}</p>}
-          <Btn onClick={() => {
-            const startIso = combineDateTime(clockInDate, clockInTime);
-            const r = resolveShiftEnd(startIso, combineDateTime(clockOutDate, clockOutTime));
-            if (r.error) { setSaveError(r.error); return; }
-            const downtimeLog = [];
-            for (let i = 0; i < downtimes.length; i++) {
-              const d = downtimes[i];
-              const o = d.orig || {};
-              if (!o.end && o.start && !d.to) { downtimeLog.push({ ...o, id: d.id, reason: d.reason.trim() || o.reason || '' }); continue; }
-              if (!d.from || !d.to) { setSaveError('Downtime ' + (i + 1) + ': put in when it started and when it ended.'); return; }
-              if (!d.reason.trim()) { setSaveError('Downtime ' + (i + 1) + ': say what was wrong (the details).'); return; }
-              const same = o.start && o.end && d.from === hmOf(o.start) && d.to === hmOf(o.end);
-              let st = same ? o.start : combineDateTime(clockInDate, d.from);
-              let en = same ? o.end : combineDateTime(clockInDate, d.to);
-              if (new Date(en) <= new Date(st)) en = new Date(new Date(en).getTime() + 24 * 3600 * 1000).toISOString();
-              const rec = { id: d.id, reason: d.reason.trim(), start: st, end: en };
-              if (o.orderId) rec.orderId = o.orderId;
-              downtimeLog.push(rec);
-            }
-            setSaveError('');
-            onSave({ start: startIso, end: r.out, downtimeLog, block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes, extraTasks });
-          }}>Save changes</Btn>
+          <Btn onClick={handleSave}>Save changes</Btn>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
           <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>Delete shift</button>
         </div>
@@ -20383,6 +20461,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (!trimmed || blocks.includes(trimmed)) return;
     await persistBlocks([...blocks, trimmed]);
   };
+  MECHANIC_CREW = (mechanics || []).filter((m) => m && jobTypeFor(m) === 'mechanic').sort((a, b) => a.localeCompare(b));
   const updateProductionShift = async (id, patch) => {
     if (patch && patch.downtimeLog) {
       const prevShift = productionShifts.find((x) => x.id === id) || {};
@@ -20395,18 +20474,31 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         if (!d.orderId && machine) {
           const oid = uid();
           d = { ...d, orderId: oid };
+          const done = d.fixed === true && !!d.end;
+          const notes0 = [];
+          if (d.end) notes0.push(await buildNote(done ? `Fixed: ${d.whatFixed} — by ${(d.fixedBy || []).join(', ')}. Machine back up ${fmtTime(d.end)}.` : `Machine back up ${fmtTime(d.end)} — not marked fixed, still needs a mechanic to follow up.`, done ? 'fix' : 'note'));
           await saveOneOrder({
             id: oid, unit: machine,
             description: await buildLocalizedField('⚠ Downtime: ' + d.reason, lang),
-            workedOnBy: [], hours: '', dueDate: '',
+            workedOnBy: done ? d.fixedBy : [], hours: '', dueDate: '',
             dateCreated: localDateFromIso(prevShift.start || prevShift.end) || localDateStr(),
-            status: 'Open', notes: [], createdBy: who, media: [], downtime: true,
+            status: done ? 'Done' : 'Open', notes: notes0, createdBy: who, media: [], downtime: true,
+            ...(done ? { completedAt: d.end } : {}),
           });
           const shortReason = d.reason.length > 120 ? d.reason.slice(0, 117) + '…' : d.reason;
           notifyPeople(mechanicsToNotify(), `⚠ Machine was down — ${machine}`, `${who}: ${shortReason}`);
         } else if (d.orderId) {
           const was = prevLog.find((x) => x.id === d.id);
-          if (was && was.reason !== d.reason) await patchOneOrder(d.orderId, { description: await buildLocalizedField('⚠ Downtime: ' + d.reason, lang) });
+          const o = orders.find((x) => x.id === d.orderId);
+          const op = {};
+          if (was && was.reason !== d.reason) op.description = await buildLocalizedField('⚠ Downtime: ' + d.reason, lang);
+          if (o && d.fixed === true && d.end && o.status !== 'Done') {
+            const crew = [...(o.workedOnBy || [])];
+            (d.fixedBy || []).forEach((n) => { if (!crew.includes(n)) crew.push(n); });
+            op.status = 'Done'; op.workedOnBy = crew; op.completedAt = d.end;
+            op.notes = [...(o.notes || []), await buildNote(`Fixed: ${d.whatFixed} — by ${(d.fixedBy || []).join(', ')}. Machine back up ${fmtTime(d.end)}.`, 'fix')];
+          }
+          if (Object.keys(op).length) await patchOneOrder(d.orderId, op);
         }
         nextLog.push(d);
       }
@@ -20797,8 +20889,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const startMs = new Date(d.from).getTime();
       if (endMs <= startMs) endMs += 24 * 3600 * 1000; // ran past midnight
       const orderId = uid();
-      downtimeLog.push({ id: uid(), reason: d.reason, start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString(), orderId });
-      downtimeOrders.push({ orderId, reason: d.reason });
+      const fixBits = d.fixed === true ? { fixed: true, whatFixed: d.whatFixed, fixedBy: d.fixedBy } : { fixed: false };
+      downtimeLog.push({ id: uid(), reason: d.reason, start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString(), orderId, ...fixBits });
+      downtimeOrders.push({ orderId, reason: d.reason, endIso: new Date(endMs).toISOString(), ...fixBits });
     }
     const shift = {
       id: uid(),
@@ -20816,19 +20909,22 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     if (downtimeOrders.length && machine) {
       if (!units.includes(machine)) await persistMeta(mechanics, [...units, machine]);
       for (const o of downtimeOrders) {
+        const done = o.fixed === true;
+        const note = await buildNote(done ? `Fixed: ${o.whatFixed} — by ${(o.fixedBy || []).join(', ')}. Machine back up ${fmtTime(o.endIso)}.` : `Machine back up ${fmtTime(o.endIso)} — not marked fixed, still needs a mechanic to follow up.`, done ? 'fix' : 'note');
         await saveOneOrder({
           id: o.orderId,
           unit: machine,
           description: await buildLocalizedField('⚠ Downtime: ' + o.reason, lang),
-          workedOnBy: [],
+          workedOnBy: done ? o.fixedBy : [],
           hours: '',
           dueDate: '',
           dateCreated: date || localDateStr(),
-          status: 'Open',
-          notes: [],
+          status: done ? 'Done' : 'Open',
+          notes: [note],
           createdBy: employeeName,
           media: [],
           downtime: true,
+          ...(done ? { completedAt: o.endIso } : {}),
         });
         const shortReason = o.reason.length > 120 ? o.reason.slice(0, 117) + '…' : o.reason;
         notifyPeople(mechanicsToNotify(), `⚠ Machine was down — ${machine}`, `${employeeName}: ${shortReason}`);
@@ -30405,6 +30501,8 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
         const d = downtimes[i];
         if (!d.from || !d.to) { setError('Downtime ' + (i + 1) + ': put in when it started and when it ended.'); return; }
         if (!d.reason.trim()) { setError('Downtime ' + (i + 1) + ': say what was wrong (the details).'); return; }
+        const fixErr = validateDowntimeFix(d, i);
+        if (fixErr) { setError(fixErr); return; }
       }
       onSubmitProduction(
         mechanic,
@@ -30415,7 +30513,7 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
         block,
         { spruce, aspen, trees, loadCount, topPileCount },
         setError,
-        downtimes.map((d) => ({ from: combine(date, d.from), to: combine(date, d.to), reason: d.reason.trim() }))
+        downtimes.map((d) => ({ from: combine(date, d.from), to: combine(date, d.to), reason: d.reason.trim(), ...fixFieldsOf(d) }))
       );
       return;
     }
@@ -30561,12 +30659,14 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
                     className="w-full rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2"
                     style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}
                   />
+                  <DowntimeFixFields d={d} onChange={(patch) => setDown(i, patch)} />
                   <button type="button" onClick={() => setDowntimes((prev) => prev.filter((_, k) => k !== i))} className="text-xs underline" style={{ color: '#E07A5F' }}>Remove this downtime</button>
                 </div>
               ))}
-              <button type="button" onClick={() => setDowntimes((prev) => [...prev, { from: '', to: '', reason: '' }])} className="text-sm underline" style={{ color: COLORS.accent }}>
+              <button type="button" onClick={() => setDowntimes((prev) => [...prev, { from: '', to: '', reason: '', fixed: undefined, whatFixed: '', fixedBy: [] }])} className="text-sm underline" style={{ color: COLORS.accent }}>
                 + {downtimes.length ? 'Add another downtime' : 'Add downtime'}
               </button>
+              <DowntimeTotalLine list={downtimes} />
             </div>
           </React.Fragment>
         ) : (
