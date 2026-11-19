@@ -14864,6 +14864,11 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
   const [newTaskHours, setNewTaskHours] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [saveError, setSaveError] = useState('');
+  // Downtime: same entries the live "Report downtime" button and the add-a-missed-day form make.
+  // New ones get a repair job for the mechanics when the shift is saved.
+  const hmOf = (iso) => { if (!iso) return ''; const x = new Date(iso); return String(x.getHours()).padStart(2, '0') + ':' + String(x.getMinutes()).padStart(2, '0'); };
+  const [downtimes, setDowntimes] = useState((shift.downtimeLog || []).map((d) => ({ id: d.id || uid(), orig: d, from: hmOf(d.start), to: d.end ? hmOf(d.end) : '', reason: d.reason || '' })));
+  const setDown = (i, patch) => setDowntimes((prev) => prev.map((d, k) => (k === i ? { ...d, ...patch } : d)));
   const activeType = machineType(shift.machine, unitTypes);
   // Clock in/out — same time-only-input approach as the mechanic
   // timesheet edit card (see TimesheetEntryCard): each keeps its own
@@ -15032,8 +15037,33 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
         <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Notes</span>
         <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
       </label>
+      <div className="mb-3 rounded-lg p-3" style={{ background: COLORS.surfaceRaised, border: '1px solid #C1521A' }}>
+        <p className="text-xs font-display uppercase tracking-wide mb-1" style={{ color: '#C1521A' }}>⚠ Downtime &amp; deficiencies</p>
+        <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>Was the machine down or broken at any point? Put it here — not in extra tasks. New ones are also sent to the mechanics as a repair job for {shift.machine || 'the machine'}.</p>
+        {downtimes.map((d, i) => (
+          <div key={d.id} className="rounded-lg p-3 mb-3" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+            {d.orig && !d.orig.end && !d.to && <p className="text-xs mb-2" style={{ color: '#C1521A' }}>Still down — not marked as running yet.</p>}
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <label className="block">
+                <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Went down at</span>
+                <input type="time" value={d.from} onChange={(e) => setDown(i, { from: e.target.value })} className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+              </label>
+              <label className="block">
+                <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Back running at</span>
+                <input type="time" value={d.to} onChange={(e) => setDown(i, { to: e.target.value })} className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+              </label>
+            </div>
+            <textarea value={d.reason} onChange={(e) => setDown(i, { reason: e.target.value })} placeholder="What was wrong? (hose blew, wouldn't start, waiting on parts...)" rows={2} className="w-full rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+            <button type="button" onClick={() => setDowntimes((prev) => prev.filter((_, k) => k !== i))} className="text-xs underline" style={{ color: '#E07A5F' }}>Remove this downtime</button>
+          </div>
+        ))}
+        <button type="button" onClick={() => setDowntimes((prev) => [...prev, { id: uid(), orig: null, from: '', to: '', reason: '' }])} className="text-sm underline" style={{ color: COLORS.accent }}>
+          + {downtimes.length ? 'Add another downtime' : 'Add downtime'}
+        </button>
+      </div>
       <div className="mb-3">
         <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Extra tasks (billable)</span>
+        <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Downtime doesn't go here — use the downtime box above.</p>
         {extraTasks.length > 0 && (
           <div className="space-y-2 mb-2">
             {extraTasks.map((t) => (
@@ -15080,8 +15110,23 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
             const startIso = combineDateTime(clockInDate, clockInTime);
             const r = resolveShiftEnd(startIso, combineDateTime(clockOutDate, clockOutTime));
             if (r.error) { setSaveError(r.error); return; }
+            const downtimeLog = [];
+            for (let i = 0; i < downtimes.length; i++) {
+              const d = downtimes[i];
+              const o = d.orig || {};
+              if (!o.end && o.start && !d.to) { downtimeLog.push({ ...o, id: d.id, reason: d.reason.trim() || o.reason || '' }); continue; }
+              if (!d.from || !d.to) { setSaveError('Downtime ' + (i + 1) + ': put in when it started and when it ended.'); return; }
+              if (!d.reason.trim()) { setSaveError('Downtime ' + (i + 1) + ': say what was wrong (the details).'); return; }
+              const same = o.start && o.end && d.from === hmOf(o.start) && d.to === hmOf(o.end);
+              let st = same ? o.start : combineDateTime(clockInDate, d.from);
+              let en = same ? o.end : combineDateTime(clockInDate, d.to);
+              if (new Date(en) <= new Date(st)) en = new Date(new Date(en).getTime() + 24 * 3600 * 1000).toISOString();
+              const rec = { id: d.id, reason: d.reason.trim(), start: st, end: en };
+              if (o.orderId) rec.orderId = o.orderId;
+              downtimeLog.push(rec);
+            }
             setSaveError('');
-            onSave({ start: startIso, end: r.out, block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes, extraTasks });
+            onSave({ start: startIso, end: r.out, downtimeLog, block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes, extraTasks });
           }}>Save changes</Btn>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
           <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>Delete shift</button>
@@ -20339,6 +20384,41 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await persistBlocks([...blocks, trimmed]);
   };
   const updateProductionShift = async (id, patch) => {
+    if (patch && patch.downtimeLog) {
+      const prevShift = productionShifts.find((x) => x.id === id) || {};
+      const prevLog = prevShift.downtimeLog || [];
+      const machine = prevShift.machine;
+      const who = prevShift.employee || currentMechanic;
+      const nextLog = [];
+      for (const d0 of patch.downtimeLog) {
+        let d = d0;
+        if (!d.orderId && machine) {
+          const oid = uid();
+          d = { ...d, orderId: oid };
+          await saveOneOrder({
+            id: oid, unit: machine,
+            description: await buildLocalizedField('⚠ Downtime: ' + d.reason, lang),
+            workedOnBy: [], hours: '', dueDate: '',
+            dateCreated: localDateFromIso(prevShift.start || prevShift.end) || localDateStr(),
+            status: 'Open', notes: [], createdBy: who, media: [], downtime: true,
+          });
+          const shortReason = d.reason.length > 120 ? d.reason.slice(0, 117) + '…' : d.reason;
+          notifyPeople(mechanicsToNotify(), `⚠ Machine was down — ${machine}`, `${who}: ${shortReason}`);
+        } else if (d.orderId) {
+          const was = prevLog.find((x) => x.id === d.id);
+          if (was && was.reason !== d.reason) await patchOneOrder(d.orderId, { description: await buildLocalizedField('⚠ Downtime: ' + d.reason, lang) });
+        }
+        nextLog.push(d);
+      }
+      // A removed downtime takes its repair job with it, but only if nobody has touched that job yet.
+      for (const was of prevLog) {
+        if (was.orderId && !nextLog.some((x) => x.id === was.id)) {
+          const o = orders.find((x) => x.id === was.orderId);
+          if (o && o.status === 'Open' && !(o.notes || []).length && !(o.workedOnBy || []).length && !o.hours) await deleteOneOrder(o.id);
+        }
+      }
+      patch = { ...patch, downtimeLog: nextLog };
+    }
     await patchOneProductionShift(id, patch);
     setEditingShiftId(null);
   };
