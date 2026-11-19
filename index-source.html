@@ -5247,6 +5247,7 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
 
 // The Diagnostics page (what each employee sees) is for this one person only.
 const DIAGNOSTICS_OWNER = 'Joe';
+const EXAMPLE_VIEW_NAME = 'Example Employee';
 function SidebarMenu({ show, onClose, mechanic, isAdmin, isSafety, isForeman, isProduction, onOpenBoard, onNavigate, onLogout, onCheckUpdates, t }) {
   if (!show) return null;
   const item = (icon, label, onClick, color) => (
@@ -15511,6 +15512,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [editingOilBaselineForUnit, setEditingOilBaselineForUnit] = useState(null);
   const [diagExpanded, setDiagExpanded] = useState(null);
   const [diagSearch, setDiagSearch] = useState('');
+  const [viewAsExample, setViewAsExample] = useState(null); // { unit, role } while previewing a blank example job
+  const [diagExampleChoice, setDiagExampleChoice] = useState('');
   const [stuckTracks, setStuckTracks] = useState(null);
   const [stuckStatus, setStuckStatus] = useState('');
   // Completion record for watch-only (noQuiz) job-hazard courses, which
@@ -17577,6 +17580,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // Role (employee/foreman/admin) — falls back to the existing /admins array
   // for anyone who predates this system, so nobody's access silently changes.
   const roleFor = (name) => {
+    if (viewAsExample && name === EXAMPLE_VIEW_NAME) return viewAsExample.role;
     const slug = slugForMechanic(name);
     if (roles[slug]) return roles[slug];
     if (admins.includes(name)) return 'admin';
@@ -17595,9 +17599,21 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setCurrentMechanic(name);
     setScreen(await freshLandingScreenFor(name));
   };
+  // A made-up employee with no records, in whatever job is picked: shows the blank layout of that job.
+  const startViewAsExample = (opt) => {
+    if (currentMechanic !== DIAGNOSTICS_OWNER || !opt || window.__viewAs) return;
+    viewAsSavedRef.current = { owner: currentMechanic, todaysJobChoice };
+    window.__viewAs = EXAMPLE_VIEW_NAME;
+    window.__viewAsBar.show('a blank example: ' + opt.label);
+    setViewAsExample({ unit: opt.unit, role: opt.role });
+    setTodaysJobChoice(null);
+    setCurrentMechanic(EXAMPLE_VIEW_NAME);
+    setScreen(usesShiftScreen(jobTypeForUnit(opt.unit, unitTypes)) ? 'shift' : 'dashboard');
+  };
   const exitViewAs = () => {
     const saved = viewAsSavedRef.current;
     if (!saved) return;
+    setViewAsExample(null);
     viewAsSavedRef.current = null;
     window.__viewAs = null;          // guard off first, so the owner's own session is restored normally
     window.__viewAsBar.hide();
@@ -17627,7 +17643,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // machine. Defaults to empty (no unit), NOT the first truck on the list —
   // a mechanic with nothing assigned should show as unassigned, not get
   // silently tagged with someone else's truck.
-  const assignedUnitFor = (name) => unitAssignments[slugForMechanic(name)] || '';
+  const assignedUnitFor = (name) => (viewAsExample && name === EXAMPLE_VIEW_NAME ? viewAsExample.unit : (unitAssignments[slugForMechanic(name)] || ''));
   const setAssignedUnit = async (name, unit) => {
     await firebase.database().ref('unitAssignments/' + slugForMechanic(name)).set(unit).catch(() => alert("Couldn't save that assignment — check your signal and try again."));
   };
@@ -28787,6 +28803,38 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               </div>
             )}
           </div>
+          {(() => {
+            const exOpts = {};
+            const add = (key, label, unit, role) => { exOpts[key] = { label, unit, role }; };
+            add('mechanic', 'Mechanic', '', 'employee');
+            add('cook', 'Cook', '__cook__', 'employee');
+            add('foreman', 'Foreman', '', 'foreman');
+            add('safety', 'Safety coordinator', '', 'safety');
+            const groups = groupedUnitOptions();
+            groups.forEach((g) => g.units.forEach((u) => add('u:' + u, g.label + ' — ' + u, u, 'employee')));
+            const chosen = exOpts[diagExampleChoice];
+            return (
+              <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+                <p className="font-display font-semibold text-sm mb-1">👁 See a job with nothing in it</p>
+                <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Pick a job to see its screens as a made-up employee with no shifts, logs or timesheets. Nothing is saved. Machine-level info (like a machine's recent history) can still show.</p>
+                <select value={diagExampleChoice} onChange={(e) => setDiagExampleChoice(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}>
+                  <option value="">Pick a job…</option>
+                  <optgroup label="Roles">
+                    <option value="mechanic">Mechanic</option>
+                    <option value="cook">Cook</option>
+                    <option value="foreman">Foreman</option>
+                    <option value="safety">Safety coordinator</option>
+                  </optgroup>
+                  {groups.map((g) => (
+                    <optgroup key={g.label} label={g.label}>
+                      {g.units.map((u) => <option key={u} value={'u:' + u}>{u}</option>)}
+                    </optgroup>
+                  ))}
+                </select>
+                <Btn onClick={() => { if (!chosen) { alert('Pick a job first.'); return; } startViewAsExample(chosen); }} className="w-full">👁 View blank example (read-only)</Btn>
+              </div>
+            );
+          })()}
           <TextInput value={diagSearch} onChange={(e) => setDiagSearch(e.target.value)} placeholder="Search a name" className="w-full mb-4" />
           <div className="space-y-2">
             {people.map((n) => {
