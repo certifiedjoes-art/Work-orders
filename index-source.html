@@ -5914,6 +5914,24 @@ function isDayLockedForWorker(approvals, dateStr) {
   const t = new Date(localDateStr() + 'T00:00:00');
   return Math.round((t - d) / 86400000) > WORKER_EDIT_WINDOW_DAYS;
 }
+// Night shifts: a clock-out that comes before the clock-in must be the next morning, so it moves
+// forward a day. If it is still not after the clock-in, it can't be saved.
+function resolveShiftEnd(startIso, endIso) {
+  if (!startIso || !endIso) return { out: endIso, error: null };
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  if (end < start) {
+    const rolled = new Date(end.getTime() + 24 * 3600 * 1000);
+    if (rolled > start && rolled - start <= 24 * 3600 * 1000) return { out: rolled.toISOString(), error: null };
+    return { out: endIso, error: 'Clock out has to be after clock in. Check the dates.' };
+  }
+  return { out: endIso, error: null };
+}
+function approvalItemWarning(it) {
+  if (it.kind === 'ts') { const e = it.raw; return e.clockIn && e.clockOut && new Date(e.clockOut) < new Date(e.clockIn) ? '⚠ Clock-out is before clock-in — hours are negative' : ''; }
+  if (it.kind === 'prod') { const sh = it.raw; return sh.start && sh.end && new Date(sh.end) < new Date(sh.start) ? '⚠ Clock-out is before clock-in — hours are negative' : ''; }
+  return '';
+}
 // ---- One-by-one approvals ----
 // Every timesheet (regular shift), production shift and driver log is approved on its own.
 // Records live in `itemApprovals/<itemId>`: {kind, approvedBy, approvedAt} when approved, or
@@ -5947,7 +5965,7 @@ function buildApprovalItems(timesheets, productionShifts, driverLogs, itemApprov
   const today = localDateStr();
   const out = [];
   (timesheets || []).forEach((e) => { if (e.clockOut && e.date && e.date >= APPROVALS_START_DATE) out.push({ id: e.id, kind: 'ts', person: e.mechanic, date: e.date, raw: e }); });
-  (productionShifts || []).forEach((sh) => { if (sh.end && localDateFromIso(sh.end) >= APPROVALS_START_DATE) out.push({ id: sh.id, kind: 'prod', person: sh.employee, date: localDateFromIso(sh.end), raw: sh }); });
+  (productionShifts || []).forEach((sh) => { if (sh.end && sh.start && localDateFromIso(sh.start) >= APPROVALS_START_DATE) out.push({ id: sh.id, kind: 'prod', person: sh.employee, date: localDateFromIso(sh.start), raw: sh }); });
   (driverLogs || []).forEach((l) => {
     if (!l.start) return;
     const date = l.start.slice(0, 10);
@@ -6001,6 +6019,7 @@ function ApprovalsPage({ items, selectedId, onSelect, showApproved, onToggleShow
         <p className="font-display text-xs uppercase tracking-wider mb-1" style={{ color: COLORS.inkDim }}>{APPROVAL_KIND_ICON[selected.kind]} {APPROVAL_KIND_LABEL[selected.kind]} · {approvalDayLabel(selected.date)}</p>
         <p className="font-display text-2xl font-bold mb-1">{selected.person}</p>
         <div className="mb-4"><ApprovalStatusChip state={selected.state} /></div>
+        {approvalItemWarning(selected) && <p className="text-sm font-semibold mb-3" style={{ color: '#E07A5F' }}>{approvalItemWarning(selected)}</p>}
         <div className="mb-4" key={selected.id}>{renderEditor ? renderEditor(selected) : null}</div>
         {counterparts.length > 0 && (
           <div className="flex gap-2 flex-wrap mb-4">
@@ -6043,6 +6062,7 @@ function ApprovalsPage({ items, selectedId, onSelect, showApproved, onToggleShow
                   <span className="text-xs" style={{ color: COLORS.inkDim }}>{APPROVAL_KIND_LABEL[it.kind]}</span>
                 </div>
                 <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>{approvalItemSummary(it)}</p>
+                {approvalItemWarning(it) && <p className="text-xs mt-1 font-semibold" style={{ color: '#E07A5F' }}>{approvalItemWarning(it)}</p>}
                 <div className="mt-1"><ApprovalStatusChip state={it.state} /></div>
               </button>
             ))}
@@ -14666,7 +14686,7 @@ function PrintableProductionShift({ shift, unitTypes }) {
       <div className="flex items-start justify-between mb-3">
         <div>
           <p style={{ fontWeight: 700, fontSize: 16 }}>{shift.employee}</p>
-          <p style={{ fontSize: 12, color: '#555' }}>{fmtDate(shift.end || shift.start)} · {shift.machine}{!shift.end ? ' · Still open' : ''}</p>
+          <p style={{ fontSize: 12, color: '#555' }}>{fmtDate(shift.start || shift.end)} · {shift.machine}{!shift.end ? ' · Still open' : ''}</p>
           {shift.groupId && (shift.switchedFrom || shift.switchedTo) && (
             <p style={{ fontSize: 11, color: '#555' }}>Part of a day on more than one machine{shift.switchedFrom ? ` · switched from ${shift.switchedFrom}` : ''}{shift.switchedTo ? ` · then switched to ${shift.switchedTo}` : ''}</p>
           )}
@@ -14843,6 +14863,7 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
   const [newTaskDesc, setNewTaskDesc] = useState('');
   const [newTaskHours, setNewTaskHours] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const activeType = machineType(shift.machine, unitTypes);
   // Clock in/out — same time-only-input approach as the mechanic
   // timesheet edit card (see TimesheetEntryCard): each keeps its own
@@ -15054,7 +15075,14 @@ function ProductionShiftEditCard({ shift, unitTypes, units, onCancel, onSave, on
         </div>
       ) : (
         <div className="flex gap-2 flex-wrap">
-          <Btn onClick={() => onSave({ start: combineDateTime(clockInDate, clockInTime), end: combineDateTime(clockOutDate, clockOutTime), block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes, extraTasks })}>Save changes</Btn>
+          {saveError && <p className="text-sm w-full" style={{ color: '#E07A5F' }}>{saveError}</p>}
+          <Btn onClick={() => {
+            const startIso = combineDateTime(clockInDate, clockInTime);
+            const r = resolveShiftEnd(startIso, combineDateTime(clockOutDate, clockOutTime));
+            if (r.error) { setSaveError(r.error); return; }
+            setSaveError('');
+            onSave({ start: startIso, end: r.out, block, startHours, endHours, spruce, aspen, trees, loadCount, topPileCount, fuelLog, notes, extraTasks });
+          }}>Save changes</Btn>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
           <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>Delete shift</button>
         </div>
@@ -17981,7 +18009,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     }
   };
   const saveOneProductionShift = async (shift) => {
-    if (shift && (shift.end || shift.start)) flagItemChanged('prod', shift.id, localDateFromIso(shift.end || shift.start), 'Changed');
+    if (shift && (shift.end || shift.start)) flagItemChanged('prod', shift.id, localDateFromIso(shift.start || shift.end), 'Changed');
     setProductionShifts((prev) => {
       const next = prev.some((s) => s.id === shift.id) ? prev.map((s) => (s.id === shift.id ? shift : s)) : [...prev, shift];
       cacheSet('productionShifts', next);
@@ -17990,7 +18018,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await queueWrite('productionShifts', { kind: 'save', entry: shift });
   };
   const patchOneProductionShift = async (shiftId, patch) => {
-    { const prevS = productionShifts.find((x) => x.id === shiftId); if (prevS && (prevS.end || prevS.start)) flagItemChanged('prod', shiftId, localDateFromIso(prevS.end || prevS.start), 'Changed'); }
+    { const prevS = productionShifts.find((x) => x.id === shiftId); if (prevS && (prevS.end || prevS.start)) flagItemChanged('prod', shiftId, localDateFromIso(prevS.start || prevS.end), 'Changed'); }
     setProductionShifts((prev) => {
       const next = prev.map((s) => (s.id === shiftId ? { ...s, ...patch } : s));
       cacheSet('productionShifts', next);
@@ -17999,7 +18027,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await queueWrite('productionShifts', { kind: 'patch', entryId: shiftId, patch });
   };
   const deleteOneProductionShift = async (shiftId) => {
-    { const prevS = productionShifts.find((x) => x.id === shiftId); if (prevS && (prevS.end || prevS.start)) flagItemChanged('prod', shiftId, localDateFromIso(prevS.end || prevS.start), 'Changed'); }
+    { const prevS = productionShifts.find((x) => x.id === shiftId); if (prevS && (prevS.end || prevS.start)) flagItemChanged('prod', shiftId, localDateFromIso(prevS.start || prevS.end), 'Changed'); }
     setProductionShifts((prev) => {
       const next = prev.filter((s) => s.id !== shiftId);
       cacheSet('productionShifts', next);
@@ -19898,7 +19926,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const date = log.start.slice(0, 10);
     flagItemChanged('log', logId, date, 'Log edited');
     timesheets.filter((t) => t.mechanic === log.driver && t.date === date).forEach((t) => flagItemChanged('ts', t.id, date, 'Driver log edited'));
-    productionShifts.filter((sh) => sh.employee === log.driver && sh.end && localDateFromIso(sh.end) === date).forEach((sh) => flagItemChanged('prod', sh.id, date, 'Driver log edited'));
+    productionShifts.filter((sh) => sh.employee === log.driver && sh.end && sh.start && localDateFromIso(sh.start) === date).forEach((sh) => flagItemChanged('prod', sh.id, date, 'Driver log edited'));
   };
 
   const persistBlocks = async (next) => {
@@ -20787,7 +20815,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const entries = timesheets.filter((t) => (!tsFilterMechanic || t.mechanic === tsFilterMechanic) && t.date >= rangeStart && t.date <= rangeEnd);
     const prod = includeProduction
       ? productionShifts.filter((s) => {
-          const d = localDateFromIso(s.end || s.start);
+          const d = localDateFromIso(s.start || s.end);
           return (!tsFilterMechanic || s.employee === tsFilterMechanic) && d >= rangeStart && d <= rangeEnd;
         })
       : [];
@@ -20950,7 +20978,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         prodList = [];
         Object.keys(byEmp).sort((a, b) => (a || '').localeCompare(b || '')).forEach((emp) => {
           const byDay = {};
-          byEmp[emp].forEach((s) => { const k = localDateFromIso(s.end || s.start); (byDay[k] = byDay[k] || []).push(s); });
+          byEmp[emp].forEach((s) => { const k = localDateFromIso(s.start || s.end); (byDay[k] = byDay[k] || []).push(s); });
           days.forEach((day) => {
             if (byDay[day]) byDay[day].sort((a, b) => (a.start || '').localeCompare(b.start || '')).forEach((s) => prodList.push(s));
             else prodList.push({ employee: emp, _blankDay: day });
@@ -20975,7 +21003,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           .join(' | ');
         rows.push([
           s.employee,
-          localDateFromIso(s.end || s.start),
+          localDateFromIso(s.start || s.end),
           s.machine,
           s.block || '',
           fmtTime(s.start),
@@ -22812,7 +22840,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             unitTypes={unitTypes}
             units={units}
             isAdmin={isAdmin}
-            isLocked={(sh) => isDayLocked(localDateFromIso(sh.end || sh.start))}
+            isLocked={(sh) => isDayLocked(localDateFromIso(sh.start || sh.end))}
           />
         </div>
       </div>
@@ -23176,7 +23204,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             unitTypes={unitTypes}
             units={units}
             isAdmin={isAdmin}
-            isLocked={(sh) => isDayLocked(localDateFromIso(sh.end || sh.start))}
+            isLocked={(sh) => isDayLocked(localDateFromIso(sh.start || sh.end))}
           />
 
           {myClockEntries.length === 0 && myShifts.length === 0 && (
@@ -23314,7 +23342,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     weekEntries.forEach((e) => {
       weekTotalsByMechanic[e.mechanic] = (weekTotalsByMechanic[e.mechanic] || 0) + entryHours(e);
     });
-    const weekProductionShifts = productionShifts.filter((s) => s.end && localDateFromIso(s.end) >= viewedWeekStart && localDateFromIso(s.end) <= viewedWeekEnd);
+    const weekProductionShifts = productionShifts.filter((s) => s.end && s.start && localDateFromIso(s.start) >= viewedWeekStart && localDateFromIso(s.start) <= viewedWeekEnd);
 
     return (
       <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
@@ -23617,7 +23645,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     // end date, so it shows up right away and can be reviewed/edited —
     // e.g. to fix a bad start time — without waiting for it to be closed out.
     const filteredProduction = productionShifts.filter((s) => {
-      const d = localDateFromIso(s.end || s.start);
+      const d = localDateFromIso(s.start || s.end);
       if (tsFilterMechanic && s.employee !== tsFilterMechanic) return false;
       if (tsFilterStart && d < tsFilterStart) return false;
       if (tsFilterEnd && d > tsFilterEnd) return false;
@@ -23646,7 +23674,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const combinedByPerson = {};
     combinedNames.forEach((name) => {
       const mechItems = (groupedByMechanic[name] || []).map((e) => ({ kind: 'mechanic', sortDate: e.date || '', data: e }));
-      const prodItems = filteredProduction.filter((s) => s.employee === name).map((s) => ({ kind: 'production', sortDate: localDateFromIso(s.end || s.start), data: s }));
+      const prodItems = filteredProduction.filter((s) => s.employee === name).map((s) => ({ kind: 'production', sortDate: localDateFromIso(s.start || s.end), data: s }));
       combinedByPerson[name] = [...mechItems, ...prodItems].sort((a, b) => (b.sortDate || '').localeCompare(a.sortDate || ''));
     });
     const clockedInNow = timesheets.filter((t) => !t.clockOut && t.date === todayStr());
@@ -23671,7 +23699,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     // tracked separately and never folded into the hours total, since
     // they're for billing only. Fuel deliveries don't show a "production"
     // number here at all — that's what the Fuel Log section is for.
-    const weekProductionShifts = productionShifts.filter((s) => s.end && localDateFromIso(s.end) >= viewedWeekStart && localDateFromIso(s.end) <= viewedWeekEnd);
+    const weekProductionShifts = productionShifts.filter((s) => s.end && s.start && localDateFromIso(s.start) >= viewedWeekStart && localDateFromIso(s.start) <= viewedWeekEnd);
     const productionWeekByPerson = {};
     weekProductionShifts.forEach((s) => {
       if (!productionWeekByPerson[s.employee]) {
@@ -23710,7 +23738,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       Object.entries(s.fuelLog).forEach(([receivingUnit, amounts]) => {
         const liters = (amounts || []).reduce((sum, v) => sum + (parseFloat(v) || 0), 0);
         if (liters > 0) {
-          fuelDeliveries.push({ date: localDateFromIso(s.end || s.start), truck: s.machine, receivingUnit, liters });
+          fuelDeliveries.push({ date: localDateFromIso(s.start || s.end), truck: s.machine, receivingUnit, liters });
         }
       });
     });
@@ -29488,7 +29516,7 @@ function WeekReviewTable({ entries, productionEntries, printMode }) {
   const productionRows = (productionEntries || []).map((s) => ({
     id: s.id,
     person: s.employee,
-    date: localDateFromIso(s.end || s.start),
+    date: localDateFromIso(s.start || s.end),
     clockIn: s.start,
     clockOut: s.end,
     breakLabel: '—',
@@ -29682,7 +29710,7 @@ function ProductionShiftCard({ shift, unitTypes, isAdmin, onEdit, onConfirmHours
   const hours = shift.start && shift.end ? (new Date(shift.end) - new Date(shift.start)) / 1000 / 60 / 60 : null;
   // Falls back to the start date so a still-open shift (no end yet) gets a
   // real date header instead of a blank one.
-  const dateLabel = fmtDate(shift.end || shift.start);
+  const dateLabel = fmtDate(shift.start || shift.end);
   const fuelLiters = shift.fuelLog ? Object.values(shift.fuelLog).flat().reduce((sum, v) => sum + (parseFloat(v) || 0), 0) : 0;
 
   return (
@@ -29706,6 +29734,7 @@ function ProductionShiftCard({ shift, unitTypes, isAdmin, onEdit, onConfirmHours
       {shift.groupId && (shift.switchedFrom || shift.switchedTo) && (
         <p className="text-xs font-mono mb-2" style={{ color: COLORS.accent }}>🔄 {shift.machine}: part of a day on more than one machine{shift.switchedFrom ? ` · from ${shift.switchedFrom}` : ''}{shift.switchedTo ? ` · then ${shift.switchedTo}` : ''}</p>
       )}
+      {hours != null && hours < 0 && <p className="text-xs font-mono mb-2" style={{ color: '#E07A5F' }}>⚠️ Clock-out is before clock-in — open Edit and fix the dates.</p>}
       {hours != null && (
         <p className="text-xs font-mono mb-2 flex flex-wrap items-center gap-2" style={{ color: hours > 24 && !shift.hoursConfirmedGood ? '#E07A5F' : hours > 16 && !shift.hoursConfirmedGood ? COLORS.progress : COLORS.accent }}>
           <span>
@@ -29799,6 +29828,7 @@ function ProductionShiftCard({ shift, unitTypes, isAdmin, onEdit, onConfirmHours
 }
 function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCancelEdit, onSave, onDelete, onAddJob, onRemoveJob, isAdmin, onConfirmHours }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [showSignature, setShowSignature] = useState(false);
   const [showRawData, setShowRawData] = useState(false);
   const [fixDraft, setFixDraft] = useState({});
@@ -29886,16 +29916,21 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
           </div>
         ) : (
           <div className="flex gap-2 mt-4">
+            {saveError && <p className="text-sm w-full" style={{ color: '#E07A5F' }}>{saveError}</p>}
             <Btn
-              onClick={() =>
+              onClick={() => {
+                const inIso = combineDateTime(clockInDate, clockInTime);
+                const r = resolveShiftEnd(inIso, combineDateTime(clockOutDate, clockOutTime));
+                if (r.error) { setSaveError(r.error); return; }
+                setSaveError('');
                 onSave({
                   date: clockInDate,
-                  clockIn: combineDateTime(clockInDate, clockInTime),
-                  clockOut: combineDateTime(clockOutDate, clockOutTime),
+                  clockIn: inIso,
+                  clockOut: r.out,
                   lunchStart: combineDateTime(clockInDate, lunchStartTime),
                   lunchEnd: combineDateTime(clockInDate, lunchEndTime),
-                })
-              }
+                });
+              }}
             >
               Save changes
             </Btn>
@@ -29937,6 +29972,7 @@ function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCance
         {!entry.skippedLunch && entry.lunchStart && entry.lunchEnd && <span>Break {fmtTime(entry.lunchStart)}–{fmtTime(entry.lunchEnd)}</span>}
         {entry.skippedLunch && <span>No break taken</span>}
       </div>
+      {entry.clockOut && entryHours(entry) < 0 && <p className="text-xs font-mono mb-2" style={{ color: '#E07A5F' }}>⚠️ Clock-out is before clock-in — open Edit and fix the dates.</p>}
       {entry.clockOut && (
         <p className="text-xs font-mono mb-2 flex flex-wrap items-center gap-2" style={{ color: entryHours(entry) > 24 && !entry.hoursConfirmedGood ? '#E07A5F' : entryHours(entry) > 16 && !entry.hoursConfirmedGood ? COLORS.progress : COLORS.accent }}>
           <span>
