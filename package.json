@@ -1,0 +1,11 @@
+{
+  "name": "harder-work-orders",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Harder Contracting work order, timesheet and production app",
+  "scripts": { "build": "node build.js" },
+  "devDependencies": {
+    "@babel/core": "^8.1.2",
+    "@babel/preset-react": "^8.0.1"
+  }
+}
