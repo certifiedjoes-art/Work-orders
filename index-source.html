@@ -7263,6 +7263,11 @@ function loadPendingWrites() {
 function savePendingWrites(queue) {
   cacheSet('pendingWrites', queue);
 }
+// Firebase .once() never fails on a weak or missing signal; it just waits. This gives any such wait a time
+// limit so the caller's offline fallback (the catch) runs instead of the screen sitting dead.
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+}
 async function queueWrite(collection, op) {
   const queue = loadPendingWrites();
   queue.push({ ...op, collection, qid: uid() });
@@ -7439,13 +7444,19 @@ async function setPushEnabled(mechanicName, enabled) {
 }
 
 
-async function translateText(text, targetLang) {
+async function translateText(text, targetLang, timeoutMs) {
   try {
-    const res = await fetch(CLOUD_FUNCTION_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, key: APP_SECRET, targetLang: targetLang || 'en' }),
-    });
+    const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), timeoutMs || 8000) : null;
+    let res;
+    try {
+      res = await fetch(CLOUD_FUNCTION_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, key: APP_SECRET, targetLang: targetLang || 'en' }),
+        signal: ctl ? ctl.signal : undefined,
+      });
+    } finally { if (timer) clearTimeout(timer); }
     if (!res.ok) return null;
     const data = await res.json();
     return data.translated || null;
@@ -7499,11 +7510,11 @@ function getLocalizedText(field, lang) {
 // between English and Spanish immediately (Google's translation service
 // supports both); Plautdietsch has no automatic translation available, so
 // that slot is left for a human to fill in later via the app.
-async function buildLocalizedField(text, currentLang) {
+async function buildLocalizedField(text, currentLang, timeoutMs) {
   const field = { text, origLang: currentLang, translations: {} };
   if (currentLang === 'en' || currentLang === 'es') {
     const other = currentLang === 'en' ? 'es' : 'en';
-    const translated = await translateText(text, other);
+    const translated = await translateText(text, other, timeoutMs);
     if (translated) field.translations[other] = translated;
   }
   return field;
@@ -8575,9 +8586,12 @@ function PreTripItemRow({ item, onSetStatus, onUpdateDetail, onAddPhoto }) {
   const handlePhotoSelect = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => onAddPhoto(reader.result);
-    reader.readAsDataURL(file);
+    // Shrunk first (like photos everywhere else in the app) so it goes through on a weak signal.
+    compressImage(file).then((dataUrl) => onAddPhoto(dataUrl)).catch(() => {
+      const reader = new FileReader();
+      reader.onload = () => onAddPhoto(reader.result);
+      reader.readAsDataURL(file);
+    });
     e.target.value = '';
   };
 
@@ -8885,8 +8899,12 @@ function PreTripInspectionForm({ driver, truckUnitName, onSubmit, onCancel, unit
             <Btn
               onClick={async () => {
                 setSubmitting(true);
-                if (signature) localStorage.setItem('savedSignature_' + driver, signature);
-                await onSubmit(unitsData, signature);
+                try {
+                  if (signature) localStorage.setItem('savedSignature_' + driver, signature);
+                  await onSubmit(unitsData, signature);
+                } catch (e) {
+                  alert("Couldn't finish saving the inspection. Tap Submit again.");
+                }
                 setSubmitting(false);
               }}
               disabled={!signature || submitting}
@@ -17204,10 +17222,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             // loaded locally at this exact moment.
             try {
               const slug = slugForMechanic(mechanic);
-              const [assignSnap, typesSnap] = await Promise.all([
+              const [assignSnap, typesSnap] = await withTimeout(Promise.all([
                 firebase.database().ref('unitAssignments/' + slug).once('value'),
                 firebase.database().ref('unitTypes').once('value'),
-              ]);
+              ]), 4000);
               const realUnit = assignSnap.val() || '';
               const realUnitTypes = typesSnap.val() || {};
               effectiveJobType = jobTypeForUnit(realUnit, realUnitTypes);
@@ -18078,10 +18096,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // the form — same pattern as login — closes that window.
   const openPreTripForm = async (trailerOnly) => {
     try {
-      const [uaSnap, utSnap] = await Promise.all([
+      const [uaSnap, utSnap] = await withTimeout(Promise.all([
         firebase.database().ref('unitAssignments').once('value'),
         firebase.database().ref('unitTypes').once('value'),
-      ]);
+      ]), 2500);
       const ua = uaSnap.val() || {};
       const ut = utSnap.val() || {};
       setUnitAssignments(ua);
@@ -18089,8 +18107,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       cacheSet('unitAssignments', ua);
       cacheSet('unitTypes', ut);
     } catch (e) {
-      // Offline — nothing fresher available than what's already loaded;
-      // fall back to whatever's currently in state/cache.
+      // Offline or weak signal (gave up after 2.5 s) — nothing fresher available than what's already
+      // loaded; fall back to whatever's currently in state/cache.
     }
     setPreTripTrailerOnly(trailerOnly === true); // a click event passed in by mistake counts as false
     setShowPreTripForm(true);
@@ -19614,7 +19632,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     for (const u of unitsData) {
       const plate = (u.plate || '').trim().toUpperCase();
       if (plate && plate !== ((unitPlates || {})[slugForUnit(u.unitName || '')] || '')) {
-        try { await saveUnitPlate(u.unitName, plate); } catch (e) { /* the inspection itself is already saved */ }
+        // Saved in the background: it goes straight to the server, so on a weak signal it must not hold up Submit.
+        saveUnitPlate(u.unitName, plate).catch(() => { /* the inspection itself is already saved */ });
       }
     }
 
@@ -19629,7 +19648,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         await persistMeta(mechanics, [...units, u.unitName]);
       }
       const lines = deficient.map((item) => `${item.severity === 'major' ? '🔴 MAJOR' : '🟡 Minor'} — ${item.label}${item.note ? ': ' + item.note : ''}`);
-      const description = await buildLocalizedField(`⚠ Pre-trip deficiencies (${fmtDate(now)}):\n${lines.join('\n')}`, lang);
+      const description = await buildLocalizedField(`⚠ Pre-trip deficiencies (${fmtDate(now)}):\n${lines.join('\n')}`, lang, 3000);
       newOrders.push({
         id: uid(),
         unit: u.unitName,
@@ -20839,7 +20858,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     // collection — a smaller, faster, and more precise check than before.
     let effectiveEntry = openEntry;
     try {
-      const snap = await firebase.database().ref('timesheetEntries/' + openEntry.id).once('value');
+      const snap = await withTimeout(firebase.database().ref('timesheetEntries/' + openEntry.id).once('value'), 2500);
       const fresh = snap.val();
       if (fresh) effectiveEntry = fresh;
     } catch (e) {
@@ -21709,10 +21728,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           // failure would just reproduce the exact bug this is fixing.
           const readRealAssignment = async () => {
             const slug = slugForMechanic(mechanic);
-            const [assignSnap, typesSnap] = await Promise.all([
+            const [assignSnap, typesSnap] = await withTimeout(Promise.all([
               firebase.database().ref('unitAssignments/' + slug).once('value'),
               firebase.database().ref('unitTypes').once('value'),
-            ]);
+            ]), 4000);
             return { realUnit: assignSnap.val() || '', realUnitTypes: typesSnap.val() || {} };
           };
           let landing;
