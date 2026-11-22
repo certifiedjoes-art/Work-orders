@@ -5934,6 +5934,20 @@ function approvalItemWarning(it) {
   return '';
 }
 let MECHANIC_CREW = [];
+function nextDateStr(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + 1);
+  return localDateStr(d);
+}
+// Typed-in shifts have one date (the day the shift STARTED) plus clock times. A clock-out at or before the
+// clock-in is the next morning (night shift), and so are lunch times that fall before the clock-in.
+function resolveMissedDayTimes(date, startTime, endTime, lunchStartTime, lunchEndTime) {
+  const at = (time, nextDay) => (time ? (nextDay ? nextDateStr(date) : date) + 'T' + time : null);
+  const crosses = !!(startTime && endTime && endTime <= startTime);
+  const lsNext = !!(crosses && lunchStartTime && lunchStartTime < startTime);
+  const leNext = !!(lunchEndTime && (lsNext || (lunchStartTime && lunchEndTime < lunchStartTime) || (crosses && lunchEndTime < startTime)));
+  return { start: at(startTime, false), end: at(endTime, crosses), lunchStart: at(lunchStartTime, lsNext), lunchEnd: at(lunchEndTime, leNext), crosses };
+}
 function downtimeTotalMinutes(list) {
   return (list || []).reduce((sum, d) => {
     if (!d.from || !d.to) return sum;
@@ -30543,6 +30557,16 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
 
   const combine = (d, time) => (time ? `${d}T${time}` : null);
   const isProductionMode = !!groupedEmployeeOptions && jobTypeFor && jobTypeFor(mechanic) === 'production';
+  const rt = isProductionMode ? resolveMissedDayTimes(date, startTime, endTime, '', '') : resolveMissedDayTimes(date, clockInTime, clockOutTime, lunchStartTime, lunchEndTime);
+  const summaryText = (() => {
+    if (!date || !rt.start || !rt.end) return '';
+    const sIso = new Date(rt.start).toISOString();
+    const eIso = new Date(rt.end).toISOString();
+    let ms = new Date(rt.end) - new Date(rt.start);
+    if (rt.lunchStart && rt.lunchEnd) ms -= new Date(rt.lunchEnd) - new Date(rt.lunchStart);
+    return fmtDate(sIso) + ', ' + fmtTime(sIso) + '  →  ' + fmtDate(eIso) + ', ' + fmtTime(eIso) + '  ·  ' + fmtHours(Math.max(0, ms) / 3600000);
+  })();
+  const startInFuture = !!(rt.start && new Date(rt.start).getTime() > Date.now() + 5 * 60000);
   const usualMachine = isProductionMode ? assignedUnitFor(mechanic) : '';
   const effectiveMachine = machineChoice || usualMachine;
   const activeType = isProductionMode ? (unitTypesMap || {})[slugForUnit(effectiveMachine)] : null;
@@ -30564,6 +30588,7 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
         setError('Pick a date and at least a start time.');
         return;
       }
+      if (startInFuture) { setError("That start time hasn't happened yet. Check the date."); return; }
       for (let i = 0; i < downtimes.length; i++) {
         const d = downtimes[i];
         if (!d.from || !d.to) { setError('Downtime ' + (i + 1) + ': put in when it started and when it ended.'); return; }
@@ -30574,13 +30599,13 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
       onSubmitProduction(
         mechanic,
         date,
-        combine(date, startTime),
-        combine(date, endTime),
+        rt.start,
+        rt.end,
         effectiveMachine,
         block,
         { spruce, aspen, trees, loadCount, topPileCount },
         setError,
-        downtimes.map((d) => ({ from: combine(date, d.from), to: combine(date, d.to), reason: d.reason.trim(), ...fixFieldsOf(d) }))
+        downtimes.map((d) => { const dDay = rt.crosses && d.from < startTime ? nextDateStr(date) : date; return { from: combine(dDay, d.from), to: combine(dDay, d.to), reason: d.reason.trim(), ...fixFieldsOf(d) }; })
       );
       return;
     }
@@ -30588,14 +30613,14 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
       setError('Pick a date and at least a clock-in time.');
       return;
     }
+    if (startInFuture) { setError("That clock-in time hasn't happened yet. Check the date."); return; }
     // If they were on a machine that day, record it as a job on the timecard
     // with the paid hours (clock span minus break) so it shows like any other.
     let jobs = [];
     if (machineChoice && clockOutTime) {
-      let ms = new Date(combine(date, clockOutTime)) - new Date(combine(date, clockInTime));
-      if (ms < 0) ms += 24 * 3600 * 1000;
-      if (lunchStartTime && lunchEndTime) {
-        let br = new Date(combine(date, lunchEndTime)) - new Date(combine(date, lunchStartTime));
+      let ms = new Date(rt.end) - new Date(rt.start);
+      if (rt.lunchStart && rt.lunchEnd) {
+        let br = new Date(rt.lunchEnd) - new Date(rt.lunchStart);
         if (br < 0) br += 24 * 3600 * 1000;
         ms -= br;
       }
@@ -30605,10 +30630,10 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
     onSubmit(
       mechanic,
       date,
-      combine(date, clockInTime),
-      combine(date, clockOutTime),
-      combine(date, lunchStartTime),
-      combine(date, lunchEndTime),
+      rt.start,
+      rt.end,
+      rt.lunchStart,
+      rt.lunchEnd,
       setError,
       jobs
     );
@@ -30757,6 +30782,8 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
           </React.Fragment>
         )}
       </div>
+      {summaryText && <p className="text-xs font-mono mb-3" style={{ color: COLORS.inkDim }}>{summaryText}{rt.crosses ? '  (night shift: clock-out is the next day)' : ''}</p>}
+      {startInFuture && <p className="text-xs mb-3" style={{ color: '#E07A5F' }}>That start hasn't happened yet. Check the date.</p>}
       {error && <p className="text-xs mb-3" style={{ color: '#E07A5F' }}>{error}</p>}
       <div className="flex gap-2">
         <Btn onClick={handleSave}>Save day</Btn>
