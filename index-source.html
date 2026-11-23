@@ -5104,8 +5104,20 @@ function TrackProductionDetail({ track, shifts, unitTypes, onClose }) {
   );
 }
 
-function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete, onUploadPdf, uploadingMapId, onSharePdf, localMaps, onAddLocalMap, onDeleteLocalMap, onShareLocalMap, onRename, addingLocalMap, onClose }) {
+function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete, onUploadPdf, uploadingMapId, onSharePdf, localMaps, onAddLocalMap, onDeleteLocalMap, onShareLocalMap, onRename, mapFolders = [], onAddFolder, onRenameFolder, onDeleteFolder, onMoveMap, addingLocalMap, onClose }) {
   const [renamingId, setRenamingId] = useState(null);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [openFolderId, setOpenFolderId] = useState(null); // which folder's page is open (null = the folder list)
+  const [renamingFolderId, setRenamingFolderId] = useState(null);
+  const [renameFolderValue, setRenameFolderValue] = useState('');
+  const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState(null);
+  const sortedFolders = [...mapFolders].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true }));
+  const folderIds = new Set(sortedFolders.map((f) => f.id));
+  const activeFolder = openFolderId ? sortedFolders.find((f) => f.id === openFolderId) || null : null;
+  const groupedMaps = [
+    ...sortedFolders.map((f) => ({ key: f.id, folder: f, maps: maps.filter((m) => m.folderId === f.id) })),
+    { key: '_unfiled', folder: null, maps: maps.filter((m) => !m.folderId || !folderIds.has(m.folderId)) },
+  ];
   const [renameValue, setRenameValue] = useState('');
   // Shared name row: shows the name with a Rename link, or an inline editor.
   const renderNameRow = (m, extra) => (
@@ -5135,12 +5147,67 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
           <h2 className="font-display text-lg font-bold">Manage maps</h2>
           <button onClick={onClose} className="text-2xl" style={{ color: COLORS.inkDim }}>✕</button>
         </div>
-        <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>New maps are public by default (you can turn that off when adding one). Pick one public map as the default everyone lands on.</p>
+        {!activeFolder && <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>New maps are public by default (you can turn that off when adding one). Pick one public map as the default everyone lands on.</p>}
+
+        {!activeFolder && <div className="mb-4">
+          <div className="flex gap-2">
+            <TextInput value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)} placeholder="New folder (e.g. a job or year)" className="flex-1" />
+            <Btn onClick={() => { onAddFolder(newFolderName); setNewFolderName(''); }} disabled={!newFolderName.trim()}>📁 Add folder</Btn>
+          </div>
+          <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>Folders show on every iPad's Field Map too. Use "Folder" on each map to move it in.</p>
+        </div>}
+
+        {activeFolder && (
+          <div className="flex items-center gap-2 mb-3 pb-3" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
+            <button onClick={() => setOpenFolderId(null)} className="text-xl leading-none px-2" style={{ color: COLORS.accent }} title="Close folder">✕</button>
+            <span className="font-display text-base font-bold flex-1">📁 {activeFolder.name}</span>
+          </div>
+        )}
 
         <div className="space-y-2 mb-4">
-          {maps.map((m) => (
+          {groupedMaps.map((g) => (
+            <React.Fragment key={g.key}>
+              {g.folder && activeFolder ? null : g.folder ? (
+                <div className="flex items-center justify-between gap-2 pt-2">
+                  {renamingFolderId === g.folder.id ? (
+                    <div className="flex gap-2 items-center flex-1">
+                      <TextInput value={renameFolderValue} onChange={(e) => setRenameFolderValue(e.target.value)} className="flex-1" />
+                      <Btn onClick={() => { if (renameFolderValue.trim()) onRenameFolder(g.folder.id, renameFolderValue); setRenamingFolderId(null); }} disabled={!renameFolderValue.trim()}>Save</Btn>
+                      <Btn variant="ghost" onClick={() => setRenamingFolderId(null)}>Cancel</Btn>
+                    </div>
+                  ) : (
+                    <React.Fragment>
+                      <button onClick={() => setOpenFolderId(g.folder.id)} className="text-sm font-bold text-left flex-1 py-2">📁 {g.folder.name} <span className="text-xs" style={{ color: COLORS.inkDim, fontWeight: 400 }}>({g.maps.length}) ›</span></button>
+                      <span className="flex gap-3 items-center">
+                        <button onClick={() => { setRenamingFolderId(g.folder.id); setRenameFolderValue(g.folder.name); }} className="text-xs underline" style={{ color: COLORS.accent }}>✏️ Rename</button>
+                        {confirmDeleteFolderId === g.folder.id ? (
+                          <React.Fragment>
+                            <button onClick={() => { onDeleteFolder(g.folder.id); setConfirmDeleteFolderId(null); }} className="text-xs underline" style={{ color: '#E07A5F' }}>Delete folder (maps are kept)</button>
+                            <button onClick={() => setConfirmDeleteFolderId(null)} className="text-xs underline" style={{ color: COLORS.inkDim }}>Cancel</button>
+                          </React.Fragment>
+                        ) : (
+                          <button onClick={() => setConfirmDeleteFolderId(g.folder.id)} className="text-xs underline" style={{ color: '#E07A5F' }}>Delete</button>
+                        )}
+                      </span>
+                    </React.Fragment>
+                  )}
+                </div>
+              ) : (!activeFolder && sortedFolders.length > 0 && g.maps.length > 0 && (
+                <div className="pt-2"><span className="text-sm font-bold" style={{ color: COLORS.inkDim }}>Unfiled <span className="text-xs" style={{ fontWeight: 400 }}>({g.maps.length})</span></span></div>
+              ))}
+              {(g.folder ? (activeFolder && activeFolder.id === g.folder.id) : !activeFolder) && g.maps.map((m) => (
             <div key={m.id} className="rounded-lg p-3" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
               {renderNameRow(m, <span className="text-xs" style={{ color: m.isPublic ? COLORS.done : COLORS.inkDim }}>{m.isPublic ? 'Public' : 'Private'}</span>)}
+              {sortedFolders.length > 0 && (
+                <label className="flex items-center gap-2 text-xs mb-2" style={{ color: COLORS.inkDim }}>
+                  Folder
+                  <select value={m.folderId && folderIds.has(m.folderId) ? m.folderId : ''} onChange={(e) => onMoveMap(m.id, e.target.value)}
+                    className="rounded px-2 py-1 text-xs" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}>
+                    <option value="">Unfiled</option>
+                    {sortedFolders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
+                </label>
+              )}
               <p className="text-xs mb-2" style={{ color: m.imageUrl ? COLORS.accent : COLORS.line }}>
                 {m.imageUrl
                   ? (m.geoCorners
@@ -5176,9 +5243,13 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
                 )}
               </div>
             </div>
+              ))}
+            </React.Fragment>
           ))}
         </div>
 
+        {!activeFolder && (
+        <React.Fragment>
         <div className="mb-6">
           <div className="flex gap-2 mb-2">
             <TextInput value={newMapName} onChange={(e) => setNewMapName(e.target.value)} placeholder="New map name" className="flex-1" />
@@ -5240,6 +5311,8 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
             onChange={(e) => { if (e.target.files[0]) onAddLocalMap(e.target.files[0]); e.target.value = ''; }}
           />
         </label>
+        </React.Fragment>
+        )}
       </div>
     </div>
   );
@@ -15756,6 +15829,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const currentMapForImage = (selectedMapId && publicMapsForImage.find((m) => m.id === selectedMapId)) || publicMapsForImage.find((m) => m.isDefault) || publicMapsForImage[0] || null;
   const currentMapImageSrc = useMapImageSrc(currentMapForImage);
   const [showManageMaps, setShowManageMaps] = useState(false);
+  const [mapFolders, setMapFolders] = useState(() => cacheGet('mapFolders', [])); // [{id, name}] — folders for sorting maps by job/year; also read by the Field Map app
   const [placingPin, setPlacingPin] = useState(false);
   const [pendingPinPosition, setPendingPinPosition] = useState(null); // {x, y} in map viewBox coordinates, set once they tap a spot
   const [viewingPinId, setViewingPinId] = useState(null);
@@ -16060,6 +16134,16 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     })();
     return () => { if (on) ref.off('value', on); };
   }, [slimHistory]);
+
+  useEffect(() => {
+    const ref = firebase.database().ref('mapFolders');
+    const on = ref.on('value', (snap) => {
+      const val = Object.values(snap.val() || {}).filter((f) => f && f.id && f.name);
+      setMapFolders(val);
+      cacheSet('mapFolders', val);
+    }, () => {});
+    return () => ref.off('value', on);
+  }, []);
 
   useEffect(() => {
     const ref = firebase.database().ref('mapRecords');
@@ -19027,6 +19111,42 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   };
   const deleteMap = async (mapId) => {
     await deleteOneMap(mapId);
+  };
+
+  // Folders — a simple one-level way to sort maps by job or year. The folder
+  // list lives at mapFolders/{id}; each map just remembers its folderId.
+  const addMapFolder = async (name) => {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return;
+    const id = uid();
+    try {
+      await firebase.database().ref('mapFolders/' + id).set({ id, name: trimmed, addedBy: currentMechanic });
+    } catch (e) {
+      alert("Couldn't add the folder — check your signal and try again.");
+    }
+  };
+  const renameMapFolder = async (folderId, name) => {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return;
+    try {
+      await firebase.database().ref('mapFolders/' + folderId + '/name').set(trimmed);
+    } catch (e) {
+      alert("Couldn't rename the folder — check your signal and try again.");
+    }
+  };
+  const deleteMapFolder = async (folderId) => {
+    try {
+      // Maps inside go back to "Unfiled" — they are never deleted with a folder.
+      for (const m of maps.filter((x) => x.folderId === folderId)) {
+        await patchOneMap(m.id, { folderId: null });
+      }
+      await firebase.database().ref('mapFolders/' + folderId).remove();
+    } catch (e) {
+      alert("Couldn't delete the folder — check your signal and try again.");
+    }
+  };
+  const moveMapToFolder = async (mapId, folderId) => {
+    await patchOneMap(mapId, { folderId: folderId || null });
   };
 
   const setMapUnitPref = async (unit) => {
@@ -26280,6 +26400,11 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             onDeleteLocalMap={deleteLocalMap}
             onShareLocalMap={shareLocalMapWithCrew}
             onRename={(id, name) => patchOneMap(id, { name })}
+            mapFolders={mapFolders}
+            onAddFolder={addMapFolder}
+            onRenameFolder={renameMapFolder}
+            onDeleteFolder={deleteMapFolder}
+            onMoveMap={moveMapToFolder}
             addingLocalMap={addingLocalMap}
             onClose={() => setShowManageMaps(false)}
           />
