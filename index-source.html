@@ -15847,7 +15847,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [altJobsDropdownOpen, setAltJobsDropdownOpen] = useState(false);
   const [expandedDriverFolder, setExpandedDriverFolder] = useState(null);
   const [expandedPreTripUnitFolder, setExpandedPreTripUnitFolder] = useState(null);
-  const [selectedMapId, setSelectedMapId] = useState(null);
+  // Remember the last map you were on (per device), so the app reopens to it instead of the default.
+  const [selectedMapId, setSelectedMapId] = useState(() => cacheGet('lastMapId', null));
+  useEffect(() => { if (selectedMapId) cacheSet('lastMapId', selectedMapId); }, [selectedMapId]);
   // Same "which public map is currently showing" logic used down in the
   // Maps screen itself, kept here too (hooks can't be called conditionally)
   // purely to feed the image-resolving hook below.
