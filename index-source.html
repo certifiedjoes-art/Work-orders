@@ -5104,6 +5104,29 @@ function TrackProductionDetail({ track, shifts, unitTypes, onClose }) {
   );
 }
 
+// iOS Files-style folder: big blue folder, name underneath, item count.
+function FolderIcon({ size = 72 }) {
+  return (
+    <svg width={size} height={size * 0.8} viewBox="0 0 80 64" aria-hidden="true">
+      <path d="M6 12a6 6 0 0 1 6-6h17l7 7h32a6 6 0 0 1 6 6v33a6 6 0 0 1-6 6H12a6 6 0 0 1-6-6z" fill="#2E86DE" />
+      <rect x="4" y="19" width="72" height="39" rx="6" fill="#5BB8FA" />
+      <rect x="4" y="19" width="72" height="5" rx="2.5" fill="#8CD0FC" opacity="0.7" />
+    </svg>
+  );
+}
+function FolderTile({ name, count, onOpen, children }) {
+  return (
+    <div className="flex flex-col items-center text-center" style={{ minWidth: 0 }}>
+      <button onClick={onOpen} className="flex flex-col items-center w-full" style={{ background: 'none', border: 'none', padding: 0 }}>
+        <FolderIcon />
+        <span className="text-sm font-semibold mt-1 w-full" style={{ color: COLORS.ink, overflowWrap: 'anywhere', lineHeight: 1.2 }}>{name}</span>
+        <span className="text-xs" style={{ color: COLORS.inkDim }}>{count} {count === 1 ? 'map' : 'maps'}</span>
+      </button>
+      {children}
+    </div>
+  );
+}
+
 function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete, onUploadPdf, uploadingMapId, onSharePdf, localMaps, onAddLocalMap, onDeleteLocalMap, onShareLocalMap, onRename, mapFolders = [], onAddFolder, onRenameFolder, onDeleteFolder, onMoveMap, addingLocalMap, onClose }) {
   const [renamingId, setRenamingId] = useState(null);
   const [newFolderName, setNewFolderName] = useState('');
@@ -5165,34 +5188,37 @@ function ManageMapsOverlay({ maps, onAdd, onTogglePublic, onSetDefault, onDelete
         )}
 
         <div className="space-y-2 mb-4">
+          {!activeFolder && sortedFolders.length > 0 && (
+            <React.Fragment>
+              {renamingFolderId && (
+                <div className="flex gap-2 items-center mb-2">
+                  <TextInput value={renameFolderValue} onChange={(e) => setRenameFolderValue(e.target.value)} className="flex-1" />
+                  <Btn onClick={() => { if (renameFolderValue.trim()) onRenameFolder(renamingFolderId, renameFolderValue); setRenamingFolderId(null); }} disabled={!renameFolderValue.trim()}>Save</Btn>
+                  <Btn variant="ghost" onClick={() => setRenamingFolderId(null)}>Cancel</Btn>
+                </div>
+              )}
+              {confirmDeleteFolderId && (
+                <div className="flex gap-2 items-center flex-wrap mb-2 text-xs" style={{ color: COLORS.inkDim }}>
+                  <span>Delete this folder? Its maps are kept (they become Unfiled).</span>
+                  <Btn variant="danger" onClick={() => { onDeleteFolder(confirmDeleteFolderId); setConfirmDeleteFolderId(null); }}>Delete folder</Btn>
+                  <Btn variant="ghost" onClick={() => setConfirmDeleteFolderId(null)}>Cancel</Btn>
+                </div>
+              )}
+              <div className="grid gap-3 pb-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))' }}>
+                {groupedMaps.filter((g) => g.folder).map((g) => (
+                  <FolderTile key={g.key} name={g.folder.name} count={g.maps.length} onOpen={() => setOpenFolderId(g.folder.id)}>
+                    <span className="flex gap-3 mt-1">
+                      <button onClick={() => { setRenamingFolderId(g.folder.id); setRenameFolderValue(g.folder.name); }} className="text-xs underline" style={{ color: COLORS.accent }}>Rename</button>
+                      <button onClick={() => setConfirmDeleteFolderId(g.folder.id)} className="text-xs underline" style={{ color: '#E07A5F' }}>Delete</button>
+                    </span>
+                  </FolderTile>
+                ))}
+              </div>
+            </React.Fragment>
+          )}
           {groupedMaps.map((g) => (
             <React.Fragment key={g.key}>
-              {g.folder && activeFolder ? null : g.folder ? (
-                <div className="flex items-center justify-between gap-2 pt-2">
-                  {renamingFolderId === g.folder.id ? (
-                    <div className="flex gap-2 items-center flex-1">
-                      <TextInput value={renameFolderValue} onChange={(e) => setRenameFolderValue(e.target.value)} className="flex-1" />
-                      <Btn onClick={() => { if (renameFolderValue.trim()) onRenameFolder(g.folder.id, renameFolderValue); setRenamingFolderId(null); }} disabled={!renameFolderValue.trim()}>Save</Btn>
-                      <Btn variant="ghost" onClick={() => setRenamingFolderId(null)}>Cancel</Btn>
-                    </div>
-                  ) : (
-                    <React.Fragment>
-                      <button onClick={() => setOpenFolderId(g.folder.id)} className="text-sm font-bold text-left flex-1 py-2">📁 {g.folder.name} <span className="text-xs" style={{ color: COLORS.inkDim, fontWeight: 400 }}>({g.maps.length}) ›</span></button>
-                      <span className="flex gap-3 items-center">
-                        <button onClick={() => { setRenamingFolderId(g.folder.id); setRenameFolderValue(g.folder.name); }} className="text-xs underline" style={{ color: COLORS.accent }}>✏️ Rename</button>
-                        {confirmDeleteFolderId === g.folder.id ? (
-                          <React.Fragment>
-                            <button onClick={() => { onDeleteFolder(g.folder.id); setConfirmDeleteFolderId(null); }} className="text-xs underline" style={{ color: '#E07A5F' }}>Delete folder (maps are kept)</button>
-                            <button onClick={() => setConfirmDeleteFolderId(null)} className="text-xs underline" style={{ color: COLORS.inkDim }}>Cancel</button>
-                          </React.Fragment>
-                        ) : (
-                          <button onClick={() => setConfirmDeleteFolderId(g.folder.id)} className="text-xs underline" style={{ color: '#E07A5F' }}>Delete</button>
-                        )}
-                      </span>
-                    </React.Fragment>
-                  )}
-                </div>
-              ) : (!activeFolder && sortedFolders.length > 0 && g.maps.length > 0 && (
+              {g.folder ? null : (!activeFolder && sortedFolders.length > 0 && g.maps.length > 0 && (
                 <div className="pt-2"><span className="text-sm font-bold" style={{ color: COLORS.inkDim }}>Unfiled <span className="text-xs" style={{ fontWeight: 400 }}>({g.maps.length})</span></span></div>
               ))}
               {(g.folder ? (activeFolder && activeFolder.id === g.folder.id) : !activeFolder) && g.maps.map((m) => (
