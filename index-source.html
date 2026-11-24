@@ -16038,6 +16038,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [mapUnit, setMapUnit] = useState(() => cacheGet('mapUnit', 'feet'));
   const [showMapSettings, setShowMapSettings] = useState(false);
   const [showMapPicker, setShowMapPicker] = useState(false);
+  const [pickerFolderId, setPickerFolderId] = useState(null); // folder page open inside the map picker
   const [selectedPinType, setSelectedPinType] = useState(() => cacheGet('selectedPinType', 'hazard'));
   const [showPinTypePicker, setShowPinTypePicker] = useState(false);
   const [showMapToolsMenu, setShowMapToolsMenu] = useState(false);
@@ -25755,6 +25756,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // ---------- MAPS ----------
   if (screen === 'maps') {
     const publicMaps = [...maps, ...localMaps].filter((m) => m.isPublic);
+    // Map picker folders: only folders that hold at least one public map.
+    const pickerFolders = mapFolders.filter((f) => publicMaps.some((m) => m.folderId === f.id)).sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true }));
+    const pickerFolderIdSet = new Set(pickerFolders.map((f) => f.id));
+    const pickerFolder = pickerFolderId ? pickerFolders.find((f) => f.id === pickerFolderId) || null : null;
+    const pickerMaps = pickerFolder
+      ? publicMaps.filter((m) => m.folderId === pickerFolder.id)
+      : (pickerFolders.length ? publicMaps.filter((m) => !m.folderId || !pickerFolderIdSet.has(m.folderId)) : publicMaps);
     const defaultMap = publicMaps.find((m) => m.isDefault) || publicMaps[0] || null;
     const currentMap = (selectedMapId && publicMaps.find((m) => m.id === selectedMapId)) || defaultMap;
 
@@ -26104,21 +26112,35 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
 
             {showMapPicker && (
-              <div style={{ position: 'fixed', inset: 0, zIndex: 150, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-end' }} onClick={() => setShowMapPicker(false)}>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 150, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-end' }} onClick={() => { setShowMapPicker(false); setPickerFolderId(null); }}>
                 <div
                   className="w-full p-5"
                   style={{ background: COLORS.bg, borderRadius: '16px 16px 0 0', maxHeight: '75vh', overflowY: 'auto', border: `2px solid ${COLORS.line}`, borderBottom: 'none' }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="font-display text-lg font-bold">Choose a map</h2>
-                    <button onClick={() => setShowMapPicker(false)} className="text-2xl" style={{ color: COLORS.inkDim }}>✕</button>
+                    {pickerFolder ? (
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setPickerFolderId(null)} className="text-2xl leading-none px-1" style={{ color: COLORS.accent }} title="Close folder">✕</button>
+                        <h2 className="font-display text-lg font-bold">📁 {pickerFolder.name}</h2>
+                      </div>
+                    ) : (
+                      <h2 className="font-display text-lg font-bold">Choose a map</h2>
+                    )}
+                    <button onClick={() => { setShowMapPicker(false); setPickerFolderId(null); }} className="text-2xl" style={{ color: COLORS.inkDim }}>{pickerFolder ? '' : '✕'}</button>
                   </div>
+                  {!pickerFolder && pickerFolders.length > 0 && (
+                    <div className="grid gap-3 pb-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))' }}>
+                      {pickerFolders.map((f) => (
+                        <FolderTile key={f.id} name={f.name} count={publicMaps.filter((m) => m.folderId === f.id).length} onOpen={() => setPickerFolderId(f.id)} />
+                      ))}
+                    </div>
+                  )}
                   <div className="space-y-2">
-                    {publicMaps.map((m) => (
+                    {pickerMaps.map((m) => (
                       <button
                         key={m.id}
-                        onClick={() => { setSelectedMapId(m.id); setShowMapPicker(false); }}
+                        onClick={() => { setSelectedMapId(m.id); setShowMapPicker(false); setPickerFolderId(null); }}
                         className="w-full text-left rounded-lg p-3 flex items-center justify-between"
                         style={{
                           background: currentMap.id === m.id ? COLORS.accent : COLORS.surfaceRaised,
