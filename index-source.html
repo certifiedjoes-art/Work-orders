@@ -3641,6 +3641,40 @@ async function renderPdfFirstPageToBlob(file) {
   return { blob, width: canvas.width, height: canvas.height, geoData };
 }
 
+//    URL now, and quietly cache it in the background for next time.
+// Very large map pictures (like a whole-area overview) can fail to draw on a
+// phone that is short on memory, which shows up as a blurry "?" instead of
+// the map. So the picture is shrunk to a size every phone can draw (the map
+// itself still stretches to the same area, so pins/lines don't move). Throws
+// if the file isn't a readable picture at all.
+async function downscaleMapBlob(blob, maxSide = 4096, maxPixels = 12000000) {
+  let bmp = null;
+  if (typeof createImageBitmap === 'function') {
+    bmp = await createImageBitmap(blob);
+  } else {
+    bmp = await new Promise((resolve, reject) => {
+      const u = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(u); resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(u); reject(new Error('bad image')); };
+      img.src = u;
+    });
+  }
+  const w = bmp.width, h = bmp.height;
+  if (!w || !h) throw new Error('empty image');
+  const scale = Math.min(1, maxSide / Math.max(w, h), Math.sqrt(maxPixels / (w * h)));
+  if (scale >= 1) { if (bmp.close) bmp.close(); return blob; }
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(w * scale));
+  canvas.height = Math.max(1, Math.round(h * scale));
+  canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  if (bmp.close) bmp.close();
+  const out = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  const final = out && out.size > 0 ? out : blob;
+  canvas.width = canvas.height = 0; // free the memory right away
+  return final;
+}
+
 // Resolves whatever a given map's on-screen image src should be right now.
 // Three cases:
 //  - local-only map (loaded straight from a file on this device, never
@@ -3649,41 +3683,63 @@ async function renderPdfFirstPageToBlob(file) {
 //    past visit: use that cached blob, so it opens with zero signal.
 //  - Firebase-backed map with no local cache yet: show the live network
 //    URL now, and quietly cache it in the background for next time.
+// Returns [src, reload]. reload() throws away this map's saved copy and
+// downloads it fresh (called when the picture fails to draw).
 function useMapImageSrc(map) {
   const [src, setSrc] = React.useState(null);
+  const [attempt, setAttempt] = React.useState(0);
+  const reloadsRef = React.useRef({});
   React.useEffect(() => {
     let cancelled = false;
     let createdUrl = null;
+    const show = (blob) => {
+      if (cancelled) return;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+      createdUrl = URL.createObjectURL(blob);
+      setSrc(createdUrl);
+    };
     setSrc(null);
     if (!map) return undefined;
     (async () => {
       if (map.localOnly) {
         const blob = await idbGetMapImageBlob(map.id);
         if (!cancelled && blob) {
-          createdUrl = URL.createObjectURL(blob);
-          setSrc(createdUrl);
+          let shown = blob;
+          try { shown = await downscaleMapBlob(blob); } catch (e) { shown = blob; }
+          show(shown);
         }
         return;
       }
       if (!map.imageUrl) return;
-      const cached = await idbGetMapImageBlob(map.id);
-      if (cached && !cancelled) {
-        createdUrl = URL.createObjectURL(cached);
-        setSrc(createdUrl);
-      } else if (!cancelled) {
-        setSrc(map.imageUrl); // no offline copy yet — show it live for now
+      let shownFromCache = false;
+      if (attempt > 0) {
+        await idbDeleteMapImageBlob(map.id); // the saved copy failed to draw — start over
+      } else {
+        const cached = await idbGetMapImageBlob(map.id);
+        if (cached && !cancelled) {
+          try {
+            const small = await downscaleMapBlob(cached);
+            if (small !== cached) idbSetMapImageBlob(map.id, small); // keep the lighter copy
+            show(small);
+            shownFromCache = true;
+          } catch (e) {
+            await idbDeleteMapImageBlob(map.id); // saved copy is broken — drop it
+          }
+        }
       }
+      if (!shownFromCache && !cancelled) setSrc(map.imageUrl); // no good offline copy — show it live for now
       if (navigator.onLine) {
         try {
           const resp = await fetch(map.imageUrl);
+          if (!resp.ok) throw new Error('download failed');
           const blob = await resp.blob();
-          await idbSetMapImageBlob(map.id, blob);
-          if (!cancelled && !cached) {
-            createdUrl = URL.createObjectURL(blob);
-            setSrc(createdUrl);
-          }
+          if (!blob || !blob.size || (blob.type && blob.type.indexOf('image/') !== 0)) throw new Error('not a picture');
+          const small = await downscaleMapBlob(blob);
+          await idbSetMapImageBlob(map.id, small);
+          if (!cancelled && !shownFromCache) show(small);
         } catch (e) {
-          // offline, or blocked — the cached/live fallback above still stands
+          // offline, blocked, or a bad download — nothing bad gets saved; the
+          // cached/live fallback above still stands
         }
       }
     })();
@@ -3691,8 +3747,14 @@ function useMapImageSrc(map) {
       cancelled = true;
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [map && map.id, map && map.imageUrl, map && map.localOnly]);
-  return src;
+  }, [map && map.id, map && map.imageUrl, map && map.localOnly, attempt]);
+  const reload = React.useCallback(() => {
+    if (!map || map.localOnly) return;
+    const n = (reloadsRef.current[map.id] || 0) + 1;
+    reloadsRef.current[map.id] = n;
+    if (n <= 2) setAttempt((a) => a + 1); // at most twice per map, so it can never loop
+  }, [map && map.id, map && map.localOnly]);
+  return [src, reload];
 }
 
 // Cumulative straight-line distance through every point of a drawn line, in
@@ -4009,7 +4071,7 @@ const GestureMapViewport = React.forwardRef(function GestureMapViewport({ childr
 // than plain click-position math, since that's what reliably survives the
 // page being scaled to fit the screen.
 function MapCanvas({
-  viewBoxWidth, viewBoxHeight, backgroundImageUrl,
+  viewBoxWidth, viewBoxHeight, backgroundImageUrl, onBackgroundError,
   pinsToShow, linesToShow, placingPin, measureMode, pencilMode, drawingPoints, drawingStrokes, trackingLine,
   calibrating, refPoints, livePositions, liveTrails, myPosition,
   onMapTap, onFreehandStart, onFreehandPoint, onFreehandEnd, onPinTap, onLineTap, onLiveTap, onTrailTap, idleStops, onIdleTap,
@@ -4105,7 +4167,7 @@ function MapCanvas({
       onPointerCancel={handlePointerUp}
     >
       {backgroundImageUrl ? (
-        <image href={backgroundImageUrl} x="0" y="0" width={vbWidth} height={vbHeight} preserveAspectRatio="none" />
+        <image href={backgroundImageUrl} x="0" y="0" width={vbWidth} height={vbHeight} preserveAspectRatio="none" onError={onBackgroundError} />
       ) : (
         <PlaceholderTerrainContent />
       )}
@@ -15873,7 +15935,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   // purely to feed the image-resolving hook below.
   const publicMapsForImage = [...maps, ...localMaps].filter((m) => m.isPublic);
   const currentMapForImage = (selectedMapId && publicMapsForImage.find((m) => m.id === selectedMapId)) || publicMapsForImage.find((m) => m.isDefault) || publicMapsForImage[0] || null;
-  const currentMapImageSrc = useMapImageSrc(currentMapForImage);
+  const [currentMapImageSrc, reloadCurrentMapImage] = useMapImageSrc(currentMapForImage);
   const [showManageMaps, setShowManageMaps] = useState(false);
   const [mapFolders, setMapFolders] = useState(() => cacheGet('mapFolders', [])); // [{id, name}] — folders for sorting maps by job/year; also read by the Field Map app
   const [placingPin, setPlacingPin] = useState(false);
@@ -25975,6 +26037,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                   viewBoxWidth={currentMap.imageWidth}
                   viewBoxHeight={currentMap.imageHeight}
                   backgroundImageUrl={currentMapImageSrc}
+                  onBackgroundError={reloadCurrentMapImage}
                   pinsToShow={mapPins.filter((p) => p.mapId === currentMap.id && canSeePin(p))}
                   linesToShow={mapLines.filter((l) => l.mapId === currentMap.id && canSeeLine(l))}
                   placingPin={placingPin}
