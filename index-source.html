@@ -6116,6 +6116,24 @@ function nextDateStr(dateStr) {
 }
 // Typed-in shifts have one date (the day the shift STARTED) plus clock times. A clock-out at or before the
 // clock-in is the next morning (night shift), and so are lunch times that fall before the clock-in.
+// Blocks a day was split across (Switch Block button / missed-day "another block"):
+// returns "Block A → Block B" style text for a stretch, or ''.
+function blockSwitchText(shift) {
+  if (!shift || !shift.groupId || !(shift.switchedFromBlock || shift.switchedToBlock)) return '';
+  return (shift.switchedFromBlock ? ` · from block ${shift.switchedFromBlock}` : '') + (shift.switchedToBlock ? ` · then block ${shift.switchedToBlock}` : '');
+}
+// Clock times (HH:MM) in order across a shift → local date-times; a time earlier than the one before it
+// means it passed midnight, so it is the next day.
+function orderedStretchTimes(dateStr, times) {
+  let day = dateStr;
+  let prev = null;
+  return times.map((t) => {
+    if (prev !== null && t < prev) day = nextDateStr(day);
+    prev = t;
+    return `${day}T${t}`;
+  });
+}
+
 function resolveMissedDayTimes(date, startTime, endTime, lunchStartTime, lunchEndTime) {
   const at = (time, nextDay) => (time ? (nextDay ? nextDateStr(date) : date) + 'T' + time : null);
   const crosses = !!(startTime && endTime && endTime <= startTime);
@@ -14970,6 +14988,9 @@ function PrintableProductionShift({ shift, unitTypes }) {
           {shift.groupId && (shift.switchedFrom || shift.switchedTo) && (
             <p style={{ fontSize: 11, color: '#555' }}>Part of a day on more than one machine{shift.switchedFrom ? ` · switched from ${shift.switchedFrom}` : ''}{shift.switchedTo ? ` · then switched to ${shift.switchedTo}` : ''}</p>
           )}
+          {blockSwitchText(shift) && (
+            <p style={{ fontSize: 11, color: '#555' }}>Part of a day on more than one block{blockSwitchText(shift)}</p>
+          )}
         </div>
         {hours !== null && (
           <div style={{ fontSize: 12, textAlign: 'right', color: '#555' }}>
@@ -16109,6 +16130,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [showInspectionMode, setShowInspectionMode] = useState(false);
   const [showProductionClockOutReview, setShowProductionClockOutReview] = useState(false);
   const [showSwitchMachine, setShowSwitchMachine] = useState(false);
+  const [showSwitchBlock, setShowSwitchBlock] = useState(false);
+  const [newSwitchBlockText, setNewSwitchBlockText] = useState('');
   const [pendingSwitchMachine, setPendingSwitchMachine] = useState(null);
   const [showLostAccess, setShowLostAccess] = useState(false);
   const [lostAccessEmail, setLostAccessEmail] = useState('');
@@ -20402,7 +20425,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       downtimeLog: [],
     };
     // Quick switch: this stretch belongs to the same day's timesheet as the one it follows.
-    if (link && link.groupId) { entry.groupId = link.groupId; entry.switchedFrom = link.switchedFrom || ''; }
+    if (link && link.groupId) { entry.groupId = link.groupId; entry.switchedFrom = link.switchedFrom || ''; if (link.switchedFromBlock) entry.switchedFromBlock = link.switchedFromBlock; }
     // Start hours: the last saved Samsara reading goes in right away (so
     // clocking in is never slowed down), then a fresh reading replaces it a
     // moment later — unless the operator has already typed their own.
@@ -20528,6 +20551,26 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     setTodaysJobChoice(newMachine);
     // Each machine picks its own block (machines can be in completely different places), so it starts blank.
     await startProductionShift(newMachine, { groupId, block: '', switchedFrom: cur.machine });
+  };
+  // SWITCH BLOCK: same machine, new block. Ends this block's stretch (machine hours, counts so far stay with
+  // it) and starts a new stretch on the same day's timesheet with its own hours, trees, loads and piles.
+  const quickSwitchBlock = async (newBlockRaw) => {
+    const cur = openProductionShift;
+    const newBlock = (newBlockRaw || '').trim();
+    setShowSwitchBlock(false);
+    setNewSwitchBlockText('');
+    if (!cur || !newBlock || newBlock === cur.block) return;
+    if (!cur.block) { alert('Pick this block first, then switch to the next one.'); return; }
+    const switchIso = new Date().toISOString();
+    const groupId = cur.groupId || cur.id;
+    const hoursPatch = await autoEndHoursPatch(cur);
+    await patchOneProductionShift(cur.id, { end: switchIso, groupId, switchedToBlock: newBlock, ...hoursPatch });
+    refreshEndHoursInBackground(cur.id, cur.machine);
+    if (TRACK_ELIGIBLE_TYPES.includes(machineType(cur.machine, unitTypes))) {
+      await endMachineTrack('productionShift', cur.id);
+    }
+    if (!(blocks || []).includes(newBlock)) { try { await addBlock(newBlock); } catch (e) { /* the block still saves on the shift */ } }
+    await startProductionShift(cur.machine, { groupId, block: newBlock, switchedFromBlock: cur.block, switchedFrom: '' });
   };
   const requestMachineSwitch = (newMachine) => {
     if (!openProductionShift || !newMachine || newMachine === openProductionShift.machine) {
@@ -21175,7 +21218,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await saveOneTimesheetEntry(entry);
   };
 
-  const addManualProductionShift = async (employeeName, date, startLocal, endLocal, machine, block, numbers, downtimes, extraTasks) => {
+  const addManualProductionShift = async (employeeName, date, startLocal, endLocal, machine, block, numbers, downtimes, extraTasks, segments) => {
     // Downtime told after the fact: same record + repair job as the live
     // "Report downtime" button, just with the real start/end times.
     const downtimeLog = [];
@@ -21201,7 +21244,35 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       downtimeLog,
       ...numbers,
     };
+    // More than one block that day: the first block's stretch ends when the next begins; each later block is
+    // its own stretch (own times, tallies) on the same day's timesheet, like the Switch Block button.
+    const segs = Array.isArray(segments) ? segments.filter((x) => x && x.block && x.startIso) : [];
+    const extraShifts = [];
+    if (segs.length) {
+      shift.groupId = shift.id;
+      shift.end = segs[0].startIso;
+      shift.switchedToBlock = segs[0].block;
+      segs.forEach((sg, i) => {
+        extraShifts.push({
+          id: uid(),
+          employee: employeeName,
+          employeeRole: roleFor(employeeName),
+          machine,
+          block: sg.block,
+          start: sg.startIso,
+          end: i + 1 < segs.length ? segs[i + 1].startIso : (endLocal ? new Date(endLocal).toISOString() : null),
+          extraTasks: [],
+          downtimeLog: [],
+          groupId: shift.id,
+          switchedFrom: '',
+          switchedFromBlock: i === 0 ? block : segs[i - 1].block,
+          ...(i + 1 < segs.length ? { switchedToBlock: segs[i + 1].block } : {}),
+          ...(sg.numbers || {}),
+        });
+      });
+    }
     await saveOneProductionShift(stripUndefined(shift));
+    for (const x of extraShifts) await saveOneProductionShift(stripUndefined(x));
     if (downtimeOrders.length && machine) {
       if (!units.includes(machine)) await persistMeta(mechanics, [...units, machine]);
       for (const o of downtimeOrders) {
@@ -22659,7 +22730,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       unitTypesMap: unitTypes,
       unitOptions: groupedUnitOptions(),
       blocks,
-      onSubmitProduction: async (employeeName, date, startLocal, endLocal, machine, block, numbers, setError, downtimes, extraTasks) => {
+      onSubmitProduction: async (employeeName, date, startLocal, endLocal, machine, block, numbers, setError, downtimes, extraTasks, segments) => {
         if (!endLocal) { setError('Put in the time you finished too.'); return; }
         if (isDayLocked(date)) { setError("That day is locked (more than 7 days ago) — ask admin to add this one for you."); return; }
         let endFixed = endLocal;
@@ -22670,7 +22741,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         if (new Date(endFixed) > new Date(Date.now() + 60000)) { setError("That finish time hasn't happened yet."); return; }
         const clash = productionShifts.some((x) => x.employee === currentMechanic && x.start && x.end && new Date(x.start) < new Date(endFixed) && new Date(x.end) > new Date(startLocal));
         if (clash) { setError('You already have a shift recorded during those hours.'); return; }
-        await addManualProductionShift(currentMechanic, date, startLocal, endFixed, machine, block, numbers, downtimes, extraTasks);
+        await addManualProductionShift(currentMechanic, date, startLocal, endFixed, machine, block, numbers, downtimes, extraTasks, segments);
         onDone();
       },
     };
@@ -23200,8 +23271,30 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 {altOptionsFor(currentMechanic).length > 1 && (
                   <Btn variant="ghost" onClick={() => setShowSwitchMachine(true)} className="flex-1">🔄 Switch Machine</Btn>
                 )}
+                {activeType !== 'fuel' && activeType !== 'winch' && (
+                  <Btn variant="ghost" onClick={() => { if (!openProductionShift.block) { alert('Pick this block first, then switch to the next one.'); return; } setShowSwitchBlock(true); }} className="flex-1">🧱 Switch Block</Btn>
+                )}
                 <Btn onClick={attemptProductionClockOut} className="flex-1">Clock Out</Btn>
               </div>
+              {showSwitchBlock && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 150, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-end' }} onClick={() => setShowSwitchBlock(false)}>
+                  <div className="w-full p-5" style={{ background: COLORS.bg, borderRadius: '16px 16px 0 0', border: `2px solid ${COLORS.line}`, borderBottom: 'none', maxHeight: '80vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+                    <h2 className="font-display text-lg font-bold mb-1">Switch block</h2>
+                    <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>
+                      Moving from block {openProductionShift.block}. Switches right away: this block keeps its own hours, trees, loads and piles, and the new block starts its own. Still one timesheet — you sign once when you clock out.</p>
+                    <div className="space-y-2 mb-3">
+                      {(blocks || []).filter((b) => b !== openProductionShift.block).map((b) => (
+                        <button key={b} onClick={() => quickSwitchBlock(b)} className="w-full text-left rounded-lg p-3 font-display font-semibold" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }}>{b}</button>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <TextInput value={newSwitchBlockText} onChange={(e) => setNewSwitchBlockText(e.target.value)} placeholder="Or a new block, e.g. 40-A" className="flex-1" />
+                      <Btn onClick={() => quickSwitchBlock(newSwitchBlockText)} disabled={!newSwitchBlockText.trim()}>Switch</Btn>
+                    </div>
+                    <button onClick={() => setShowSwitchBlock(false)} className="text-xs underline mt-3 block" style={{ color: COLORS.inkDim }}>Cancel</button>
+                  </div>
+                </div>
+              )}
               {showSwitchMachine && (
                 <div style={{ position: 'fixed', inset: 0, zIndex: 150, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-end' }} onClick={() => setShowSwitchMachine(false)}>
                   <div className="w-full p-5" style={{ background: COLORS.bg, borderRadius: '16px 16px 0 0', border: `2px solid ${COLORS.line}`, borderBottom: 'none' }} onClick={(e) => e.stopPropagation()}>
@@ -24923,8 +25016,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 await addManualEntry(mechanicName, date, ci, co, ls, le, jobs);
                 setShowAddMissedDayAdmin(false);
               }}
-              onSubmitProduction={async (employeeName, date, startLocal, endLocal, machine, block, numbers, setError, downtimes, extraTasks) => {
-                await addManualProductionShift(employeeName, date, startLocal, endLocal, machine, block, numbers, downtimes, extraTasks);
+              onSubmitProduction={async (employeeName, date, startLocal, endLocal, machine, block, numbers, setError, downtimes, extraTasks, segments) => {
+                await addManualProductionShift(employeeName, date, startLocal, endLocal, machine, block, numbers, downtimes, extraTasks, segments);
                 setShowAddMissedDayAdmin(false);
               }}
               onCancel={() => setShowAddMissedDayAdmin(false)}
@@ -30284,6 +30377,9 @@ function ProductionShiftCard({ shift, unitTypes, isAdmin, onEdit, onConfirmHours
       {shift.groupId && (shift.switchedFrom || shift.switchedTo) && (
         <p className="text-xs font-mono mb-2" style={{ color: COLORS.accent }}>🔄 {shift.machine}: part of a day on more than one machine{shift.switchedFrom ? ` · from ${shift.switchedFrom}` : ''}{shift.switchedTo ? ` · then ${shift.switchedTo}` : ''}</p>
       )}
+      {blockSwitchText(shift) && (
+        <p className="text-xs font-mono mb-2" style={{ color: COLORS.accent }}>🧱 {shift.machine}: part of a day on more than one block{blockSwitchText(shift)}</p>
+      )}
       {hours != null && hours < 0 && <p className="text-xs font-mono mb-2" style={{ color: '#E07A5F' }}>⚠️ Clock-out is before clock-in — open Edit and fix the dates.</p>}
       {hours != null && (
         <p className="text-xs font-mono mb-2 flex flex-wrap items-center gap-2" style={{ color: hours > 24 && !shift.hoursConfirmedGood ? '#E07A5F' : hours > 16 && !shift.hoursConfirmedGood ? COLORS.progress : COLORS.accent }}>
@@ -30902,6 +30998,9 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
   const [trees, setTrees] = useState('');
   const [loadCount, setLoadCount] = useState('');
   const [topPileCount, setTopPileCount] = useState('');
+  // More blocks the same day: [{ id, block, at:'HH:MM', spruce, aspen, trees, loadCount, topPileCount }]
+  const [moreBlocks, setMoreBlocks] = useState([]);
+  const setMore = (i, patch) => setMoreBlocks((prev) => prev.map((b, k) => (k === i ? { ...b, ...patch } : b)));
   const [error, setError] = useState('');
   // Downtime that happened during the day: [{ from:'HH:MM', to:'HH:MM', reason }]
   const [downtimes, setDowntimes] = useState([]);
@@ -30954,6 +31053,16 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
         const fixErr = validateDowntimeFix(d, i);
         if (fixErr) { setError(fixErr); return; }
       }
+      for (let i = 0; i < moreBlocks.length; i++) {
+        if (!moreBlocks[i].block) { setError('Block ' + (i + 2) + ': pick the block.'); return; }
+        if (!moreBlocks[i].at) { setError('Block ' + (i + 2) + ': put in the time they moved to it.'); return; }
+      }
+      const segTimes = moreBlocks.length ? orderedStretchTimes(date, [startTime, ...moreBlocks.map((b) => b.at)]).slice(1) : [];
+      const segments = moreBlocks.map((b, i) => ({
+        block: b.block,
+        startIso: new Date(segTimes[i]).toISOString(),
+        numbers: { spruce: b.spruce, aspen: b.aspen, trees: b.trees, loadCount: b.loadCount, topPileCount: b.topPileCount },
+      }));
       // A half-typed extra task still counts if both boxes are filled.
       const taskList = [...extraTasks];
       if (newTaskDesc.trim() && parseFloat(newTaskHours) > 0) taskList.push({ id: uid(), desc: newTaskDesc.trim(), hours: parseFloat(newTaskHours) });
@@ -30968,7 +31077,8 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
         { spruce, aspen, trees, loadCount, topPileCount },
         setError,
         downtimes.map((d) => { const dDay = rt.crosses && d.from < startTime ? nextDateStr(date) : date; return { from: combine(dDay, d.from), to: combine(dDay, d.to), reason: d.reason.trim(), ...fixFieldsOf(d) }; }),
-        taskList
+        taskList,
+        segments
       );
       return;
     }
@@ -31088,6 +31198,63 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
                   <input type="number" inputMode="numeric" value={topPileCount} onChange={(e) => setTopPileCount(e.target.value)} className={fieldClass} style={fieldStyle} />
                 </label>
               </React.Fragment>
+            )}
+            {activeType !== 'fuel' && activeType !== 'winch' && (
+              <div className="col-span-2">
+                {moreBlocks.map((mb, i) => (
+                  <div key={mb.id} className="rounded-lg p-3 mb-3" style={{ background: COLORS.surface, border: `1px solid ${COLORS.accent}` }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-display uppercase tracking-wide" style={{ color: COLORS.accent }}>Block {i + 2}</p>
+                      <button type="button" onClick={() => setMoreBlocks((prev) => prev.filter((x) => x.id !== mb.id))} style={{ color: '#E07A5F' }}>✕ Remove</button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="block">
+                        <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Block</span>
+                        <select value={mb.block} onChange={(e) => setMore(i, { block: e.target.value })} className={fieldClass} style={fieldStyle}>
+                          <option value="">— Pick —</option>
+                          {(blocks || []).map((b) => <option key={b} value={b}>{b}</option>)}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Moved here at</span>
+                        <input type="time" value={mb.at} onChange={(e) => setMore(i, { at: e.target.value })} className={fieldClass} style={fieldStyle} />
+                      </label>
+                      {activeType === 'buncher' && (
+                        <label className="block col-span-2">
+                          <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Tree count (this block)</span>
+                          <input type="number" inputMode="numeric" value={mb.trees} onChange={(e) => setMore(i, { trees: e.target.value })} className={fieldClass} style={fieldStyle} />
+                        </label>
+                      )}
+                      {(activeType === 'skidder' || activeType === 'processor') && (
+                        <React.Fragment>
+                          <label className="block">
+                            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Spruce</span>
+                            <input type="number" inputMode="numeric" value={mb.spruce} onChange={(e) => setMore(i, { spruce: e.target.value })} className={fieldClass} style={fieldStyle} />
+                          </label>
+                          <label className="block">
+                            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Aspen</span>
+                            <input type="number" inputMode="numeric" value={mb.aspen} onChange={(e) => setMore(i, { aspen: e.target.value })} className={fieldClass} style={fieldStyle} />
+                          </label>
+                        </React.Fragment>
+                      )}
+                      {activeType === 'loader' && (
+                        <React.Fragment>
+                          <label className="block">
+                            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Loads</span>
+                            <input type="number" inputMode="numeric" value={mb.loadCount} onChange={(e) => setMore(i, { loadCount: e.target.value })} className={fieldClass} style={fieldStyle} />
+                          </label>
+                          <label className="block">
+                            <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Top piles</span>
+                            <input type="number" inputMode="numeric" value={mb.topPileCount} onChange={(e) => setMore(i, { topPileCount: e.target.value })} className={fieldClass} style={fieldStyle} />
+                          </label>
+                        </React.Fragment>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                <button type="button" onClick={() => setMoreBlocks((prev) => [...prev, { id: uid(), block: '', at: '', spruce: '', aspen: '', trees: '', loadCount: '', topPileCount: '' }])} className="w-full text-center text-sm font-display uppercase tracking-wide py-2 rounded-lg" style={{ color: COLORS.accent, background: COLORS.surface, border: `2px dashed ${COLORS.accent}` }}>+ Add another block</button>
+                <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>Worked more than one block? The numbers above are for the first block. Each extra block gets its own time and numbers.</p>
+              </div>
             )}
             <div className="col-span-2 rounded-lg p-3" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
               <p className="text-xs font-display uppercase tracking-wide mb-1" style={{ color: '#C1521A' }}>⚠ Downtime &amp; deficiencies</p>
