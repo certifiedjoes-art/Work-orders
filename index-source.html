@@ -23199,6 +23199,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     <TextInput value={newBlockText} onChange={(e) => setNewBlockText(e.target.value)} placeholder="Add new block, e.g. 40-A" className="flex-1" />
                     <Btn onClick={async () => { await addBlock(newBlockText); patchOpenProductionShift({ block: newBlockText.trim() }); setNewBlockText(''); }} disabled={!newBlockText.trim()}>Add</Btn>
                   </div>
+                  <Btn variant="ghost" onClick={() => { if (!openProductionShift.block) { alert('Pick this block first, then switch to the next one.'); return; } setShowSwitchBlock(true); }} className="w-full mt-2">Switch Block</Btn>
                 </Section>
               )}
 
@@ -23270,9 +23271,6 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
               <div className="mt-6 flex gap-2">
                 {altOptionsFor(currentMechanic).length > 1 && (
                   <Btn variant="ghost" onClick={() => setShowSwitchMachine(true)} className="flex-1">🔄 Switch Machine</Btn>
-                )}
-                {activeType !== 'fuel' && activeType !== 'winch' && (
-                  <Btn variant="ghost" onClick={() => { if (!openProductionShift.block) { alert('Pick this block first, then switch to the next one.'); return; } setShowSwitchBlock(true); }} className="flex-1">🧱 Switch Block</Btn>
                 )}
                 <Btn onClick={attemptProductionClockOut} className="flex-1">Clock Out</Btn>
               </div>
@@ -30378,7 +30376,7 @@ function ProductionShiftCard({ shift, unitTypes, isAdmin, onEdit, onConfirmHours
         <p className="text-xs font-mono mb-2" style={{ color: COLORS.accent }}>🔄 {shift.machine}: part of a day on more than one machine{shift.switchedFrom ? ` · from ${shift.switchedFrom}` : ''}{shift.switchedTo ? ` · then ${shift.switchedTo}` : ''}</p>
       )}
       {blockSwitchText(shift) && (
-        <p className="text-xs font-mono mb-2" style={{ color: COLORS.accent }}>🧱 {shift.machine}: part of a day on more than one block{blockSwitchText(shift)}</p>
+        <p className="text-xs font-mono mb-2" style={{ color: COLORS.accent }}>{shift.machine}: part of a day on more than one block{blockSwitchText(shift)}</p>
       )}
       {hours != null && hours < 0 && <p className="text-xs font-mono mb-2" style={{ color: '#E07A5F' }}>⚠️ Clock-out is before clock-in — open Edit and fix the dates.</p>}
       {hours != null && (
