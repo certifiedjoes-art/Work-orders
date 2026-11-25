@@ -172,7 +172,7 @@ function getMostRecentCompletedWeek(now) {
 // gets a row instead of being left out entirely.
 function timesheetsToCsv(timesheets, startStr, endStr, productionShifts, unitTypesMap) {
   const rows = [
-    ['Person', 'Date', 'Clock In', 'Clock Out', 'Break Start', 'Break End', 'Worked Through Break', 'Paid Hours', 'Jobs', 'Block(s)', 'Machine(s)', 'Production Hours', 'Production'],
+    ['Person', 'Date', 'Clock In', 'Clock Out', 'Break Start', 'Break End', 'Worked Through Break', 'Paid Hours', 'Day', 'Jobs / Notes', 'Block(s)', 'Machine(s)', 'Production Hours', 'Production'],
   ];
   const filteredEntries = Object.values(timesheets || {}).filter((e) => e.date && e.date >= startStr && e.date <= endStr);
   const filteredShifts = Object.values(productionShifts || {}).filter((s) => s.end && shiftEndDate(s) >= startStr && shiftEndDate(s) <= endStr);
@@ -198,7 +198,8 @@ function timesheetsToCsv(timesheets, startStr, endStr, productionShifts, unitTyp
   Object.keys(byPersonDate).sort().forEach((key) => {
     const day = byPersonDate[key];
     const hrs = day.entries.reduce((sum, e) => sum + computeHours(e), 0);
-    const jobsStr = day.entries.flatMap((e) => cookDayInfo(e) ? [cookDayText(e)] : Object.values(e.jobs || {}).map((j) => `${j.unit}: ${j.hours}h`)).join(' | ');
+    const dayStr = day.entries.map((e) => cookDayInfo(e) ? cookDayInfo(e).label : '').filter(Boolean).join(' | ');
+    const jobsStr = day.entries.flatMap((e) => cookDayInfo(e) ? (e.notes ? [e.notes] : []) : Object.values(e.jobs || {}).map((j) => `${j.unit}: ${j.hours}h`)).join(' | ');
     cookTotals[day.name] = (cookTotals[day.name] || 0) + day.entries.reduce((sum, e) => sum + (cookDayInfo(e) ? cookDayInfo(e).days : 0), 0);
     const workedThroughBreak = day.entries.some((e) => e.skippedLunch) ? 'Yes' : 'No';
 
@@ -216,6 +217,7 @@ function timesheetsToCsv(timesheets, startStr, endStr, productionShifts, unitTyp
       day.entries.map((e) => fmtT(e.lunchEnd)).filter(Boolean).join(' / '),
       workedThroughBreak,
       hrs.toFixed(2),
+      dayStr,
       jobsStr,
       blocks,
       machines,
@@ -224,7 +226,7 @@ function timesheetsToCsv(timesheets, startStr, endStr, productionShifts, unitTyp
     ]);
   });
   Object.keys(cookTotals).sort().filter((n) => cookTotals[n] > 0).forEach((n) => {
-    rows.push([n, 'Cook days (day rate) total:', '', '', '', '', '', String(cookTotals[n]), '', '', '', '', '']);
+    rows.push([n, 'Cook days (day rate) total:', '', '', '', '', '', '', String(cookTotals[n]), '', '', '', '', '']);
   });
   return toCsvRows(rows);
 }
@@ -444,8 +446,8 @@ function monthlySummaryXlsx(timesheets, productionShifts, unitTypesMap, receipts
         total += hrs;
         const isCook = !!cookDayInfo(e);
         if (isCook) cookDayTotal += cookDayInfo(e).days;
-        const jobsStr = isCook ? cookDayText(e) : Object.values(e.jobs || {}).map((j) => `${j.unit}: ${j.hours}h`).join(', ');
-        rows.push([
+        const jobsStr = isCook ? (e.notes || '') : Object.values(e.jobs || {}).map((j) => `${j.unit}: ${j.hours}h`).join(', ');
+        const cookRow = [
           dateShown ? '' : dateStr,
           '', '',
           isCook ? '' : fmtT(e.clockIn),
@@ -456,7 +458,9 @@ function monthlySummaryXlsx(timesheets, productionShifts, unitTypesMap, receipts
           isCook ? '' : hrs.toFixed(2),
           jobsStr,
           '', '', '', '', '', '',
-        ]);
+        ];
+        cookRow.dayText = isCook ? cookDayInfo(e).label : '';
+        rows.push(cookRow);
         dateShown = true;
       });
 
@@ -488,7 +492,12 @@ function monthlySummaryXlsx(timesheets, productionShifts, unitTypesMap, receipts
       });
     }
     rows.push(['', '', '', '', '', '', '', totalLabel, total.toFixed(2), '', '', '', '', '', '', '']);
-    if (cookDayTotal > 0) rows.push(['', '', '', '', '', '', '', 'Cook days (day rate):', String(cookDayTotal), '', '', '', '', '', '', '']);
+    const cookTotalRow = cookDayTotal > 0 ? ['', '', '', '', '', '', '', 'Cook days (day rate):', '', '', '', '', '', '', '', ''] : null;
+    if (cookTotalRow) cookTotalRow.dayText = String(cookDayTotal);
+    if (cookTotalRow) rows.push(cookTotalRow);
+    // New "Day" column right after Paid Hours (cooks are paid a day rate).
+    rows.forEach((r, i) => r.splice(9, 0, i === 0 ? 'Day' : (r.dayText || '')));
+    rows[0][10] = 'Jobs / Notes';
 
     // Receipts this person photographed for reimbursement, right under
     // their month total.
@@ -513,7 +522,7 @@ function monthlySummaryXlsx(timesheets, productionShifts, unitTypesMap, receipts
     });
     ws['!cols'] = [
       { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 11 }, { wch: 11 },
-      { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 11 }, { wch: 16 },
+      { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 11 }, { wch: 10 }, { wch: 28 },
       { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 }, { wch: 12 },
     ];
     // Excel tab names: max 31 characters, and can't contain : \ / ? * [ ]
