@@ -97,6 +97,12 @@ function shiftPaidHours(s) {
   return Math.round(raw * 2) / 2;
 }
 
+// Cooks are paid a day rate: their timesheet entry has dayType (half /
+// threeQuarter / full) and notes, with clock-in = clock-out (0 hours).
+const COOK_DAYS = { half: { label: 'Half day', days: 0.5 }, threeQuarter: { label: '3/4 day', days: 0.75 }, full: { label: 'Full day', days: 1 } };
+function cookDayInfo(e) { return (e && e.dayType && COOK_DAYS[e.dayType]) || null; }
+function cookDayText(e) { const i = cookDayInfo(e); return i ? i.label + (e.notes ? ': ' + e.notes : '') : ''; }
+
 function computeHours(e) {
   if (!e.clockIn || !e.clockOut) return 0;
   let ms = new Date(e.clockOut) - new Date(e.clockIn);
@@ -188,10 +194,12 @@ function timesheetsToCsv(timesheets, startStr, endStr, productionShifts, unitTyp
     day.shifts.sort((a, b) => new Date(a.start || 0) - new Date(b.start || 0));
   });
 
+  const cookTotals = {};
   Object.keys(byPersonDate).sort().forEach((key) => {
     const day = byPersonDate[key];
     const hrs = day.entries.reduce((sum, e) => sum + computeHours(e), 0);
-    const jobsStr = day.entries.flatMap((e) => Object.values(e.jobs || {}).map((j) => `${j.unit}: ${j.hours}h`)).join(' | ');
+    const jobsStr = day.entries.flatMap((e) => cookDayInfo(e) ? [cookDayText(e)] : Object.values(e.jobs || {}).map((j) => `${j.unit}: ${j.hours}h`)).join(' | ');
+    cookTotals[day.name] = (cookTotals[day.name] || 0) + day.entries.reduce((sum, e) => sum + (cookDayInfo(e) ? cookDayInfo(e).days : 0), 0);
     const workedThroughBreak = day.entries.some((e) => e.skippedLunch) ? 'Yes' : 'No';
 
     const shiftHrs = day.shifts.reduce((sum, s) => sum + shiftPaidHours(s), 0);
@@ -202,8 +210,8 @@ function timesheetsToCsv(timesheets, startStr, endStr, productionShifts, unitTyp
     rows.push([
       day.name,
       day.date,
-      day.entries.map((e) => fmtT(e.clockIn)).join(' / '),
-      day.entries.map((e) => fmtT(e.clockOut)).join(' / '),
+      day.entries.map((e) => cookDayInfo(e) ? '' : fmtT(e.clockIn)).filter(Boolean).join(' / '),
+      day.entries.map((e) => cookDayInfo(e) ? '' : fmtT(e.clockOut)).filter(Boolean).join(' / '),
       day.entries.map((e) => fmtT(e.lunchStart)).filter(Boolean).join(' / '),
       day.entries.map((e) => fmtT(e.lunchEnd)).filter(Boolean).join(' / '),
       workedThroughBreak,
@@ -214,6 +222,9 @@ function timesheetsToCsv(timesheets, startStr, endStr, productionShifts, unitTyp
       shiftHrs.toFixed(2),
       productionStr,
     ]);
+  });
+  Object.keys(cookTotals).sort().filter((n) => cookTotals[n] > 0).forEach((n) => {
+    rows.push([n, 'Cook days (day rate) total:', '', '', '', '', '', String(cookTotals[n]), '', '', '', '', '']);
   });
   return toCsvRows(rows);
 }
@@ -413,6 +424,7 @@ function monthlySummaryXlsx(timesheets, productionShifts, unitTypesMap, receipts
 
     const rows = [['Date', 'Block', 'Machine', 'Clock In', 'Clock Out', 'Break Start', 'Break End', 'Worked Through Break', 'Paid Hours', 'Jobs', 'Trees', 'Spruce', 'Aspen', 'Loads', 'Top Piles', 'Fuel Delivered (L)']];
     let total = 0;
+    let cookDayTotal = 0;
 
     for (const dateStr of dateList) {
       const dayEntries = entriesByDate[dateStr] || [];
@@ -430,16 +442,18 @@ function monthlySummaryXlsx(timesheets, productionShifts, unitTypesMap, receipts
       dayEntries.forEach((e) => {
         const hrs = computeHours(e);
         total += hrs;
-        const jobsStr = Object.values(e.jobs || {}).map((j) => `${j.unit}: ${j.hours}h`).join(', ');
+        const isCook = !!cookDayInfo(e);
+        if (isCook) cookDayTotal += cookDayInfo(e).days;
+        const jobsStr = isCook ? cookDayText(e) : Object.values(e.jobs || {}).map((j) => `${j.unit}: ${j.hours}h`).join(', ');
         rows.push([
           dateShown ? '' : dateStr,
           '', '',
-          fmtT(e.clockIn),
-          fmtT(e.clockOut),
-          fmtT(e.lunchStart),
-          fmtT(e.lunchEnd),
-          e.skippedLunch ? 'Yes' : 'No',
-          hrs.toFixed(2),
+          isCook ? '' : fmtT(e.clockIn),
+          isCook ? '' : fmtT(e.clockOut),
+          isCook ? '' : fmtT(e.lunchStart),
+          isCook ? '' : fmtT(e.lunchEnd),
+          isCook ? '' : (e.skippedLunch ? 'Yes' : 'No'),
+          isCook ? '' : hrs.toFixed(2),
           jobsStr,
           '', '', '', '', '', '',
         ]);
@@ -474,6 +488,7 @@ function monthlySummaryXlsx(timesheets, productionShifts, unitTypesMap, receipts
       });
     }
     rows.push(['', '', '', '', '', '', '', totalLabel, total.toFixed(2), '', '', '', '', '', '', '']);
+    if (cookDayTotal > 0) rows.push(['', '', '', '', '', '', '', 'Cook days (day rate):', String(cookDayTotal), '', '', '', '', '', '', '']);
 
     // Receipts this person photographed for reimbursement, right under
     // their month total.

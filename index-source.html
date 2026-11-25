@@ -5922,6 +5922,20 @@ function fmtTime(iso) {
   return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: APP_TZ });
 }
 
+// Cooks are paid a day rate, not hours. A cook day is a timesheet entry with
+// dayType set (half / threeQuarter / full), a note about the work done, and
+// clock-in = clock-out = noon that day so it counts 0 hours everywhere.
+const COOK_DAY_TYPES = [
+  { key: 'half', label: 'Half day', days: 0.5 },
+  { key: 'threeQuarter', label: '3/4 day', days: 0.75 },
+  { key: 'full', label: 'Full day', days: 1 },
+];
+function cookDayInfo(entry) { return (entry && entry.dayType && COOK_DAY_TYPES.find((d) => d.key === entry.dayType)) || null; }
+function cookDaysOf(entry) { const i = cookDayInfo(entry); return i ? i.days : 0; }
+function cookNoonIso(dateStr) { return new Date(dateStr + 'T12:00:00').toISOString(); }
+function fmtDays(d) { return `${d} day${d === 1 ? '' : 's'}`; }
+function fmtHoursDays(h, d) { return d > 0 ? (h > 0 ? `${fmtHours(h)} + ${fmtDays(d)}` : fmtDays(d)) : fmtHours(h); }
+
 // Total paid hours for a shift: clock-in to clock-out, minus any unpaid break.
 function entryHours(entry) {
   if (!entry.clockIn || !entry.clockOut) return 0;
@@ -6169,6 +6183,7 @@ function approvalDayLabel(dateStr) {
 function approvalItemSummary(it) {
   if (it.kind === 'ts') {
     const e = it.raw;
+    if (cookDayInfo(e)) return cookDayInfo(e).label + (e.notes ? ' · ' + e.notes : '');
     return `${fmtTime(e.clockIn)}–${fmtTime(e.clockOut)} · ${fmtHours(entryHours(e))}` + ((e.jobs || []).length ? ` · ${e.jobs.map((j) => j.unit).join(', ')}` : '');
   }
   if (it.kind === 'prod') {
@@ -15592,6 +15607,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   const [unitAssignments, setUnitAssignments] = useState(() => cacheGet('unitAssignments', {})); // { [slug]: unitName } — a service truck or a production machine. Which one it is determines mechanic vs. production automatically.
   const [fixOutEntryVal, setFixOutEntryVal] = useState(''); // My Timesheets: datetime-local for closing a forgotten timecard
   const [fixOutShiftVal, setFixOutShiftVal] = useState(''); // My Timesheets: same, for a forgotten production shift
+  const [cookDate, setCookDate] = useState(() => localDateStr());
+  const [cookNotes, setCookNotes] = useState(null); // null = show what's already saved for that day
+  const [cookMsg, setCookMsg] = useState('');
   const [cookFixOut, setCookFixOut] = useState(''); // datetime-local value for fixing a forgotten cook clock-out
   const [altUnitAssignments, setAltUnitAssignments] = useState(() => cacheGet('altUnitAssignments', {})); // { [slug]: (unitName | '__mechanic__')[] } — any additional jobs someone regularly switches into, beyond their primary. Missing/empty = no alternates, behaves exactly as before.
   // Training required before someone gets into the app — set per employee
@@ -20965,6 +20983,24 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       setTimeClockActionPending(false);
     }
   };
+  // Day-rate cooks: one entry per day (half / 3/4 / full) with a note.
+  const saveCookDay = async (dateStr, dayType, notes) => {
+    if (timeClockActionPending) return;
+    if (!dateStr) { setCookMsg('Pick the day first.'); return; }
+    if (dateStr > todayStr()) { setCookMsg("That day hasn't happened yet."); return; }
+    if (isDayLocked(dateStr)) { setCookMsg('That day is locked (more than 7 days ago) — ask admin to add it.'); return; }
+    setTimeClockActionPending(true);
+    try {
+      const existing = timesheets.find((t) => t.mechanic === currentMechanic && t.date === dateStr && t.dayType);
+      const fields = { date: dateStr, dayType, notes: (notes || '').trim(), clockIn: cookNoonIso(dateStr), clockOut: cookNoonIso(dateStr) };
+      if (existing) await patchOneTimesheetEntry(existing.id, fields);
+      else await saveOneTimesheetEntry({ id: uid(), mechanic: currentMechanic, lunchStart: null, lunchEnd: null, skippedLunch: true, jobs: [], jobType: 'cook', ...fields });
+      setCookMsg('Saved: ' + (COOK_DAY_TYPES.find((d) => d.key === dayType) || {}).label + ' for ' + fmtDate(dateStr));
+      setCookNotes(null);
+    } finally {
+      setTimeClockActionPending(false);
+    }
+  };
   const cookClockOut = async (endIso) => {
     if (timeClockActionPending || !openEntry) return;
     setTimeClockActionPending(true);
@@ -21295,6 +21331,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
         let regularTotal = 0;
         let overtimeTotal = 0;
+        let cookDayTotal = 0;
         dates.forEach((dateStr) => {
           const dayEntries = entriesByDate[dateStr];
           if (!dayEntries || dayEntries.length === 0) {
@@ -21313,7 +21350,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           const dailyRegular = hours - dailyOvertime;
           regularTotal += dailyRegular;
           overtimeTotal += dailyOvertime;
-          const jobsStr = dayEntries.flatMap((e) => (e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`)).join(' | ');
+          const jobsStr = dayEntries.flatMap((e) => cookDayInfo(e) ? [cookDayInfo(e).label + (e.notes ? ': ' + e.notes : '')] : (e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`)).join(' | ');
+          cookDayTotal += dayEntries.reduce((sum, e) => sum + cookDaysOf(e), 0);
           const workedThroughBreak = dayEntries.some((e) => e.skippedLunch) ? 'Yes' : 'No';
           rows.push([
             name,
@@ -21330,6 +21368,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         rows.push(['', '', '', '', '', '', 'Regular Hours (nearest 0.5):', fmtHoursFixed2(roundToHalf(regularTotal)), '']);
         rows.push(['', '', '', '', '', '', 'Overtime Hours (nearest 0.5):', fmtHoursFixed2(roundToHalf(overtimeTotal)), '']);
         rows.push(['', '', '', '', '', '', 'Total Hours (nearest 0.5):', fmtHoursFixed2(roundToHalf(regularTotal + overtimeTotal)), '']);
+        if (cookDayTotal > 0) rows.push(['', '', '', '', '', '', 'Cook days (day rate):', String(cookDayTotal), '']);
       });
     }
 
@@ -22784,13 +22823,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       const todayMs = todays.reduce((sum, t) => sum + (t.clockOut ? Math.max(0, new Date(t.clockOut) - new Date(t.clockIn)) : 0), 0);
       const staleOpen = openEntry && localDateFromIso(openEntry.clockIn) !== today;
       const recentDays = [];
-      myCookEntries.filter((t) => t.clockOut && localDateFromIso(t.clockIn) !== today).forEach((t) => {
-        const d = localDateFromIso(t.clockIn);
+      myCookEntries.filter((t) => t.clockOut).forEach((t) => {
+        const d = t.dayType ? t.date : localDateFromIso(t.clockIn);
+        if (!t.dayType && d === today) return;
         let row = recentDays.find((r) => r.date === d);
         if (!row) { row = { date: d, ms: 0, punches: [] }; recentDays.push(row); }
-        row.ms += Math.max(0, new Date(t.clockOut) - new Date(t.clockIn));
+        if (t.dayType) { row.dayInfo = cookDayInfo(t); row.notes = t.notes || ''; }
+        else row.ms += Math.max(0, new Date(t.clockOut) - new Date(t.clockIn));
         row.punches.push(t);
       });
+      recentDays.sort((x, y) => y.date.localeCompare(x.date));
+      const cookExisting = myCookEntries.find((t) => t.dayType && t.date === cookDate) || null;
+      const cookNotesShown = cookNotes !== null ? cookNotes : (cookExisting ? (cookExisting.notes || '') : '');
       return (
         <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-body p-5 sm:p-8">
           {FONT_STYLE}
@@ -22857,40 +22901,42 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
 
             <ReceiptCard employee={currentMechanic} receipts={receipts} saving={savingReceipt} onSubmit={submitReceipt} />
             {!openEntry ? (
-              <div className="rounded-lg p-8 text-center mb-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
-                <p className="text-base mb-5" style={{ color: COLORS.inkDim }}>Not clocked in</p>
-                <Btn onClick={cookClockIn} disabled={timeClockActionPending}>Clock In</Btn>
+              <div className="rounded-lg p-5 mb-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
+                <label className="block mb-3">
+                  <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>Day</span>
+                  <input type="date" value={cookDate} max={todayStr()} onChange={(e) => { setCookDate(e.target.value); setCookNotes(null); setCookMsg(''); }} className="w-full rounded-lg px-3 py-2 text-sm font-mono" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+                </label>
+                {cookExisting && <p className="text-xs mb-2" style={{ color: COLORS.accent }}>Already saved: {cookDayInfo(cookExisting).label}. Tap a button to change it.</p>}
+                <label className="block mb-3">
+                  <span className="text-xs block mb-1" style={{ color: COLORS.inkDim }}>What work did you do? (optional)</span>
+                  <textarea value={cookNotesShown} onChange={(e) => { setCookNotes(e.target.value); setCookMsg(''); }} rows={3} className="w-full rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {COOK_DAY_TYPES.map((d) => (
+                    <button key={d.key} type="button" disabled={timeClockActionPending} onClick={() => saveCookDay(cookDate, d.key, cookNotesShown)} className="rounded-lg py-4 text-sm font-semibold" style={{ background: cookExisting && cookExisting.dayType === d.key ? COLORS.accent : COLORS.surfaceRaised, color: cookExisting && cookExisting.dayType === d.key ? '#1B1F19' : COLORS.ink, border: `1px solid ${COLORS.line}`, opacity: timeClockActionPending ? 0.5 : 1 }}>{d.label}</button>
+                  ))}
+                </div>
+                {cookMsg && <p className="text-sm mt-3" style={{ color: cookMsg.startsWith('Saved') ? COLORS.done : '#E07A5F' }}>{cookMsg}</p>}
               </div>
             ) : !staleOpen && (
               <div className="rounded-lg p-6 text-center mb-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
-                <p className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>Clocked in since</p>
+                <p className="text-xs uppercase tracking-wide" style={{ color: COLORS.inkDim }}>Old clock-in still open since</p>
                 <p className="font-display text-2xl font-bold mb-5">{fmtTime(openEntry.clockIn)}</p>
                 <Btn onClick={() => cookClockOut()} disabled={timeClockActionPending}>Clock Out</Btn>
               </div>
             )}
 
-            <div className="rounded-lg p-4 mb-5" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
-              <div className="flex items-center justify-between mb-2">
-                <p className="font-display font-semibold text-sm uppercase tracking-wide">Today</p>
-                <p className="text-sm">{fmtHours(todayMs / 3600000)}</p>
-              </div>
-              {todays.length === 0 ? (
-                <p className="text-xs" style={{ color: COLORS.inkDim }}>No punches yet today.</p>
-              ) : todays.map((t) => (
-                <p key={t.id} className="text-sm py-1" style={{ color: COLORS.inkDim }}>
-                  {fmtTime(t.clockIn)} – {t.clockOut ? fmtTime(t.clockOut) : 'now'}
-                </p>
-              ))}
-            </div>
-
             {recentDays.length > 0 && (
               <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
                 <p className="font-display font-semibold text-sm uppercase tracking-wide mb-2">Recent days</p>
-                {recentDays.slice(0, 10).map((r) => (
-                  <div key={r.date} className="flex items-center justify-between py-1.5 text-sm" style={{ borderTop: `1px solid ${COLORS.line}` }}>
-                    <span>{new Date(r.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</span>
-                    <span style={{ color: COLORS.inkDim }}>{fmtHours(r.ms / 3600000)}</span>
-                  </div>
+                {recentDays.slice(0, 14).map((r) => (
+                  <button key={r.date} type="button" onClick={() => { if (r.dayInfo) { setCookDate(r.date); setCookNotes(null); setCookMsg(''); window.scrollTo(0, 0); } }} className="w-full text-left py-1.5 text-sm" style={{ borderTop: `1px solid ${COLORS.line}` }}>
+                    <span className="flex items-center justify-between">
+                      <span>{new Date(r.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                      <span style={{ color: COLORS.inkDim }}>{r.dayInfo ? r.dayInfo.label : fmtHours(r.ms / 3600000)}</span>
+                    </span>
+                    {r.notes ? <span className="block text-xs" style={{ color: COLORS.inkDim }}>{r.notes}</span> : null}
+                  </button>
                 ))}
               </div>
             )}
@@ -23413,10 +23459,13 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
             </div>
             {mySummaryStart && mySummaryEnd ? (
               <p className="font-display text-xl font-bold" style={{ color: COLORS.accent }}>
-                {fmtHours(
+                {fmtHoursDays(
                   myEntries
                     .filter((e) => e.date >= mySummaryStart && e.date <= mySummaryEnd)
-                    .reduce((sum, e) => sum + entryHours(e), 0)
+                    .reduce((sum, e) => sum + entryHours(e), 0),
+                  myEntries
+                    .filter((e) => e.date >= mySummaryStart && e.date <= mySummaryEnd)
+                    .reduce((sum, e) => sum + cookDaysOf(e), 0)
                 )}
               </p>
             ) : (
@@ -23689,8 +23738,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     });
 
     const totalsByMechanic = {};
+    const daysByMechanic = {};
     filtered.forEach((e) => {
       totalsByMechanic[e.mechanic] = (totalsByMechanic[e.mechanic] || 0) + entryHours(e);
+      if (cookDaysOf(e)) daysByMechanic[e.mechanic] = (daysByMechanic[e.mechanic] || 0) + cookDaysOf(e);
     });
 
     // Group shifts by mechanic (each person's shifts together, newest first)
@@ -23713,8 +23764,10 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const viewedWeekEnd = weekEndOf(viewedWeekStart);
     const weekEntries = timesheets.filter((t) => t.date >= viewedWeekStart && t.date <= viewedWeekEnd);
     const weekTotalsByMechanic = {};
+    const weekDaysByMechanic = {};
     weekEntries.forEach((e) => {
       weekTotalsByMechanic[e.mechanic] = (weekTotalsByMechanic[e.mechanic] || 0) + entryHours(e);
+      if (cookDaysOf(e)) weekDaysByMechanic[e.mechanic] = (weekDaysByMechanic[e.mechanic] || 0) + cookDaysOf(e);
     });
     const weekProductionShifts = productionShifts.filter((s) => s.end && s.start && localDateFromIso(s.start) >= viewedWeekStart && localDateFromIso(s.start) <= viewedWeekEnd);
 
@@ -23943,7 +23996,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     style={{ color: COLORS.accent, borderBottom: `1px solid ${COLORS.line}` }}
                   >
                     <span>{name}</span>
-                    <span>{fmtHours(totalsByMechanic[name] || 0)} total</span>
+                    <span>{fmtHoursDays(totalsByMechanic[name] || 0, daysByMechanic[name] || 0)} total</span>
                   </p>
                   <div className="space-y-3">
                     {groupedByMechanic[name].map((entry) => (
@@ -24026,7 +24079,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       return true;
     });
     const totalsByMechanic = {};
-    filtered.forEach((e) => { totalsByMechanic[e.mechanic] = (totalsByMechanic[e.mechanic] || 0) + entryHours(e); });
+    const daysByMechanic = {};
+    filtered.forEach((e) => { totalsByMechanic[e.mechanic] = (totalsByMechanic[e.mechanic] || 0) + entryHours(e); if (cookDaysOf(e)) daysByMechanic[e.mechanic] = (daysByMechanic[e.mechanic] || 0) + cookDaysOf(e); });
     const groupedByMechanic = {};
     filtered.forEach((e) => {
       if (!groupedByMechanic[e.mechanic]) groupedByMechanic[e.mechanic] = [];
@@ -24062,7 +24116,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     const viewedWeekEnd = weekEndOf(viewedWeekStart);
     const weekEntries = timesheets.filter((t) => t.date >= viewedWeekStart && t.date <= viewedWeekEnd);
     const weekTotalsByMechanic = {};
-    weekEntries.forEach((e) => { weekTotalsByMechanic[e.mechanic] = (weekTotalsByMechanic[e.mechanic] || 0) + entryHours(e); });
+    const weekDaysByMechanic = {};
+    weekEntries.forEach((e) => { weekTotalsByMechanic[e.mechanic] = (weekTotalsByMechanic[e.mechanic] || 0) + entryHours(e); if (cookDaysOf(e)) weekDaysByMechanic[e.mechanic] = (weekDaysByMechanic[e.mechanic] || 0) + cookDaysOf(e); });
 
     const productionClockedInNow = productionShifts.filter((s) => !s.end);
     const recentProductionShifts = productionShifts.filter((s) => s.end).sort((a, b) => b.end.localeCompare(a.end)).slice(0, 20);
@@ -24738,7 +24793,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                           return (
                             <div key={name} className="flex items-center justify-between py-1">
                               <span className="font-display font-semibold">{name}</span>
-                              <span className="font-mono" style={{ color: COLORS.ink }}>{fmtHours(weekTotalsByMechanic[name] || 0)}</span>
+                              <span className="font-mono" style={{ color: COLORS.ink }}>{fmtHoursDays(weekTotalsByMechanic[name] || 0, weekDaysByMechanic[name] || 0)}</span>
                             </div>
                           );
                         }
@@ -24877,7 +24932,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 return (
                   <div key={name || '__missing__'} className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${COLORS.line}` }}>
                     <span className="font-display font-semibold" style={isMissing ? { color: '#E07A5F' } : undefined}>{isMissing ? '⚠ (missing name — corrupted entry)' : name}</span>
-                    <span className="font-mono">{fmtHours((totalsByMechanic[name] || 0) + (productionHoursByEmployee[name] || 0))}</span>
+                    <span className="font-mono">{fmtHoursDays((totalsByMechanic[name] || 0) + (productionHoursByEmployee[name] || 0), daysByMechanic[name] || 0)}</span>
                   </div>
                 );
               })}
@@ -24896,7 +24951,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                     <div key={name}>
                       <p className="font-display text-xs uppercase tracking-wide mb-2 pb-2 flex items-center justify-between" style={{ color: COLORS.accent, borderBottom: `1px solid ${COLORS.line}` }}>
                         <span>{name}</span>
-                        <span>{fmtHours((totalsByMechanic[name] || 0) + (productionHoursByEmployee[name] || 0))} total</span>
+                        <span>{fmtHoursDays((totalsByMechanic[name] || 0) + (productionHoursByEmployee[name] || 0), daysByMechanic[name] || 0)} total</span>
                       </p>
                       <div className="space-y-3">
                         {combinedByPerson[name].map((item) => (
@@ -29937,13 +29992,13 @@ function WeekReviewTable({ entries, productionEntries, printMode }) {
     id: e.id,
     person: e.mechanic,
     date: e.date,
-    clockIn: e.clockIn,
-    clockOut: e.clockOut,
+    clockIn: cookDayInfo(e) ? null : e.clockIn,
+    clockOut: cookDayInfo(e) ? null : e.clockOut,
     breakLabel: !e.skippedLunch && e.lunchStart && e.lunchEnd ? `${fmtTime(e.lunchStart)}–${fmtTime(e.lunchEnd)}` : '—',
     workedThruBreak: e.skippedLunch ? 'Yes' : 'No',
     paidHours: entryHours(e),
     signed: !!e.signature,
-    detail: '🔧 ' + ((e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`).join(' | ') || 'Mechanic'),
+    detail: cookDayInfo(e) ? '🍳 ' + cookDayInfo(e).label + (e.notes ? ' — ' + e.notes : '') : '🔧 ' + ((e.jobs || []).map((j) => `${j.unit}: ${j.hours}h`).join(' | ') || 'Mechanic'),
   }));
   const productionRows = (productionEntries || []).map((s) => ({
     id: s.id,
@@ -30258,7 +30313,68 @@ function ProductionShiftCard({ shift, unitTypes, isAdmin, onEdit, onConfirmHours
     </div>
   );
 }
-function TimesheetEntryCard({ entry, locked, canEdit, isEditing, onEdit, onCancelEdit, onSave, onDelete, onAddJob, onRemoveJob, isAdmin, onConfirmHours }) {
+function TimesheetEntryCard(props) {
+  if (cookDayInfo(props.entry)) return <CookDayCard {...props} />;
+  return <TimesheetEntryCardInner {...props} />;
+}
+
+// A cook's day-rate entry: half / 3/4 / full day plus a note on the work done.
+function CookDayCard({ entry, locked, canEdit, isEditing, onEdit, onCancelEdit, onSave, onDelete, isAdmin }) {
+  const [dayType, setDayType] = useState(entry.dayType);
+  const [notes, setNotes] = useState(entry.notes || '');
+  const [date, setDate] = useState(entry.date);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const info = cookDayInfo(entry);
+  if (isEditing) {
+    return (
+      <div className="rounded-lg p-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
+        <p className="font-display font-semibold mb-3">{fmtDate(entry.date)} · 🍳 Cook day</p>
+        {isAdmin && (
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono mb-3" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+        )}
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          {COOK_DAY_TYPES.map((d) => (
+            <button key={d.key} type="button" onClick={() => setDayType(d.key)} className="rounded-lg py-3 text-sm font-semibold" style={{ background: dayType === d.key ? COLORS.accent : COLORS.surfaceRaised, color: dayType === d.key ? '#1B1F19' : COLORS.ink, border: `1px solid ${COLORS.line}` }}>{d.label}</button>
+          ))}
+        </div>
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="What work did you do?" className="w-full rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+        {confirmDelete ? (
+          <div className="rounded-lg p-3" style={{ background: COLORS.surfaceRaised }}>
+            <p className="text-sm mb-2" style={{ color: COLORS.inkDim }}>Delete this day? This can't be undone.</p>
+            <div className="flex gap-2">
+              <Btn variant="danger" onClick={onDelete}>Yes, delete it</Btn>
+              <Btn variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Btn>
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <Btn onClick={() => onSave({ date: date || entry.date, dayType, notes: notes.trim(), clockIn: cookNoonIso(date || entry.date), clockOut: cookNoonIso(date || entry.date) })}>Save changes</Btn>
+            <Btn variant="ghost" onClick={onCancelEdit}>Cancel</Btn>
+            <button onClick={() => setConfirmDelete(true)} className="text-xs underline ml-auto" style={{ color: '#E07A5F' }}>Delete day</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg p-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="font-display font-semibold">{fmtDate(entry.date)}</span>
+        {!canEdit ? (
+          <span className="text-xs" style={{ color: COLORS.line }}>Ask admin to fix a mistake</span>
+        ) : locked ? (
+          <span className="text-xs font-semibold" style={{ color: COLORS.done }}>🔒 Locked</span>
+        ) : (
+          <button onClick={onEdit} className="text-xs underline" style={{ color: COLORS.accent }}>Edit</button>
+        )}
+      </div>
+      <p className="text-sm font-semibold" style={{ color: COLORS.accent }}>🍳 {info.label}</p>
+      {entry.notes ? <p className="text-sm mt-1" style={{ color: COLORS.inkDim }}>{entry.notes}</p> : <p className="text-xs mt-1" style={{ color: COLORS.inkDim }}>No notes</p>}
+    </div>
+  );
+}
+
+function TimesheetEntryCardInner({ entry, locked, canEdit, isEditing, onEdit, onCancelEdit, onSave, onDelete, onAddJob, onRemoveJob, isAdmin, onConfirmHours }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [showSignature, setShowSignature] = useState(false);
