@@ -21077,7 +21077,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     await saveOneTimesheetEntry(entry);
   };
 
-  const addManualProductionShift = async (employeeName, date, startLocal, endLocal, machine, block, numbers, downtimes) => {
+  const addManualProductionShift = async (employeeName, date, startLocal, endLocal, machine, block, numbers, downtimes, extraTasks) => {
     // Downtime told after the fact: same record + repair job as the live
     // "Report downtime" button, just with the real start/end times.
     const downtimeLog = [];
@@ -21099,7 +21099,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       block: block || null,
       start: startLocal ? new Date(startLocal).toISOString() : null,
       end: endLocal ? new Date(endLocal).toISOString() : null,
-      extraTasks: [],
+      extraTasks: Array.isArray(extraTasks) ? extraTasks : [],
       downtimeLog,
       ...numbers,
     };
@@ -22558,7 +22558,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       unitTypesMap: unitTypes,
       unitOptions: groupedUnitOptions(),
       blocks,
-      onSubmitProduction: async (employeeName, date, startLocal, endLocal, machine, block, numbers, setError, downtimes) => {
+      onSubmitProduction: async (employeeName, date, startLocal, endLocal, machine, block, numbers, setError, downtimes, extraTasks) => {
         if (!endLocal) { setError('Put in the time you finished too.'); return; }
         if (isDayLocked(date)) { setError("That day is locked (more than 7 days ago) — ask admin to add this one for you."); return; }
         let endFixed = endLocal;
@@ -22569,7 +22569,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         if (new Date(endFixed) > new Date(Date.now() + 60000)) { setError("That finish time hasn't happened yet."); return; }
         const clash = productionShifts.some((x) => x.employee === currentMechanic && x.start && x.end && new Date(x.start) < new Date(endFixed) && new Date(x.end) > new Date(startLocal));
         if (clash) { setError('You already have a shift recorded during those hours.'); return; }
-        await addManualProductionShift(currentMechanic, date, startLocal, endFixed, machine, block, numbers, downtimes);
+        await addManualProductionShift(currentMechanic, date, startLocal, endFixed, machine, block, numbers, downtimes, extraTasks);
         onDone();
       },
     };
@@ -24806,8 +24806,8 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                 await addManualEntry(mechanicName, date, ci, co, ls, le, jobs);
                 setShowAddMissedDayAdmin(false);
               }}
-              onSubmitProduction={async (employeeName, date, startLocal, endLocal, machine, block, numbers, setError, downtimes) => {
-                await addManualProductionShift(employeeName, date, startLocal, endLocal, machine, block, numbers, downtimes);
+              onSubmitProduction={async (employeeName, date, startLocal, endLocal, machine, block, numbers, setError, downtimes, extraTasks) => {
+                await addManualProductionShift(employeeName, date, startLocal, endLocal, machine, block, numbers, downtimes, extraTasks);
                 setShowAddMissedDayAdmin(false);
               }}
               onCancel={() => setShowAddMissedDayAdmin(false)}
@@ -30726,6 +30726,10 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
   const [error, setError] = useState('');
   // Downtime that happened during the day: [{ from:'HH:MM', to:'HH:MM', reason }]
   const [downtimes, setDowntimes] = useState([]);
+  // Extra billable tasks: [{ id, desc, hours }]
+  const [extraTasks, setExtraTasks] = useState([]);
+  const [newTaskDesc, setNewTaskDesc] = useState('');
+  const [newTaskHours, setNewTaskHours] = useState('');
   const setDown = (i, patch) => setDowntimes((prev) => prev.map((d, k) => (k === i ? { ...d, ...patch } : d)));
   // '' = their usual machine (production) / nothing (everyone else).
   const [machineChoice, setMachineChoice] = useState('');
@@ -30771,6 +30775,10 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
         const fixErr = validateDowntimeFix(d, i);
         if (fixErr) { setError(fixErr); return; }
       }
+      // A half-typed extra task still counts if both boxes are filled.
+      const taskList = [...extraTasks];
+      if (newTaskDesc.trim() && parseFloat(newTaskHours) > 0) taskList.push({ id: uid(), desc: newTaskDesc.trim(), hours: parseFloat(newTaskHours) });
+      else if (newTaskDesc.trim() || newTaskHours) { setError('Extra task: put in both the description and the hours, then tap Add (or clear them).'); return; }
       onSubmitProduction(
         mechanic,
         date,
@@ -30780,7 +30788,8 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
         block,
         { spruce, aspen, trees, loadCount, topPileCount },
         setError,
-        downtimes.map((d) => { const dDay = rt.crosses && d.from < startTime ? nextDateStr(date) : date; return { from: combine(dDay, d.from), to: combine(dDay, d.to), reason: d.reason.trim(), ...fixFieldsOf(d) }; })
+        downtimes.map((d) => { const dDay = rt.crosses && d.from < startTime ? nextDateStr(date) : date; return { from: combine(dDay, d.from), to: combine(dDay, d.to), reason: d.reason.trim(), ...fixFieldsOf(d) }; }),
+        taskList
       );
       return;
     }
@@ -30934,6 +30943,24 @@ function AddMissedDayForm({ onSubmit, onSubmitProduction, onCancel, mechanics, g
                 + {downtimes.length ? 'Add another downtime' : 'Add downtime'}
               </button>
               <DowntimeTotalLine list={downtimes} />
+            </div>
+            <div className="col-span-2 rounded-lg p-3" style={{ background: COLORS.surfaceRaised, border: `1px solid ${COLORS.line}` }}>
+              <p className="text-xs font-display uppercase tracking-wide mb-1" style={{ color: COLORS.inkDim }}>Extra tasks (billable)</p>
+              <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Extra billing hours (crossings, other jobs). Downtime doesn't go here — use the downtime box above.</p>
+              {extraTasks.map((x) => (
+                <div key={x.id} className="rounded-lg p-2 mb-2 flex items-center justify-between" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+                  <span className="text-sm">{x.desc}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-sm" style={{ color: COLORS.inkDim }}>{x.hours}h</span>
+                    <button type="button" onClick={() => setExtraTasks((prev) => prev.filter((y) => y.id !== x.id))} style={{ color: '#E07A5F' }}>✕</button>
+                  </div>
+                </div>
+              ))}
+              <input type="text" value={newTaskDesc} onChange={(e) => setNewTaskDesc(e.target.value)} placeholder="Job/crossing # or description" className={fieldClass + ' mb-2'} style={fieldStyle} />
+              <div className="flex gap-2">
+                <input type="number" inputMode="decimal" value={newTaskHours} onChange={(e) => setNewTaskHours(e.target.value)} placeholder="Hours" className={fieldClass + ' flex-1'} style={fieldStyle} />
+                <button type="button" disabled={!newTaskDesc.trim() || !(parseFloat(newTaskHours) > 0)} onClick={() => { setExtraTasks((prev) => [...prev, { id: uid(), desc: newTaskDesc.trim(), hours: parseFloat(newTaskHours) }]); setNewTaskDesc(''); setNewTaskHours(''); }} className="px-4 rounded-lg text-sm font-medium" style={{ background: COLORS.accent, color: '#fff', opacity: (!newTaskDesc.trim() || !(parseFloat(newTaskHours) > 0)) ? 0.4 : 1 }}>Add</button>
+              </div>
             </div>
           </React.Fragment>
         ) : (
