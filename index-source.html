@@ -24513,7 +24513,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     });
     const weekGroups = groupedEmployees().map((group) => ({
       ...group,
-      names: group.names.filter((n) => (group.label === 'Mechanics' ? weekTotalsByMechanic[n] !== undefined : productionWeekByPerson[n])),
+      // Cooks are paid by the day and their days are saved as timesheet entries
+      // (not production shifts), so a cook shows up if they have either.
+      names: group.names.filter((n) => (group.label === 'Mechanics' ? weekTotalsByMechanic[n] !== undefined : group.label === 'Cooks' ? (weekTotalsByMechanic[n] !== undefined || !!productionWeekByPerson[n]) : productionWeekByPerson[n])),
     })).filter((group) => group.names.length > 0);
     // Safety net: a name might have real hours this week but not exactly
     // match anyone in the current roster (a rename, a spelling difference,
