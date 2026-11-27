@@ -2605,6 +2605,26 @@ function LoadingAnimation() {
 }
 
 function OfflineBanner({ isOnline, pendingCount }) {
+  // Quiet green "all sent" for a few seconds after saved changes finally reach the server.
+  const [showSent, setShowSent] = React.useState(false);
+  const prevPendingRef = React.useRef(pendingCount || 0);
+  React.useEffect(() => {
+    const prev = prevPendingRef.current;
+    prevPendingRef.current = pendingCount || 0;
+    if (prev > 0 && !pendingCount && isOnline) {
+      setShowSent(true);
+      const tm = setTimeout(() => setShowSent(false), 4000);
+      return () => clearTimeout(tm);
+    }
+    return undefined;
+  }, [pendingCount, isOnline]);
+  if (isOnline && !pendingCount && showSent) {
+    return (
+      <div className="font-display font-bold text-sm uppercase tracking-wide text-center py-2.5 px-4 mb-4 rounded-lg" style={{ background: '#4C8A4C', color: '#fff' }}>
+        ✓ All sent
+      </div>
+    );
+  }
   if (isOnline && !pendingCount) return null;
   if (!isOnline) {
     return (
@@ -2628,6 +2648,29 @@ function OfflineBanner({ isOnline, pendingCount }) {
       style={{ background: '#3E7CB1', color: '#fff' }}
     >
       ⏳ Back online — sending {pendingCount} saved change{pendingCount === 1 ? '' : 's'}…
+    </div>
+  );
+}
+
+// Shown on the main Shift screen when a shift has been open a very long time (almost certainly forgotten).
+function StaleShiftBox({ startIso, title, onSave }) {
+  const [val, setVal] = React.useState('');
+  const pad = (n) => String(n).padStart(2, '0');
+  const toLocalInput = (iso) => { const d = new Date(iso); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const save = async () => {
+    if (!val) { alert('Pick the date and time you actually finished.'); return; }
+    const endMs = new Date(val).getTime();
+    if (isNaN(endMs) || endMs <= new Date(startIso).getTime()) { alert('The finish time has to be after you started.'); return; }
+    if (endMs > Date.now() + 60000) { alert("That time hasn't happened yet."); return; }
+    await onSave(new Date(endMs).toISOString());
+    setVal('');
+  };
+  return (
+    <div className="rounded-lg p-4 mb-5" style={{ background: COLORS.surface, border: `2px solid ${COLORS.accent}` }}>
+      <p className="text-sm font-semibold mb-1">⚠ {title}</p>
+      <p className="text-xs mb-3" style={{ color: COLORS.inkDim }}>You clocked in on {fmtDate(startIso)} at {fmtTime(startIso)} and it was never ended. Enter when you actually finished that shift, then clock in for today.</p>
+      <input type="datetime-local" value={val} min={toLocalInput(startIso)} max={toLocalInput(new Date().toISOString())} onChange={(e) => setVal(e.target.value)} className="w-full rounded-lg px-3 py-2 text-sm font-mono mb-3" style={{ background: COLORS.surfaceRaised, color: COLORS.ink, border: `1px solid ${COLORS.line}` }} />
+      <Btn onClick={save}>Save finish time</Btn>
     </div>
   );
 }
@@ -7473,6 +7516,37 @@ function savePendingWrites(queue) {
 }
 // Firebase .once() never fails on a weak or missing signal; it just waits. This gives any such wait a time
 // limit so the caller's offline fallback (the catch) runs instead of the screen sitting dead.
+// A person's own recent records, read straight from the server (not from this phone's saved copy).
+// Used to double-check whether they are already clocked in. Rejects if the server doesn't answer in `ms`.
+async function fetchPersonRecords(collection, field, person, ms) {
+  const base = firebase.database().ref(collection);
+  const snap = await withTimeout(lowDataPersonRef(base, field, person).once('value'), ms || 6000);
+  const out = [];
+  snap.forEach((c) => { const v = c.val(); if (v && v[field] === person) out.push(v); });
+  return out;
+}
+// Folds server records into this phone's list: adds ones the phone doesn't have, and fixes ones the phone
+// still thinks are open but the server shows as ended. Unsent changes on this phone are applied on top.
+function mergeFetchedRecords(prev, fetched, collection, endField) {
+  if (!fetched || !fetched.length) return prev;
+  let changed = false;
+  const out = prev.slice();
+  fetched.forEach((f) => {
+    const i = out.findIndex((x) => x.id === f.id);
+    if (i < 0) {
+      const m = applyPendingWrites(collection, [f])[0];
+      if (m) { out.push(m); changed = true; }
+    } else if (!out[i][endField] && f[endField]) {
+      const m = applyPendingWrites(collection, [f])[0];
+      if (m) { out[i] = m; changed = true; }
+    }
+  });
+  return changed ? out : prev;
+}
+// A shift still open after this many hours was almost certainly forgotten.
+const STALE_OPEN_HOURS = 16;
+function hoursOpenSince(iso) { return iso ? (Date.now() - new Date(iso).getTime()) / 3600000 : 0; }
+
 function withTimeout(promise, ms) {
   return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
 }
@@ -16023,6 +16097,36 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     };
   }), [liveFleetPositions, unitTypes, machineIconOverrides, unitIconOverrides]);
   const openTracks = useMemo(() => machineTracks.filter((t) => !t.endedAt), [machineTracks]);
+
+  // When someone signs in (and whenever the app comes back to the screen), ask the server directly
+  // for their own recent shifts, so a phone with a stale or incomplete saved copy still knows whether
+  // they are clocked in. Until the server answers (max ~5 s) the Shift screen says "Checking your
+  // shift…" instead of wrongly showing "Not clocked in".
+  const [shiftCheck, setShiftCheck] = useState({ name: null, done: true });
+  useEffect(() => {
+    if (!currentMechanic || window.__viewAs) return undefined;
+    let cancelled = false;
+    setShiftCheck({ name: currentMechanic, done: navigator.onLine === false });
+    const timer = setTimeout(() => { if (!cancelled) setShiftCheck({ name: currentMechanic, done: true }); }, 5000);
+    const run = async () => {
+      try {
+        const [pr, ts] = await Promise.all([
+          fetchPersonRecords('productionShiftRecords', 'employee', currentMechanic, 6000),
+          fetchPersonRecords('timesheetEntries', 'mechanic', currentMechanic, 6000),
+        ]);
+        if (cancelled) return;
+        setProductionShifts((prev) => { const n = mergeFetchedRecords(prev, pr, 'productionShifts', 'end'); if (n !== prev) cacheSet('productionShifts', n); return n; });
+        setTimesheets((prev) => { const n = mergeFetchedRecords(prev, ts, 'timesheets', 'clockOut'); if (n !== prev) cacheSet('timesheets', n); return n; });
+        setShiftCheck({ name: currentMechanic, done: true });
+      } catch (e) {
+        // offline or too slow — the 5 second timer ends the "checking" state
+      }
+    };
+    run();
+    const onVis = () => { if (document.visibilityState === 'visible') run(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { cancelled = true; clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
+  }, [currentMechanic]);
   const [expandedPreTripId, setExpandedPreTripId] = useState(null);
   const [editingDriverLogId, setEditingDriverLogId] = useState(null);
   const [driverLogWeekOffset, setDriverLogWeekOffset] = useState(0);
@@ -16080,6 +16184,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
         sessionHadUserRef.current = false;
         localStorage.removeItem('sessionMechanic');
         localStorage.removeItem('sessionLastActive');
+        localStorage.removeItem('sessionOpenShift');
       }
     } catch (e) { /* ignore */ }
   }, [currentMechanic]);
@@ -16090,7 +16195,9 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     try { name = localStorage.getItem('sessionMechanic'); last = parseInt(localStorage.getItem('sessionLastActive'), 10) || 0; } catch (e) { return; }
     if (!name) { autoSignInTriedRef.current = true; return; }
     autoSignInTriedRef.current = true;
-    const withinWindow = Date.now() - last < stayHours() * 3600 * 1000;
+    let openHours = 0;
+    try { if (localStorage.getItem('sessionOpenShift') === name) openHours = 24; } catch (e) { /* ignore */ }
+    const withinWindow = Date.now() - last < Math.max(stayHours(), openHours) * 3600 * 1000;
     if (!withinWindow || !mechanics.includes(name) || firebaseUser.email !== emailForMechanic(name)) {
       try { localStorage.removeItem('sessionMechanic'); localStorage.removeItem('sessionLastActive'); } catch (e) { /* ignore */ }
       return;
@@ -20365,6 +20472,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
   };
 
   const openProductionShift = productionShifts.find((s) => s.employee === currentMechanic && !s.end);
+  const checkingShift = shiftCheck.name === currentMechanic && !shiftCheck.done;
 
   // Machine hours start/stop come from Samsara automatically — at clock-in
   // (start) and clock-out (stop). Only for machine types that actually have
@@ -20403,7 +20511,44 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     }
   };
 
+  // Never create a second open shift: look for one on this phone, in unsent changes, and (quickly)
+  // on the server before clocking in. Quick switches (Switch Machine / Switch Block) skip this.
+  const startingProdRef = useRef(false);
+  const findExistingOpenProduction = async (name) => {
+    const poolOf = (extra) => {
+      let pending = [];
+      try { pending = loadPendingWrites().filter((op) => op.collection === 'productionShifts' && op.kind === 'save' && op.entry).map((op) => op.entry); } catch (e) { /* ignore */ }
+      const known = new Set(productionShifts.map((x) => x.id));
+      return applyPendingWrites('productionShifts', [...productionShifts, ...pending.filter((e) => !known.has(e.id)), ...(extra || [])]).filter((x) => x && x.employee === name);
+    };
+    const hit = (list) => list.filter((x) => !x.end || new Date(x.start).getTime() > Date.now() - 60000).sort((a, b) => new Date(b.start) - new Date(a.start))[0] || null;
+    const local = hit(poolOf());
+    if (local) return local;
+    if (navigator.onLine === false) return null;
+    try {
+      const fetched = await fetchPersonRecords('productionShiftRecords', 'employee', name, 2500);
+      if (fetched.length) setProductionShifts((prev) => { const n = mergeFetchedRecords(prev, fetched, 'productionShifts', 'end'); if (n !== prev) cacheSet('productionShifts', n); return n; });
+      return hit(applyPendingWrites('productionShifts', fetched).filter((x) => x.employee === name));
+    } catch (e) {
+      return null; // the server didn't answer in time — carry on, never block a clock-in on a weak signal
+    }
+  };
   const startProductionShift = async (machineOverride, link) => {
+    if (link && link.groupId) return startProductionShiftInner(machineOverride, link);
+    if (startingProdRef.current) return undefined;
+    startingProdRef.current = true;
+    try {
+      const existing = await findExistingOpenProduction(currentMechanic);
+      if (existing) {
+        alert(`You're already clocked in since ${fmtDate(existing.start)} ${fmtTime(existing.start)} — nothing new was created.`);
+        return undefined;
+      }
+      return await startProductionShiftInner(machineOverride, link);
+    } finally {
+      startingProdRef.current = false;
+    }
+  };
+  const startProductionShiftInner = async (machineOverride, link) => {
     const entry = {
       id: uid(),
       employee: currentMechanic,
@@ -20963,6 +21108,17 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
     .filter((t) => t.mechanic === currentMechanic && !t.clockOut)
     .sort((a, b) => new Date(b.clockIn) - new Date(a.clockIn))[0];
 
+  // Remember that this person has a shift open, so a locked/closed phone keeps them signed in for 24 hours
+  // (instead of the usual window) and a night shift never asks for the PIN again before clock-out.
+  useEffect(() => {
+    try {
+      if (window.__viewAs || !currentMechanic) return;
+      if (openEntry || openProductionShift) localStorage.setItem('sessionOpenShift', currentMechanic);
+      else if (shiftCheck.done && localStorage.getItem('sessionOpenShift') === currentMechanic) localStorage.removeItem('sessionOpenShift');
+    } catch (e) { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentMechanic, !!openEntry, !!openProductionShift, shiftCheck.done]);
+
   // Prompt to clock in once per login, if they haven't already for today.
   // Mechanics only — production employees already get a clear "Not clocked
   // in" prompt right on their own Shift screen, no need to duplicate it here.
@@ -21060,6 +21216,18 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
       jobs: [],
     };
     try {
+      // Quick check with the server too, in case this phone's saved copy is behind.
+      if (navigator.onLine !== false) {
+        try {
+          const fetched = await fetchPersonRecords('timesheetEntries', 'mechanic', currentMechanic, 2500);
+          const open = applyPendingWrites('timesheets', fetched).find((x) => x.mechanic === currentMechanic && !x.clockOut);
+          if (open) {
+            setTimesheets((prev) => { const n = mergeFetchedRecords(prev, fetched, 'timesheets', 'clockOut'); if (n !== prev) cacheSet('timesheets', n); return n; });
+            alert(`You're already clocked in since ${fmtDate(open.clockIn)} ${fmtTime(open.clockIn)} — nothing new was created.`);
+            return;
+          }
+        } catch (e) { /* server too slow — carry on */ }
+      }
       await saveOneTimesheetEntry(entry);
     } finally {
       setTimeClockActionPending(false);
@@ -23135,10 +23303,20 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           )}
 
           <ReceiptCard employee={currentMechanic} receipts={receipts} saving={savingReceipt} onSubmit={submitReceipt} />
+          {openProductionShift && hoursOpenSince(openProductionShift.start) > STALE_OPEN_HOURS && (
+            <StaleShiftBox
+              startIso={openProductionShift.start}
+              title={'You never ended your shift on ' + fmtDate(openProductionShift.start)}
+              onSave={async (iso) => {
+                await patchOneProductionShift(openProductionShift.id, { end: iso });
+                if (TRACK_ELIGIBLE_TYPES.includes(machineType(openProductionShift.machine, unitTypes))) await endMachineTrack('productionShift', openProductionShift.id);
+              }}
+            />
+          )}
           {!openProductionShift ? (
             <div className="rounded-lg p-8 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
-              <p className="text-base mb-5" style={{ color: COLORS.inkDim }}>Not clocked in</p>
-              <Btn onClick={() => startProductionShift(effectiveUnit || undefined)}>Clock In</Btn>
+              <p className="text-base mb-5" style={{ color: COLORS.inkDim }}>{checkingShift ? 'Checking your shift…' : 'Not clocked in'}</p>
+              <Btn onClick={() => startProductionShift(effectiveUnit || undefined)} disabled={checkingShift}>Clock In</Btn>
               {hasAltRole(currentMechanic) && (
                 <div className="mt-4 text-left">
                   <label className="block text-xs mb-1" style={{ color: COLORS.inkDim }}>Working as today:</label>
@@ -23475,12 +23653,19 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           <p className="text-sm mb-8" style={{ color: COLORS.inkDim }}>{currentMechanic}</p>
 
           <ReceiptCard employee={currentMechanic} receipts={receipts} saving={savingReceipt} onSubmit={submitReceipt} />
+          {openEntry && hoursOpenSince(openEntry.clockIn) > STALE_OPEN_HOURS && (
+            <StaleShiftBox
+              startIso={openEntry.clockIn}
+              title={'You never clocked out on ' + fmtDate(openEntry.clockIn)}
+              onSave={async (iso) => { await patchOneTimesheetEntry(openEntry.id, { clockOut: iso }); }}
+            />
+          )}
           {/* Current status card */}
           <div className="rounded-lg p-6 mb-8 text-center" style={{ background: COLORS.surface, border: `2px solid ${COLORS.line}` }}>
             {!openEntry ? (
               <React.Fragment>
-                <p className="text-base mb-5" style={{ color: COLORS.inkDim }}>{t('notClockedIn')}</p>
-                <Btn onClick={clockIn} disabled={timeClockActionPending}>{timeClockActionPending ? '…' : t('clockIn')}</Btn>
+                <p className="text-base mb-5" style={{ color: COLORS.inkDim }}>{checkingShift ? 'Checking your shift…' : t('notClockedIn')}</p>
+                <Btn onClick={clockIn} disabled={timeClockActionPending || checkingShift}>{timeClockActionPending ? '…' : t('clockIn')}</Btn>
                 {hasAltRole(currentMechanic) && (
                   <div className="mt-4 text-left">
                     <label className="block text-xs mb-1" style={{ color: COLORS.inkDim }}>Working as today:</label>
@@ -29206,6 +29391,45 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
           </button>
           <h1 className="font-display text-3xl font-bold mb-1">🩺 Diagnostics</h1>
           <p className="text-xs mb-4" style={{ color: COLORS.inkDim }}>What each person gets when they sign in: their home screen, ☰ menu, unit, job and today's status. Tap a name, then "View the app as" to open the real screens exactly as they see them. Nothing you do there is saved, and only you can see this page.</p>
+          {(() => {
+            // Shifts that look wrong: forgotten open shifts, two open at once, or impossibly long ones.
+            const cutoff = Date.now() - 21 * 24 * 3600 * 1000;
+            const items = [];
+            const openByPerson = {};
+            productionShifts.forEach((sh) => {
+              if (!sh.start) return;
+              if (!sh.end) {
+                (openByPerson[sh.employee] = openByPerson[sh.employee] || []).push(sh.start);
+                const h = hoursOpenSince(sh.start);
+                if (h > STALE_OPEN_HOURS) items.push({ key: 'po' + sh.id, when: sh.start, text: `${sh.employee} · ${sh.machine || 'shift'} · still open since ${fmtDate(sh.start)} ${fmtTime(sh.start)} (${Math.round(h)}h)` });
+              } else if (new Date(sh.start).getTime() > cutoff) {
+                const h = (new Date(sh.end) - new Date(sh.start)) / 3600000;
+                if (h > STALE_OPEN_HOURS) items.push({ key: 'pl' + sh.id, when: sh.start, text: `${sh.employee} · ${sh.machine || 'shift'} · ${fmtDate(sh.start)} runs ${fmtHours(h)} (${fmtTime(sh.start)} to ${fmtDate(sh.end)} ${fmtTime(sh.end)})` });
+              }
+            });
+            timesheets.forEach((e) => {
+              if (!e.clockIn || cookDayInfo(e)) return;
+              if (!e.clockOut) {
+                (openByPerson[e.mechanic] = openByPerson[e.mechanic] || []).push(e.clockIn);
+                const h = hoursOpenSince(e.clockIn);
+                if (h > STALE_OPEN_HOURS) items.push({ key: 'to' + e.id, when: e.clockIn, text: `${e.mechanic} · timesheet · still open since ${fmtDate(e.clockIn)} ${fmtTime(e.clockIn)} (${Math.round(h)}h)` });
+              } else if (new Date(e.clockIn).getTime() > cutoff) {
+                const h = entryHours(e);
+                if (h > STALE_OPEN_HOURS) items.push({ key: 'tl' + e.id, when: e.clockIn, text: `${e.mechanic} · timesheet · ${fmtDate(e.clockIn)} adds up to ${fmtHours(h)}` });
+              }
+            });
+            Object.keys(openByPerson).forEach((name) => {
+              if (openByPerson[name].length > 1) items.push({ key: 'dup' + name, when: openByPerson[name][0], text: `${name} has ${openByPerson[name].length} shifts open at the same time (started ${openByPerson[name].map((x) => fmtDate(x) + ' ' + fmtTime(x)).join(', ')})` });
+            });
+            items.sort((a, b) => new Date(b.when) - new Date(a.when));
+            return (
+              <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surface, border: `1px solid ${items.length ? '#E3A23C' : COLORS.line}` }}>
+                <p className="font-display font-semibold text-sm mb-1">⚠ Needs attention {items.length ? `(${items.length})` : ''}</p>
+                <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Shifts open more than {STALE_OPEN_HOURS} hours, two open at once, or longer than {STALE_OPEN_HOURS} hours (last 3 weeks). Based on what this device has loaded.</p>
+                {items.length === 0 ? <p className="text-xs" style={{ color: COLORS.done }}>✓ Nothing looks wrong.</p> : items.map((it) => <p key={it.key} className="text-xs font-mono mb-1">{it.text}</p>)}
+              </div>
+            );
+          })()}
           <div className="rounded-lg p-3 mb-4" style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
             <p className="font-display font-semibold text-sm mb-1">🛰️ Stuck GPS tracks</p>
             <p className="text-xs mb-2" style={{ color: COLORS.inkDim }}>Tracks still "open" from over a day ago make the server download them again and again, which drives up the Firebase bill. This finds them and closes them.</p>
