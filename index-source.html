@@ -3874,6 +3874,7 @@ const GestureMapViewport = React.forwardRef(function GestureMapViewport({ childr
   const pointerArray = () => Array.from(pointers.current.values());
 
   const handlePointerDown = (e) => {
+    if (e.pointerType === 'pen') return; // Apple Pencil only draws, it never pans or zooms the map
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.current.size === 2) {
       setFollowing(false);
@@ -4117,7 +4118,7 @@ function MapCanvas({
   viewBoxWidth, viewBoxHeight, backgroundImageUrl, onBackgroundError,
   pinsToShow, linesToShow, placingPin, measureMode, pencilMode, drawingPoints, drawingStrokes, trackingLine,
   calibrating, refPoints, livePositions, liveTrails, myPosition,
-  onMapTap, onFreehandStart, onFreehandPoint, onFreehandEnd, onPinTap, onLineTap, onLiveTap, onTrailTap, idleStops, onIdleTap,
+  onMapTap, onFreehandStart, onFreehandPoint, onFreehandEnd, onFreehandCancel, onPinTap, onLineTap, onLiveTap, onTrailTap, idleStops, onIdleTap,
 
 }) {
   const svgRef = useRef(null);
@@ -4177,23 +4178,52 @@ function MapCanvas({
   // Freehand pencil — pointer events cover touch, mouse, and stylus with
   // one code path. Pointer capture keeps receiving move events even if the
   // finger drifts off the SVG mid-stroke, so the line doesn't cut out.
+  // Pencil rules: the Apple Pencil (or one finger) draws. Two fingers down
+  // means pinch / rotate / pan the map, so the stroke in progress is thrown
+  // away and drawing pauses until all fingers lift. A palm resting on the
+  // screen while the Pencil is down is ignored.
+  const touchIds = useRef(new Set());
+  const penDown = useRef(false);
+  const blockDraw = useRef(false);
+  const strokePointer = useRef(null);
+  const cancelStroke = () => {
+    if (isDrawingStroke.current) {
+      isDrawingStroke.current = false;
+      strokePointer.current = null;
+      if (onFreehandCancel) onFreehandCancel();
+    }
+  };
   const handlePointerDown = (e) => {
     if (!pencilMode) return;
+    if (e.pointerType === 'pen') {
+      penDown.current = true;
+      cancelStroke(); // a finger stroke that started just before the Pencil landed
+    } else {
+      touchIds.current.add(e.pointerId);
+      if (penDown.current) return; // palm
+      if (touchIds.current.size >= 2) { blockDraw.current = true; cancelStroke(); return; }
+      if (blockDraw.current) return;
+    }
     const local = toLocal(e.clientX, e.clientY);
     if (!local) return;
     isDrawingStroke.current = true;
+    strokePointer.current = e.pointerId;
     e.currentTarget.setPointerCapture(e.pointerId);
     if (onFreehandStart) onFreehandStart();
     onFreehandPoint(local.x, local.y);
   };
   const handlePointerMove = (e) => {
-    if (!pencilMode || !isDrawingStroke.current) return;
+    if (!pencilMode || !isDrawingStroke.current || e.pointerId !== strokePointer.current) return;
     const local = toLocal(e.clientX, e.clientY);
     if (local) onFreehandPoint(local.x, local.y);
   };
-  const handlePointerUp = () => {
-    if (!pencilMode || !isDrawingStroke.current) return;
+  const handlePointerUp = (e) => {
+    if (e.pointerType === 'pen') penDown.current = false;
+    else touchIds.current.delete(e.pointerId);
+    if (touchIds.current.size === 0) blockDraw.current = false;
+    if (!pencilMode || !isDrawingStroke.current || e.pointerId !== strokePointer.current) return;
     isDrawingStroke.current = false;
+    strokePointer.current = null;
     onFreehandEnd();
   };
 
@@ -26351,6 +26381,7 @@ function App({ personalTrackingOn, setPersonalTrackingOn }) {
                       return [...strokes.slice(0, -1), [...cur, { x, y }]];
                     });
                   }}
+                  onFreehandCancel={() => setPencilStrokes((strokes) => (strokes.length ? strokes.slice(0, -1) : strokes))}
                   onFreehandEnd={() => {
                     // Lifting your finger just ends that stroke — the drawing stays
                     // open until you tap Done. A lone tap (under 2 points) is dropped.
